@@ -1,2 +1,2 @@
 def f() -> None:
-    print("Hello")
+    print("BYe")

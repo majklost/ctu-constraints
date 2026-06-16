@@ -33,6 +33,7 @@ MANIFEST
 
 
 # Research Data (Crucial!)
+notebooks/logs/*.txt
 outputs/
 wandb/
 datasources/

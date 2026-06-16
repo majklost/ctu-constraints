@@ -21,7 +21,8 @@ ARGS=$(printf ' %q' "$@")
 # Pipe commands to ssh so they run in a login shell where 'ml' works.
 # The module environment is propagated to the compute node via --export=ALL.
 ssh "${REMOTE}" << EOF
-ml PyTorch-Lightning/2.5.5-foss-2025b-CUDA-12.9.1
+ml PyTorch-Lightning/2.5.5-foss-2025a-CUDA-12.8.0
+ml PyTorch3D/0.7.9-foss-2025a-CUDA-12.8.0
 echo "HPC modules loaded successfully."
 cd ${PROJECT_DIR} && sbatch --export=ALL submit_job.sh${ARGS}
 EOF

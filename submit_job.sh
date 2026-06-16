@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=dl_job
-#SBATCH --partition=h200fast
+#SBATCH --partition=amdgpufast
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
