@@ -1,0 +1,39 @@
+sync:
+  constraints:
+    alpha: "."
+    beta: "mrkosmic@rci:/mnt/personal/mrkosmic/synced/constraints"
+    mode: "two-way-resolved"
+    ignore:
+      vcs: true
+      paths:
+        # Caches
+        - "datasources/"
+        - ".mypy_cache/"
+        - "*/__pycache__/"
+        - "wandb/"
+        - "weights/"
+        - "predictions/"
+        # Dataset / large binary files
+        - "*.npz"
+        - "*.zip"
+        - "*.pt"
+        - "*.pth"
+        - "*.ckpt"
+        - "*.tfrecord"
+        - "*.LICENSE"
+        # Build artifacts
+        - "dist/"
+        - "*.egg-info/"
+        # Quarto reports
+        - "reports/.quarto/"
+        - "reports/output/"
+        - "reports/*_files/"
+        - "reports/*_cache/"
+        - "reports/*.quarto_ipynb"
+        - "reports/*.quarto_ipynb_*"
+        - "reports/*.typ"
+
+        # OS/IDE
+        - ".DS_Store"
+        - ".vscode/"
+        - ".venv/"
