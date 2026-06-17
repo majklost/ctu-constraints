@@ -3,8 +3,9 @@ import torch
 
 # TODO: Make _Weighted loss from it
 class CentroidLoss(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, reduction="mean"):
         super().__init__()
+        self.reduction = reduction
 
     def forward(self, pred_one_hot: torch.Tensor, gt_one_hot: torch.Tensor):
         # pred_one_hot and gt_one_hot shape: [B, C, H, W]
@@ -33,4 +34,7 @@ class CentroidLoss(torch.nn.Module):
         gt_centroids = get_centroids(gt_one_hot)
 
         # MSE loss between the class center points establishes a global gradient pull
-        return torch.nn.functional.mse_loss(pred_centroids, gt_centroids)
+        loss = torch.nn.functional.mse_loss(
+            pred_centroids, gt_centroids, reduction=self.reduction
+        )
+        return loss

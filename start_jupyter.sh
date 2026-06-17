@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=remote-kernel
-#SBATCH --partition=amdgpufast
+#SBATCH --partition=gpufast
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
