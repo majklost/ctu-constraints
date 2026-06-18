@@ -30,7 +30,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
+MNIST/
 
 # Research Data (Crucial!)
 notebooks/logs/*.txt

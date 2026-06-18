@@ -14,6 +14,8 @@ dependencies = [
     "seaborn>=0.13.2",
     "segmentation-models-pytorch>=0.5.0",
     "wandb>=0.25.1",
+    'neurite @ git+https://github.com/adalca/neurite.git@dev',
+
 ]
 
 [build-system]
@@ -23,6 +25,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["constraints"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 
 [dependency-groups]
