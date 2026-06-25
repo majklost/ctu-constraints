@@ -22,6 +22,10 @@
   // Pyright (via Pylance language server) is used for real-time type checking
   "python.linting.mypyEnabled": false,
   "python.linting.enabled": true,
+  "jupyter.runStartupCommands": [
+        "%matplotlib inline",
+        "import matplotlib.pyplot as plt"
+    ]
 
   // Tell VS Code to use the uv-installed tools
   "ruff.importStrategy": "fromEnvironment",

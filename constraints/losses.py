@@ -38,3 +38,7 @@ class CentroidLoss(torch.nn.Module):
             pred_centroids, gt_centroids, reduction=self.reduction
         )
         return loss
+
+
+class SDF(torch.nn.Module):
+    pass

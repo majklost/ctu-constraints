@@ -15,6 +15,14 @@ def get_repo_root() -> Path:
 
 # Define your base paths relative to the repo root
 REPO_ROOT = get_repo_root()
+LOGS_DIR = REPO_ROOT / "logs"
+
+
+def get_experiment_folder(experiment_name: str) -> Path:
+    """Returns the path to the experiment folder within the repository."""
+    folder = REPO_ROOT / "outputs" / "notebooks" / experiment_name
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
 
 
 def rad2deg(rad):
