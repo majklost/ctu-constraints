@@ -86,9 +86,17 @@ class SpatialTransformer(nn.Module):
             f"dim mismatch: moving={moving_image.dim()}, field={deformation_field.dim()}"
         )
 
-        # Allocate or reallocate meshgrid if spatial shape changed
+        # Allocate or reallocate meshgrid when spatial metadata changes.
+        # This avoids stale CPU grids being reused after `.to("cuda")` calls.
         spatial_shape = moving_image.shape[2:]
-        if not hasattr(self, "meshgrid") or self.meshgrid.shape[1:] != spatial_shape:
+        meshgrid = getattr(self, "meshgrid", None)
+        needs_new_meshgrid = (
+            meshgrid is None
+            or meshgrid.shape[1:] != spatial_shape
+            or meshgrid.device != moving_image.device
+            or meshgrid.dtype != moving_image.dtype
+        )
+        if needs_new_meshgrid:
             self.meshgrid = ne.volshape_to_ndgrid(
                 size=spatial_shape,
                 device=moving_image.device,

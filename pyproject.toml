@@ -15,7 +15,7 @@ dependencies = [
     "segmentation-models-pytorch>=0.5.0",
     "wandb>=0.25.1",
     'neurite @ git+https://github.com/adalca/neurite.git@dev',
-
+    "matplotlib>=3.10.3",
 ]
 
 [build-system]
