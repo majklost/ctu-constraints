@@ -13,7 +13,7 @@ echo "=== Submitting Jupyter job to SLURM ==="
 
 # FIX: Added -q (quiet) and -T (no pseudo-terminal) flags.
 # Replaced Heredoc with a single inline execution string to completely suppress login node banners.
-JOB_INFO=$(ssh -q -T "${REMOTE}" "source /etc/profile && ml PyTorch-Lightning/2.5.5-foss-2025a-CUDA-12.8.0 && ml PyTorch3D/0.7.9-foss-2025a-CUDA-12.8.0 && cd ${PROJECT_DIR} && source ./.venv/bin/activate && sbatch --export=ALL start_jupyter.sh")
+JOB_INFO=$(ssh -q -T "${REMOTE}" "source /etc/profile && ml PyTorch-Lightning/2.5.5-foss-2025a-CUDA-12.8.0 && cd ${PROJECT_DIR} && source ./.venv/bin/activate && sbatch --export=ALL start_jupyter.sh")
 
 # Strict extraction: Pulls out the numerical field from the line containing "batch job"
 JOB_ID=$(echo "$JOB_INFO" | grep "batch job" | awk '{print $NF}')
