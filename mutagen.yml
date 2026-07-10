@@ -9,6 +9,7 @@ sync:
         - "mutagen.yml.lock"
         - "uv.lock"
         # Caches
+        - "data/"
         - "datasources/"
         - ".mypy_cache/"
         - "*/__pycache__/"
