@@ -2,10 +2,12 @@ sync:
   constraints:
     alpha: "."
     beta: "mrkosmic@rci:/mnt/personal/mrkosmic/synced/constraints"
-    mode: "two-way-resolved"
+    mode: "two-way-safe"
     ignore:
       vcs: true
       paths:
+        - "mutagen.yml.lock"
+        - "uv.lock"
         # Caches
         - "datasources/"
         - ".mypy_cache/"

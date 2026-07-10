@@ -1,5 +1,5 @@
 import torch
-
+import scipy
 
 # TODO: Make _Weighted loss from it
 class CentroidLoss(torch.nn.Module):
@@ -40,5 +40,94 @@ class CentroidLoss(torch.nn.Module):
         return loss
 
 
-class SDF(torch.nn.Module):
-    pass
+class OneSideSDFSquare(torch.nn.Module):
+    r"""
+    Compute the one-sided signed distance field loss between predicted and
+    ground truth masks.
+
+    The loss is defined as:
+
+    .. math::
+
+        L_{\mathrm{pull}}
+        =
+        \frac{1}{N}
+        \sum_{i=1}^{N}
+        \sum_{c=1}^{C}
+        \left[
+            P_{i,c} \max(0, \mathrm{SDF}_{i,c})^2
+            +
+            (1-P_{i,c}) \max(0, -\mathrm{SDF}_{i,c})^2
+        \right]
+
+    where :math:`P_{i,c}` denotes the predicted probability for sample
+    :math:`i` and class :math:`c`, and :math:`\mathrm{SDF}_{i,c}` is the
+    signed distance field of the corresponding ground-truth mask.
+    """
+    def __init__(self, reduction="mean") -> None:
+        super().__init__()
+        if reduction not in {"none", "mean", "sum"}:
+            raise ValueError(
+                f"Invalid reduction: {reduction}. "
+                "Expected one of {'none', 'mean', 'sum'}."
+            )
+
+        self.reduction = reduction
+
+    def forward(self, pred, sdf):
+        loss = pred * torch.clamp(sdf, min=0) ** 2 + \
+               (1 - pred) * torch.clamp(-sdf, min=0) ** 2
+
+        if self.reduction == "mean":
+            return loss.mean()
+        elif self.reduction == "sum":
+            return loss.sum()
+        else:  # "none"
+            return loss
+        
+
+class OneSideSDF(torch.nn.Module):
+    r"""
+    Compute the one-sided signed distance field loss between predicted and
+    ground truth masks.
+
+    The loss is defined as:
+
+    .. math::
+
+        L_{\mathrm{pull}}
+        =
+        \frac{1}{N}
+        \sum_{i=1}^{N}
+        \sum_{c=1}^{C}
+        \left[
+            P_{i,c} \max(0, \mathrm{SDF}_{i,c})
+            +
+            (1-P_{i,c}) \max(0, -\mathrm{SDF}_{i,c})
+        \right]
+
+    where :math:`P_{i,c}` denotes the predicted probability for sample
+    :math:`i` and class :math:`c`, and :math:`\mathrm{SDF}_{i,c}` is the
+    signed distance field of the corresponding ground-truth mask.
+    """
+    def __init__(self, reduction="mean") -> None:
+        super().__init__()
+        if reduction not in {"none", "mean", "sum"}:
+            raise ValueError(
+                f"Invalid reduction: {reduction}. "
+                "Expected one of {'none', 'mean', 'sum'}."
+            )
+
+        self.reduction = reduction
+
+    def forward(self, pred, sdf):
+        loss = pred * torch.clamp(sdf, min=0) + \
+               (1 - pred) * torch.clamp(-sdf, min=0)
+
+        if self.reduction == "mean":
+            return loss.mean()
+        elif self.reduction == "sum":
+            return loss.sum()
+        else:  # "none"
+            return loss
+        

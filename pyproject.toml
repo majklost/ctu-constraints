@@ -17,7 +17,8 @@ dependencies = [
     'neurite @ git+https://github.com/adalca/neurite.git@dev',
     "matplotlib>=3.10.3",
     "tensorboard>=2.20.0",
-    "setuptools<82",  # FIX: Restores pkg_resources required by TensorBoard 2.20+
+    "setuptools<82", # FIX: Restores pkg_resources required by TensorBoard 2.20+
+    "kornia>=0.8.3",
 ]
 
 [build-system]
