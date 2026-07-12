@@ -31,7 +31,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 MNIST/
-
+mnist-data/
 # Research Data (Crucial!)
 notebooks/logs/*.txt
 outputs/
