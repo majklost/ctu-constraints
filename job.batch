@@ -1,0 +1,12 @@
+#!/bin/bash
+#SBATCH --job-name=dl_job
+#SBATCH --partition=cpu
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=8G
+#SBATCH --time=12:00:00
+#SBATCH --output=slurm/slurm-%j.out
+#SBATCH --error=slurm/slurm-%j.err
+
+PROJECT_DIR="/mnt/personal/mrkosmic/synced/constraints"
+cd ${PROJECT_DIR}
+make both
