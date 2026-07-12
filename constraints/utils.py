@@ -32,6 +32,11 @@ def get_experiment_folder(experiment_name: str | Path) -> Path:
     return folder
 
 
+def get_data_folder()->Path:
+    folder = REPO_ROOT / "data"
+    assert folder.exists(), f"Data folder does not exist: {folder}"
+    return folder
+
 def rad2deg(rad):
     return rad * 180 / np.pi
 

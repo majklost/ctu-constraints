@@ -16,8 +16,10 @@ VAL_N        ?= 100
 
 TRAIN_SEED   ?= 42
 VAL_SEED     ?= 43
+AFFINE_MODE ?= small
 
 GEN_TYPES    := affine deformed both
+KEEP_DIRS := downloaded custom
 
 # ---- helper: generate one split for one generator type ----
 # usage: $(call gen_split,generator_type,split_name,num_samples,seed)
@@ -25,7 +27,8 @@ define gen_split
 $(PYTHON) $(GEN_SCRIPT) $(3) \
 	--output_dir $(DATA_ROOT)/$(1)/$(2) \
 	--seed $(4) \
-	--generator_type $(1)
+	--generator_type $(1) \
+	--affine_mode $(AFFINE_MODE)
 endef
 
 # ---- per-generator-type targets ----
@@ -38,4 +41,7 @@ $(GEN_TYPES):
 all: $(GEN_TYPES)
 
 clean:
-	rm -rf $(DATA_ROOT)
+	@echo "Cleaning generated datasets (keeping $(KEEP_DIRS))..."
+	find $(DATA_ROOT) -mindepth 1 -maxdepth 1 \
+		$(foreach d,$(KEEP_DIRS),! -name $(d)) \
+		-exec rm -rf {} +

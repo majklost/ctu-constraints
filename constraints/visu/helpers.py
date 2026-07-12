@@ -2,6 +2,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
+import numpy as np
 
 
 def show_torch_image(
@@ -10,6 +11,12 @@ def show_torch_image(
     cmap: str | None = None,
     save_path: Path | str | None = None,
 ):
+    #if numpy array convert to torch tensor
+    if isinstance(tensor, np.ndarray):
+        if not tensor.flags.writeable:
+            tensor = tensor.copy()
+
+        tensor = torch.from_numpy(tensor)
     # 1. Prepare data safely
     image = tensor.detach().cpu().squeeze()
 

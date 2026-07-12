@@ -13,6 +13,7 @@ from tqdm import tqdm
 from constraints.generators.generators import (
     ArteryGeneratorAffine,
     ArteryGeneratorDeformed,
+    AffineSampleBound,ROT_ONLY,SMALL
 )
 from constraints.utils import (
     save_manifest,
@@ -47,11 +48,22 @@ def _save_template(output_dir: Path, template: torch.Tensor):
 
 
 def create_affine(args) -> None:
+    affine_mode = args.affine_mode
+    if affine_mode == "rot":
+        sample_specs = ROT_ONLY
+    elif affine_mode == "small":
+        sample_specs = SMALL
+    else:
+        sample_specs = None
+
+
+
     output_dir = Path(args.output_dir)
     dataset = ArteryGeneratorAffine(
         fixed_seed=args.seed,
         num_samples=args.num_samples,
         speckle=0.2,
+        sample_specs=sample_specs,
     )
 
     first_sample = dataset[0]
@@ -182,11 +194,17 @@ if __name__ == "__main__":
         default="affine",
         help="Type of generator to use",
     )
+    parser.add_argument(
+        "--affine_mode",
+        type=str,
+        choices=["rot","small","large"],
+        help="Mode for affine transformation",
+        default="large",
+    )
 
     args = parser.parse_args()
-    if args.num_samples <= 0:
-        raise ValueError("num_samples must be positive.")
-
+    if args.num_samples < 0:
+        raise ValueError("num_samples must be a positive integer.")
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
     if args.generator_type == "affine":

@@ -24,6 +24,10 @@ ROT_ONLY = AffineSampleBound(
     dx_min=0, dx_max=0, dy_min=0, dy_max=0, angle_min=-np.pi, angle_max=np.pi
 )
 
+SMALL = AffineSampleBound(
+    dx_min=-0.08, dx_max=0.08, dy_min=-0.08, dy_max=0.08, angle_min=-np.pi / 18, angle_max=np.pi / 18
+)
+
 
 class ArteryGeneratorAffine(Dataset):
     def __init__(

@@ -1,5 +1,6 @@
 import torch
 import scipy
+import torch.nn.functional as F
 
 # TODO: Make _Weighted loss from it
 class CentroidLoss(torch.nn.Module):
@@ -38,6 +39,73 @@ class CentroidLoss(torch.nn.Module):
             pred_centroids, gt_centroids, reduction=self.reduction
         )
         return loss
+
+
+class BlurredMSELoss(torch.nn.Module):
+    """
+    MSE loss with Gaussian-blurred ground truth:
+        loss = MSE(pred, gaussian_blur(gt))
+    Expected input shape: [B, C, H, W]
+    """
+    def __init__(
+        self,
+        kernel_size: int = 7,
+        sigma: float = 1.5,
+        reduction: str = "mean",
+        padding_mode: str = "reflect",
+    ) -> None:
+        super().__init__()
+
+        if reduction not in {"none", "mean", "sum"}:
+            raise ValueError(
+                f"Invalid reduction: {reduction}. "
+                "Expected one of {'none', 'mean', 'sum'}."
+            )
+        if kernel_size <= 0 or kernel_size % 2 == 0:
+            raise ValueError("kernel_size must be a positive odd integer.")
+        if sigma <= 0:
+            raise ValueError("sigma must be > 0.")
+        if padding_mode not in {"reflect", "replicate", "constant", "circular"}:
+            raise ValueError(
+                f"Invalid padding_mode: {padding_mode}. "
+                "Expected one of {'reflect', 'replicate', 'constant', 'circular'}."
+            )
+
+        self.kernel_size = kernel_size
+        self.sigma = sigma
+        self.reduction = reduction
+        self.padding_mode = padding_mode
+
+        self.register_buffer("kernel2d", self._make_gaussian_kernel2d(kernel_size, sigma), persistent=False)
+
+    @staticmethod
+    def _make_gaussian_kernel2d(kernel_size: int, sigma: float) -> torch.Tensor:
+        coords = torch.arange(kernel_size, dtype=torch.float32) - (kernel_size - 1) / 2
+        yy, xx = torch.meshgrid(coords, coords, indexing="ij")
+        kernel = torch.exp(-(xx**2 + yy**2) / (2 * sigma**2))
+        kernel = kernel / kernel.sum()
+        return kernel.view(1, 1, kernel_size, kernel_size)  # [1,1,K,K]
+
+    def _blur(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() != 4:
+            raise ValueError(f"Expected 4D tensor [B,C,H,W], got shape {tuple(x.shape)}.")
+
+        b, c, h, w = x.shape
+        pad = self.kernel_size // 2
+
+        kernel = self.kernel2d.to(device=x.device, dtype=x.dtype).expand(c, 1, -1, -1)  # [C,1,K,K]
+        x = F.pad(x, (pad, pad, pad, pad), mode=self.padding_mode)
+        return F.conv2d(x, kernel, groups=c)
+
+    def forward(self, pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
+        if pred.shape != gt.shape:
+            raise ValueError(
+                f"`pred` and `gt` must have the same shape, got {tuple(pred.shape)} vs {tuple(gt.shape)}."
+            )
+
+        gt_blurred = self._blur(gt)
+        return F.mse_loss(pred, gt_blurred, reduction=self.reduction)
+
 
 
 class OneSideSDFSquare(torch.nn.Module):
