@@ -7,8 +7,9 @@ import torch.nn.functional as nnf
 from segmentation_models_pytorch.base import SegmentationHead
 from segmentation_models_pytorch.decoders.unet.decoder import UnetDecoder
 
-from ..voxelmorph import modules
 
+from ..voxelmorph import modules
+from ..voxelmorph.models import VxmPairwise
 
 class TwoBranch(torch.nn.Module):
     """
@@ -41,6 +42,7 @@ class TwoBranch(torch.nn.Module):
         flow_initializer: float = 1e-5,
     ):
         super().__init__()
+        raise ValueError("TwoBranch is deprecated.")
 
         self.target_channels = target_channels
 
@@ -88,6 +90,7 @@ class TwoBranch(torch.nn.Module):
         template: torch.Tensor | None = None,
         return_field_type: Literal["displacement", "velocity", "svf"] = "displacement",
     ) -> tuple[torch.Tensor, ...]:
+        raise ValueError("TwoBranch is deprecated.")
 
         valid_field_types = {"velocity", "svf", "displacement"}
         if return_field_type not in valid_field_types:
@@ -153,3 +156,39 @@ class TwoBranch(torch.nn.Module):
                 f"template channels ({template.shape[1]}) must match target_channels "
                 f"({self.target_channels})"
             )
+
+class ProjectWithTemplateD(torch.nn.Module):
+    """
+    Encode->Decode segmentations, then pass the segmentation map and template into registration network
+    Registration network processes both, return 2D deformation field
+    Deformation field is applied to spatial transform
+    
+    ---
+    Return: segmentation map, deformation field
+    ---
+    """
+    def __init__(self):
+        super().__init__()
+        self.unet = smp.Unet(
+            "resnet18", encoder_weights="imagenet", in_channels=1, classes=3
+        )
+
+        nb_features = [
+            [32, 32, 32, 32], # encoder features
+            [32, 32, 32, 32]  # decoder features
+        ]
+        self.encoder = VxmPairwise(
+            ndim=2,
+            source_channels=3,
+            target_channels=3,  # concatenated channel count
+            nb_features=nb_features,
+        )
+        
+        
+
+
+    def forward(self, x,template) -> tuple[torch.Tensor,torch.Tensor]:
+        segmentation_logits = self.unet(x) #B,C,H,W
+        concatenated_input = torch.cat([segmentation_logits, template], dim=1)  # B,2C,H,W
+        deformation_field = self.encoder(concatenated_input)  # B, feature_dim
+        return segmentation_logits, deformation_field

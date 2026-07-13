@@ -3,8 +3,8 @@
 #SBATCH --partition=amdgpufast
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
-#SBATCH --time=02:00:00
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
 #SBATCH --output=slurm/slurm-%j.out
 #SBATCH --error=slurm/slurm-%j.err
 
@@ -55,7 +55,7 @@ echo "Args:       $*"
 echo "Started:    $(date)"
 echo "================"
 
-python "${SCRIPT}" "$@"
+python -u "${SCRIPT}" "$@"
 
 EXIT_CODE=$?
 echo "Finished:   $(date)"
