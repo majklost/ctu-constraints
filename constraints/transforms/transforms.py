@@ -1,6 +1,6 @@
 import torch
 
-from .voxelmorph import modules
+from ..voxelmorph import modules
 
 
 def _as_batch_parameter(value, batch_size, image, name):

@@ -13,9 +13,11 @@ DATA_ROOT    := data/artificial
 
 TRAIN_N      ?= 2000
 VAL_N        ?= 100
+TST_N 	  ?= 100
 
 TRAIN_SEED   ?= 42
 VAL_SEED     ?= 43
+TST_SEED     ?= 44
 AFFINE_MODE ?= small
 
 GEN_TYPES    := affine deformed both
@@ -37,7 +39,7 @@ endef
 $(GEN_TYPES):
 	$(call gen_split,$@,trn,$(TRAIN_N),$(TRAIN_SEED))
 	$(call gen_split,$@,val,$(VAL_N),$(VAL_SEED))
-
+	$(call gen_split,$@,tst,$(TST_N),$(TST_SEED))
 all: $(GEN_TYPES)
 
 clean:
