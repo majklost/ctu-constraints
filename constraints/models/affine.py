@@ -2,7 +2,7 @@ import segmentation_models_pytorch as smp
 import torch
 import timm
 from .helpers import RigidTransformHead
-from ..types import TransformSpec
+from ..types import RigidParams, TransformSpec
 class TwoBranch(torch.nn.Module):
     def __init__(self, max_translation=0.3):
         super().__init__()
@@ -62,5 +62,6 @@ class ProjectWithTemplateA(torch.nn.Module):
         concatenated_input = torch.cat([segmentation_logits, template], dim=1)  # B,2C,H,W
         features = self.encoder(concatenated_input)  # B, feature_dim
         angle, translation = self.TransformHead(features)  # B,1 and B,2
-        transform_spec = TransformSpec(kind="rigid", angle=angle, translation=translation)
+        rigid = RigidParams(angle=angle, dx=translation[:, 0:1], dy=translation[:, 1:2])
+        transform_spec = TransformSpec(rigid=rigid)
         return segmentation_logits, transform_spec

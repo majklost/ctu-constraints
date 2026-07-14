@@ -10,7 +10,7 @@ from segmentation_models_pytorch.decoders.unet.decoder import UnetDecoder
 
 from ..voxelmorph import modules
 from ..voxelmorph.models import VxmPairwise
-from ..types import TransformSpec
+from ..types import FieldParams, TransformSpec
 
 class TwoBranch(torch.nn.Module):
     """
@@ -192,5 +192,6 @@ class ProjectWithTemplateD(torch.nn.Module):
         segmentation_logits = self.unet(x) #B,C,H,W
         concatenated_input = torch.cat([segmentation_logits, template], dim=1)  # B,2C,H,W
         deformation_field = self.encoder(concatenated_input)  # B, feature_dim
-        transform_spec = TransformSpec(kind="field", field=deformation_field)
+        field_params = FieldParams(field=deformation_field)
+        transform_spec = TransformSpec(field=field_params)
         return segmentation_logits, transform_spec

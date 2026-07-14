@@ -1,6 +1,23 @@
 import torch
 
+from ..types import FieldApplicationResult
 from ..voxelmorph import modules
+
+
+def _resolve_broadcast_batch_size(named_sizes):
+    batch_size = max(named_sizes.values())
+    incompatible = [
+        f"{name}={size}"
+        for name, size in named_sizes.items()
+        if size not in (1, batch_size)
+    ]
+    if incompatible:
+        raise ValueError(
+            "Incompatible batch sizes for broadcasting: "
+            + ", ".join(incompatible)
+            + f" (resolved batch size: {batch_size})"
+        )
+    return batch_size
 
 
 def _as_batch_parameter(value, batch_size, image, name):
@@ -19,6 +36,9 @@ def differentiable_rigid(image, angle, dx, dy):
     """
     Compute a differentiable rigid transformation (rotation + translation) of an image.
 
+    Image and parameter batches are broadcastable: each input batch dimension can
+    be either 1 or N.
+
     """
     input_was_unbatched = image.ndim == 3
     if input_was_unbatched:
@@ -28,7 +48,22 @@ def differentiable_rigid(image, angle, dx, dy):
             f"Expected image shape (N, C, H, W) or (C, H, W), got {tuple(image.shape)}"
         )
 
-    batch_size = image.shape[0]
+    angle = torch.as_tensor(angle, device=image.device, dtype=image.dtype).reshape(-1)
+    dx = torch.as_tensor(dx, device=image.device, dtype=image.dtype).reshape(-1)
+    dy = torch.as_tensor(dy, device=image.device, dtype=image.dtype).reshape(-1)
+
+    batch_size = _resolve_broadcast_batch_size(
+        {
+            "image": image.shape[0],
+            "angle": angle.numel(),
+            "dx": dx.numel(),
+            "dy": dy.numel(),
+        }
+    )
+
+    if image.shape[0] == 1 and batch_size > 1:
+        image = image.expand(batch_size, -1, -1, -1)
+
     angle = _as_batch_parameter(angle, batch_size, image, "angle")
     dx = _as_batch_parameter(dx, batch_size, image, "dx")
     dy = _as_batch_parameter(dy, batch_size, image, "dy")
@@ -53,7 +88,7 @@ def differentiable_rigid(image, angle, dx, dy):
 
     grid = torch.nn.functional.affine_grid(theta, image.size(), align_corners=False)
     rotated_image = torch.nn.functional.grid_sample(image, grid, align_corners=False)
-    return rotated_image.squeeze(0) if input_was_unbatched else rotated_image
+    return rotated_image.squeeze(0) if input_was_unbatched and batch_size == 1 else rotated_image
 
 
 def differentiable_rotation(image, angle):
@@ -62,7 +97,7 @@ def differentiable_rotation(image, angle):
     Args:
         image: Tensor with shape (N, C, H, W), or a single image (C, H, W).
         angle: 1D tensor with shape (N,) containing angles in radians.
-            A scalar angle is accepted for a single image.
+            Batch size is broadcasted between image and angle (1 or N).
     """
     return differentiable_rigid(image, angle, dx=0.0, dy=0.0)
 
@@ -82,10 +117,15 @@ def field_application(
     Args:
         source: Tensor with shape (N, C, H, W), or a single image (C, H, W).
         displacement: Tensor with shape (N, 2, H, W) containing displacement vectors.
+            The source/displacement batch dimensions are broadcastable: each can
+            be either 1 or N.
         target: Optional tensor with shape (N, C, H, W) or (C, H, W).
         return_field: If True, include displacement in the output.
         return_warped_source: If True, include source warped by +displacement.
         return_warped_target: If True, include target warped by -displacement.
+
+    Returns:
+        FieldApplicationResult with requested members populated.
     """
     return _field_application_impl(
         source,
@@ -108,7 +148,7 @@ def _as_batched_image(image, name):
     return image, input_was_unbatched
 
 
-def _as_batched_field(field, batch_size, spatial_shape, reference):
+def _as_batched_field(field, spatial_shape, reference):
     input_was_unbatched = field.ndim == 3
     if input_was_unbatched:
         field = field.unsqueeze(0)
@@ -124,13 +164,6 @@ def _as_batched_field(field, batch_size, spatial_shape, reference):
         raise ValueError(
             f"Field spatial shape {tuple(field.shape[2:])} does not match image "
             f"spatial shape {tuple(spatial_shape)}"
-        )
-
-    if field.shape[0] == 1 and batch_size > 1:
-        field = field.expand(batch_size, -1, -1, -1)
-    elif field.shape[0] != batch_size:
-        raise ValueError(
-            f"Field batch size {field.shape[0]} must match image batch size {batch_size}"
         )
 
     return field.to(device=reference.device, dtype=reference.dtype), input_was_unbatched
@@ -154,13 +187,14 @@ def _field_application_impl(
     Args:
         source: Tensor with shape (N, C, H, W) or (C, H, W).
         displacement: Tensor with shape (N, 2, H, W) or (2, H, W).
+            source/displacement batch sizes are broadcastable (1 or N).
         target: Optional tensor with shape (N, C, H, W) or (C, H, W).
         return_field: If True, include displacement as first returned item.
         return_warped_source: If True, include source warped by +displacement.
         return_warped_target: If True, include target warped by -displacement.
 
     Returns:
-        A tensor or tuple of tensors, depending on selected return flags.
+        FieldApplicationResult with requested members populated.
     """
     if not return_field and not return_warped_source and not return_warped_target:
         raise ValueError("At least one of return_field/return_warped_source/return_warped_target must be True")
@@ -168,10 +202,21 @@ def _field_application_impl(
     source_batched, source_was_unbatched = _as_batched_image(source, "source")
     field_batched, field_was_unbatched = _as_batched_field(
         displacement,
-        batch_size=source_batched.shape[0],
         spatial_shape=source_batched.shape[2:],
         reference=source_batched,
     )
+
+    batch_size = _resolve_broadcast_batch_size(
+        {
+            "source": source_batched.shape[0],
+            "displacement": field_batched.shape[0],
+        }
+    )
+
+    if source_batched.shape[0] == 1 and batch_size > 1:
+        source_batched = source_batched.expand(batch_size, -1, -1, -1)
+    if field_batched.shape[0] == 1 and batch_size > 1:
+        field_batched = field_batched.expand(batch_size, -1, -1, -1)
 
     target_batched = None
     target_was_unbatched = False
@@ -179,11 +224,11 @@ def _field_application_impl(
         if target is None:
             raise ValueError("target must be provided when return_warped_target=True")
         target_batched, target_was_unbatched = _as_batched_image(target, "target")
-        if target_batched.shape[0] == 1 and source_batched.shape[0] > 1:
-            target_batched = target_batched.expand(source_batched.shape[0], -1, -1, -1)
-        elif target_batched.shape[0] != source_batched.shape[0]:
+        if target_batched.shape[0] == 1 and batch_size > 1:
+            target_batched = target_batched.expand(batch_size, -1, -1, -1)
+        elif target_batched.shape[0] != batch_size:
             raise ValueError(
-                f"Target batch size {target_batched.shape[0]} must match source batch size {source_batched.shape[0]}"
+                f"Target batch size {target_batched.shape[0]} must be 1 or match resolved batch size {batch_size}"
             )
         if tuple(target_batched.shape[2:]) != tuple(source_batched.shape[2:]):
             raise ValueError(
@@ -195,24 +240,26 @@ def _field_application_impl(
 
     transformer = modules.SpatialTransformer()
 
-    outputs = []
+    result = FieldApplicationResult()
 
     if return_field:
         field_out = field_batched
-        if source_was_unbatched and field_was_unbatched:
+        if source_was_unbatched and field_was_unbatched and batch_size == 1:
             field_out = field_out.squeeze(0)
-        outputs.append(field_out)
+        result.field = field_out
 
     if return_warped_source:
         warped_source = transformer(source_batched, field_batched)
-        if source_was_unbatched:
+        if source_was_unbatched and batch_size == 1:
             warped_source = warped_source.squeeze(0)
-        outputs.append(warped_source)
+        result.warped_source = warped_source
 
     if return_warped_target:
         warped_target = transformer(target_batched, -field_batched)
-        if target_was_unbatched:
+        if target_was_unbatched and batch_size == 1:
             warped_target = warped_target.squeeze(0)
-        outputs.append(warped_target)
+        result.warped_target = warped_target
 
-    return outputs[0] if len(outputs) == 1 else tuple(outputs)
+    return result
+
+

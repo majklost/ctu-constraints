@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from kornia.contrib import distance_transform as kornia_distance_transform
 from scipy import ndimage
+from .types import RigidParams
 
 
 def get_repo_root() -> Path:
@@ -190,3 +191,57 @@ def signed_distance_kornia(
 
     else:
         raise TypeError(f"Input must be np.ndarray or torch.Tensor, got {type(mask)}")
+
+
+
+
+def mat2params(mat: torch.Tensor) -> RigidParams:
+    """Convert a batch of 2D affine matrices to rotation angle and translation.
+
+    Args:
+        mat: Tensor with shape (N, 2, 3) or (2, 3).
+    Returns:
+        angle: Tensor with shape (N,) or scalar.
+        dx: Tensor with shape (N,) or scalar.
+        dy: Tensor with shape (N,) or scalar.
+    """
+    squeeze = mat.dim() == 2
+    if squeeze:
+        mat = mat.unsqueeze(0)
+
+    angle = torch.atan2(mat[:, 1, 0], mat[:, 0, 0])
+    dx = mat[:, 0, 2]
+    dy = mat[:, 1, 2]
+
+    if squeeze:
+        angle = angle.squeeze(0)
+        dx = dx.squeeze(0)
+        dy = dy.squeeze(0)
+
+    return RigidParams(angle=angle, dx=dx, dy=dy)
+
+
+def mat2inv(mat: torch.Tensor) -> torch.Tensor:
+    """Compute the inverse of a batch of 2D affine matrices.
+
+    Args:
+        mat: Tensor with shape (N, 2, 3) or (2, 3).
+    Returns:
+        inv_mat: Tensor with shape (N, 2, 3) or (2, 3).
+    """
+    squeeze = mat.dim() == 2
+    if squeeze:
+        mat = mat.unsqueeze(0)
+
+    A = mat[:, :, :2]          # (N, 2, 2)
+    t = mat[:, :, 2:3]         # (N, 2, 1)
+
+    A_inv = torch.linalg.inv(A)          # (N, 2, 2)
+    t_inv = -A_inv @ t                    # (N, 2, 1)
+
+    inv_mat = torch.cat([A_inv, t_inv], dim=2)  # (N, 2, 3)
+
+    if squeeze:
+        inv_mat = inv_mat.squeeze(0)
+
+    return inv_mat

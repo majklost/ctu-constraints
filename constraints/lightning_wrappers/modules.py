@@ -4,14 +4,14 @@ from torch import nn
 from typing import Callable
 from ..types import TransformSpec
 from ..types import WarpResult
-from ..transforms.transformers import Transformer
+from ..transforms.transformers import SpatialTransformer
 
 
 
 
 class ProjectLightning(pl.LightningModule):
     def __init__(self, model: nn.Module,
-                 spatial_transform: Transformer,
+                 spatial_transform: SpatialTransformer,
                   loss_seg: nn.Module,
                    loss_reg: nn.Module):
         super().__init__()
