@@ -1,8 +1,7 @@
 import torch
 import pytorch_lightning as pl
 from torch import nn
-from typing import Callable
-from ..types import TransformSpec
+from ..types import LossResult
 from ..datatools.datasets import Sample
 from ..types import WarpResult,LossInput
 from ..transforms.transformers import SpatialTransformer
@@ -25,6 +24,19 @@ class ProjectLightning(pl.LightningModule):
         self.spatial_transform = spatial_transform
         self.loss_computer = loss_computer
 
+    def _extra_logging(self,
+                       stage: str,
+                       batch: Sample,
+                       batch_idx: int,
+                       loss_output: LossResult,
+                       ) -> None:
+        """Extension hook for ad-hoc notebook diagnostics.
+
+        Subclasses can override this to log additional experiment-specific values
+        without modifying the stable baseline logging in `_shared_step`.
+        """
+        return None
+
     def forward(self, img:torch.Tensor, template:torch.Tensor):
         segmentation_logits, transform_spec = self.model(img, template)
         warp_result = self.spatial_transform(template, transform_spec)
@@ -44,6 +56,22 @@ class ProjectLightning(pl.LightningModule):
         loss_output = self.loss_computer.compute(loss_input)
 
         # Logging
+        self.log(f"{stage}/loss", loss_output.total, on_step=True, on_epoch=True, prog_bar=(stage == "train"))
+
+        if loss_output.components:
+            for component_name, component_value in loss_output.components.items():
+                self.log(f"{stage}/loss/{component_name}", component_value, on_step=True, on_epoch=True)
+
+        if loss_output.logs:
+            for log_name, log_value in loss_output.logs.items():
+                self.log(f"{stage}/{log_name}", log_value, on_step=True, on_epoch=True)
+
+        self._extra_logging(
+            stage=stage,
+            batch=batch,
+            batch_idx=batch_idx,
+            loss_output=loss_output,
+        )
 
         return loss_output.total
 
