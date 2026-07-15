@@ -143,6 +143,9 @@ class OneSideSDFSquare(torch.nn.Module):
         self.reduction = reduction
 
     def forward(self, pred, sdf):
+        """
+        Predicted probabilities `pred` and signed distance field `sdf` should have the same shape [B, C, H, W].
+        """
         loss = pred * torch.clamp(sdf, min=0) ** 2 + \
                (1 - pred) * torch.clamp(-sdf, min=0) ** 2
 

@@ -59,7 +59,8 @@ class ProjectWithTemplateA(torch.nn.Module):
 
     def forward(self, x,template) -> tuple[torch.Tensor,TransformSpec]:
         segmentation_logits = self.unet(x) #B,C,H,W
-        concatenated_input = torch.cat([segmentation_logits, template], dim=1)  # B,2C,H,W
+        segmentations_probs = torch.softmax(segmentation_logits, dim=1) #B,C,H,W
+        concatenated_input = torch.cat([segmentations_probs, template], dim=1)  # B,2C,H,W
         features = self.encoder(concatenated_input)  # B, feature_dim
         angle, translation = self.TransformHead(features)  # B,1 and B,2
         rigid = RigidParams(angle=angle, dx=translation[:, 0:1], dy=translation[:, 1:2])
