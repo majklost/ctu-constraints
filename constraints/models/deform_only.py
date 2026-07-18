@@ -126,26 +126,26 @@ class TwoBranch(torch.nn.Module):
         warped_template = self.spatial_transformer(template_to_warp, displacement)
         return segmentation_logits, return_field, warped_template
 
-    def _init_flow_head(self, flow_initializer: float = 1e-5) -> None:
-        """
-        Initialize first flow-head convolution with small random weights.
-        """
-        if flow_initializer is None:
-            return
+    # def _init_flow_head(self, flow_initializer: float = 1e-5) -> None:
+    #     """
+    #     Initialize first flow-head convolution with small random weights.
+    #     """
+    #     if flow_initializer is None:
+    #         return
 
-        first_conv = None
-        for module in self.flow_head.modules():
-            if isinstance(module, torch.nn.Conv2d):
-                first_conv = module
-                break
+    #     first_conv = None
+    #     for module in self.flow_head.modules():
+    #         if isinstance(module, torch.nn.Conv2d):
+    #             first_conv = module
+    #             break
 
-        if first_conv is None:
-            return
+    #     if first_conv is None:
+    #         return
 
-        with torch.no_grad():
-            torch.nn.init.normal_(first_conv.weight, mean=0.0, std=flow_initializer)
-            if first_conv.bias is not None:
-                first_conv.bias.zero_()
+    #     with torch.no_grad():
+    #         torch.nn.init.normal_(first_conv.weight, mean=0.0, std=flow_initializer)
+    #         if first_conv.bias is not None:
+    #             first_conv.bias.zero_()
 
     def _validate_template_shape(self, template: torch.Tensor) -> None:
         if template.ndim != 4:
@@ -190,8 +190,7 @@ class ProjectWithTemplateD(torch.nn.Module):
 
     def forward(self, x,template) -> tuple[torch.Tensor,TransformSpec]:
         segmentation_logits = self.unet(x) #B,C,H,W
-        concatenated_input = torch.cat([segmentation_logits, template], dim=1)  # B,2C,H,W
-        deformation_field = self.encoder(concatenated_input)  # B, feature_dim
+        deformation_field = self.encoder(segmentation_logits, template)
         field_params = FieldParams(field=deformation_field)
         transform_spec = TransformSpec(field=field_params)
         return segmentation_logits, transform_spec

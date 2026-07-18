@@ -6,7 +6,11 @@ from ..types import LossInput, MetricInput, WandbOverlay
 from ..transforms.transformers import SpatialTransformer
 from ..computers.loss_computers import ProjectLossComputer
 from ..computers.metric_computers import ProjectMetricComputer, NoOpMetricComputer
+from typing import Callable, Union, List, Tuple, Dict, Any
 
+# Whatever configure_optimizers() itself may legally return
+from pytorch_lightning.utilities.types import OptimizerLRScheduler
+OptimizerFactory = Callable[[nn.Module], OptimizerLRScheduler]
 try:
     from pytorch_lightning.loggers import WandbLogger
 except Exception:  # pragma: no cover - optional dependency
@@ -28,13 +32,14 @@ class ProjectLightning(pl.LightningModule):
                  spatial_transform: SpatialTransformer,
                  loss_computer: ProjectLossComputer,
                  metric_computer: ProjectMetricComputer | None = None,
-
-                  ):
+                 optimizer_callback: OptimizerFactory = lambda module: torch.optim.Adam(module.parameters(), lr=1e-3)):
+                  
         super().__init__()
         self.model = model
         self.spatial_transform = spatial_transform
         self.loss_computer = loss_computer
         self.metric_computer = metric_computer if metric_computer is not None else NoOpMetricComputer()
+        self.optimizer_callback = optimizer_callback
 
     def forward(self, img:torch.Tensor, template:torch.Tensor):
         segmentation_logits, transform_spec = self.model(img, template)
@@ -105,7 +110,7 @@ class ProjectLightning(pl.LightningModule):
 
         if loss_output.logs:
             for log_name, log_value in loss_output.logs.items():
-                self.log(f"{stage}/{log_name}", log_value, on_step=True, on_epoch=True)
+                self.log(f"{stage}/info/{log_name}", log_value, on_step=True, on_epoch=True)
 
         metric_input = MetricInput(
             stage=stage,
@@ -139,3 +144,7 @@ class ProjectLightning(pl.LightningModule):
 
     def validation_step(self, batch:Sample, batch_idx):
         return self._shared_step(batch, batch_idx, stage='val')
+
+
+    def configure_optimizers(self):
+        return self.optimizer_callback(self)

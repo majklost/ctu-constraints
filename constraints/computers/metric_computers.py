@@ -3,6 +3,7 @@ from typing import cast
 
 import torch
 from torch import nn
+from torchmetrics.functional.classification import multiclass_jaccard_index
 
 from ..types import MetricInput, MetricResult, WandbOverlay
 from ..visu.helpers import to_label_map
@@ -68,7 +69,52 @@ class CompositeMetricComputer(ProjectMetricComputer):
         )
 
 
-class LabelTripletImageMetricComputer(ProjectMetricComputer):
+class SegmentationIoUMetricComputer(ProjectMetricComputer):
+    """Compute IoU metrics from predicted and warped label maps."""
+
+    def __init__(
+        self,
+        num_classes: int = 3,
+    ) -> None:
+        super().__init__()
+        if num_classes <= 0:
+            raise ValueError("num_classes must be > 0")
+        self.num_classes = int(num_classes)
+
+    def compute(self, metric_input: MetricInput) -> MetricResult:
+        pred_mask_logits = metric_input.segmentation_logits
+        warped_template = metric_input.warped_template
+        gt_mask = metric_input.gt_mask
+
+        if pred_mask_logits is None or warped_template is None or gt_mask is None:
+            return MetricResult()
+
+        pred_labels = to_label_map(pred_mask_logits)
+        warped_labels = to_label_map(warped_template)
+        gt_labels = to_label_map(gt_mask)
+
+        iou_pred_vs_gt = multiclass_jaccard_index(
+            preds=pred_labels,
+            target=gt_labels,
+            num_classes=self.num_classes,
+            average="macro",
+        )
+        iou_warped_vs_gt = multiclass_jaccard_index(
+            preds=warped_labels,
+            target=gt_labels,
+            num_classes=self.num_classes,
+            average="macro",
+        )
+
+        return MetricResult(
+            logs={
+                "iou/pred_vs_gt": iou_pred_vs_gt,
+                "iou/warped_vs_gt": iou_warped_vs_gt,
+            }
+        )
+
+
+class SegmentationOverlayMetricComputer(ProjectMetricComputer):
     """Log GT, warped, and predicted label maps as W&B mask overlays."""
 
     def __init__(
@@ -185,3 +231,32 @@ class LabelTripletImageMetricComputer(ProjectMetricComputer):
             caption="GT | warped | pred",
         )
         return MetricResult(wandb_overlays={self.image_tag: overlay})
+
+
+class LabelTripletImageMetricComputer(SegmentationOverlayMetricComputer):
+    """Backward-compatible alias for SegmentationOverlayMetricComputer."""
+
+
+class DefaultSegmentationMetricComputer(CompositeMetricComputer):
+    """Precomposed favorite metrics: IoU scalars + W&B segmentation overlays."""
+
+    def __init__(
+        self,
+        num_classes: int = 3,
+        overlay_stage: str = "val",
+        overlay_every_n_epochs: int = 1,
+        overlay_sample_idx: int = 0,
+        overlay_image_tag: str = "labels_overlay",
+    ) -> None:
+        super().__init__(
+            metric_computers=[
+                SegmentationIoUMetricComputer(num_classes=num_classes),
+                SegmentationOverlayMetricComputer(
+                    stage=overlay_stage,
+                    every_n_epochs=overlay_every_n_epochs,
+                    sample_idx=overlay_sample_idx,
+                    num_classes=num_classes,
+                    image_tag=overlay_image_tag,
+                ),
+            ]
+        )
