@@ -62,3 +62,38 @@ class LossResult:
     logs: dict[str, float | torch.Tensor] | None = None
 
 
+@dataclass
+class MetricInput:
+    """Canonical model output contract used by metric computers."""
+
+    stage: str
+    batch_idx: int
+    current_epoch: int | None = None
+    global_step: int | None = None
+    image: torch.Tensor | None = None
+    segmentation_logits: torch.Tensor | None = None
+    warped_template: torch.Tensor | None = None
+    gt_mask: torch.Tensor | None = None
+    gt_mask_sdf: torch.Tensor | None = None
+    transform_spec: TransformSpec | None = None
+    extras: dict[str, Any] | None = None
+
+
+@dataclass
+class MetricResult:
+    """Structured metric output with scalars and optional W&B overlay artifacts."""
+
+    logs: dict[str, float | torch.Tensor] | None = None
+    wandb_overlays: dict[str, "WandbOverlay"] | None = None
+
+
+@dataclass
+class WandbOverlay:
+    """Typed payload for a single W&B image with one or more mask overlays."""
+
+    image: torch.Tensor
+    masks: dict[str, torch.Tensor]
+    class_labels: dict[int, str] | None = None
+    caption: str | None = None
+
+

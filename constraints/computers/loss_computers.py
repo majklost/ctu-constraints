@@ -90,9 +90,9 @@ class CrossEntrAndOneSide(ProjectLossComputer):
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_mask is not None, "gt_mask is required for loss computation"
 
-        loss_seg = self._cross_entropy(pred_mask_logits, gt_mask)
+        loss_seg = 20 * self._cross_entropy(pred_mask_logits, gt_mask)
         loss_sdf = self._one_sided(warped_template, gt_sdf)
-        loss = 20 *loss_seg + loss_sdf
+        loss = loss_seg + loss_sdf
 
         pred_labels = self._to_labels(pred_mask_logits)
         warped_labels = self._to_labels(warped_template)
