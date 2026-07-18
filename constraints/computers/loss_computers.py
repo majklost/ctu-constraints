@@ -3,7 +3,8 @@ import torch
 from torch import nn
 
 from ..types import LossInput, LossResult
-
+from torchmetrics.functional.classification import multiclass_jaccard_index    
+from ..losses import OneSideSDFSquare
 
 
 class LossComputer(nn.Module, ABC):
@@ -61,3 +62,62 @@ class ProjectLossComputer(LossComputer):
     @abstractmethod
     def compute(self, loss_input: LossInput) -> LossResult:
         """Implement project-specific loss from the typed `LossInput` contract."""
+
+
+
+
+class CrossEntrAndOneSide(ProjectLossComputer):
+    def __init__(self, num_classes=3, weight=1.0):
+        super().__init__()
+        self.num_classes = num_classes
+        self._one_sided = OneSideSDFSquare()
+        self._cross_entropy = torch.nn.CrossEntropyLoss()
+
+    @staticmethod
+    def _to_labels(x: torch.Tensor) -> torch.Tensor:
+        # [B, C, H, W] -> [B, H, W], already-labeled -> long
+        if x.ndim == 4:
+            return x.argmax(dim=1)
+        return x.long()
+
+    def compute(self, loss_input: LossInput) -> LossResult:
+        gt_sdf = loss_input.gt_mask_sdf
+        gt_mask = loss_input.gt_mask
+        pred_mask_logits = loss_input.segmentation_logits
+        warped_template = loss_input.warped_template
+
+        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
+        assert warped_template is not None, "warped_template is required for loss computation"
+        assert gt_mask is not None, "gt_mask is required for loss computation"
+
+        loss_seg = self._cross_entropy(pred_mask_logits, gt_mask)
+        loss_sdf = self._one_sided(warped_template, gt_sdf)
+        loss = 20 *loss_seg + loss_sdf
+
+        pred_labels = self._to_labels(pred_mask_logits)
+        warped_labels = self._to_labels(warped_template)
+        gt_labels = self._to_labels(gt_mask)
+
+        iou_pred_vs_gt = multiclass_jaccard_index(
+            preds=pred_labels,
+            target=gt_labels,
+            num_classes=self.num_classes,
+            average="macro",
+        )
+        iou_warped_vs_gt = multiclass_jaccard_index(
+            preds=warped_labels,
+            target=gt_labels,
+            num_classes=self.num_classes,
+            average="macro",
+        )
+
+        components = {
+            "loss_seg": loss_seg,
+            "loss_sdf": loss_sdf,
+        }
+        logs = {
+            "iou/pred_vs_gt": iou_pred_vs_gt,
+            "iou/warped_vs_gt": iou_warped_vs_gt,
+        }
+
+        return LossResult(total=loss, components=components, logs=logs)
