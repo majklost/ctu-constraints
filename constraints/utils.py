@@ -193,6 +193,20 @@ def signed_distance_kornia(
         raise TypeError(f"Input must be np.ndarray or torch.Tensor, got {type(mask)}")
 
 
+def signed_distance_kornia_differentiable(mask: torch.Tensor) -> torch.Tensor:
+    if mask.ndim not in (3, 4):
+        raise ValueError(f"Expected (B, C, H, W) or (C, H, W), got {mask.ndim}D")
+
+    torch_mask = mask.to(dtype=torch.float32)  # no .detach()
+    squeeze_back = mask.ndim == 3
+    if squeeze_back:
+        torch_mask = torch_mask.unsqueeze(0)
+
+    sdf = kornia_distance_transform(torch_mask)
+
+    if squeeze_back:
+        sdf = sdf.squeeze(0)
+    return sdf
 
 
 def mat2params(mat: torch.Tensor) -> RigidParams:

@@ -121,7 +121,7 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         self,
         stage: str = "val",
         every_n_epochs: int = 1,
-        sample_idx: int = 0,
+        sample_indices: list[int] | None = None,
         num_classes: int | None = None,
         image_tag: str = "labels_overlay",
     ) -> None:
@@ -130,14 +130,24 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
             raise ValueError("stage must be 'train' or 'val'")
         if every_n_epochs <= 0:
             raise ValueError("every_n_epochs must be > 0")
-        if sample_idx < 0:
-            raise ValueError("sample_idx must be >= 0")
+        if sample_indices is not None and any(idx < 0 for idx in sample_indices):
+            raise ValueError("sample_indices must contain only values >= 0")
 
         self.stage = stage
         self.every_n_epochs = every_n_epochs
-        self.sample_idx = sample_idx
+        self.sample_indices = sample_indices
         self.num_classes = num_classes
         self.image_tag = image_tag
+
+    def _resolved_sample_indices(self) -> list[int]:
+        if self.sample_indices is None:
+            return [0]
+
+        deduped_indices: list[int] = []
+        for idx in self.sample_indices:
+            if idx not in deduped_indices:
+                deduped_indices.append(int(idx))
+        return deduped_indices
 
     def _build_class_labels(self, inferred_num_classes: int) -> dict[int, str]:
         class_count = inferred_num_classes
@@ -201,36 +211,46 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         pred_labels = to_label_map(pred_mask_logits)
 
         batch_size = min(gt_labels.shape[0], warped_labels.shape[0], pred_labels.shape[0])
-        if self.sample_idx < 0 or self.sample_idx >= batch_size:
+        if batch_size <= 0:
             return MetricResult()
 
-        gt_sample = gt_labels[self.sample_idx].detach().cpu().long()
-        warped_sample = warped_labels[self.sample_idx].detach().cpu().long()
-        pred_sample = pred_labels[self.sample_idx].detach().cpu().long()
+        overlays: dict[str, WandbOverlay] = {}
+        for sample_idx in self._resolved_sample_indices():
+            if sample_idx >= batch_size:
+                continue
 
-        inferred_classes = int(
-            max(gt_sample.max().item(), warped_sample.max().item(), pred_sample.max().item()) + 1
-        )
-        class_labels = self._build_class_labels(inferred_classes)
-        height, width = int(gt_sample.shape[0]), int(gt_sample.shape[1])
+            gt_sample = gt_labels[sample_idx].detach().cpu().long()
+            warped_sample = warped_labels[sample_idx].detach().cpu().long()
+            pred_sample = pred_labels[sample_idx].detach().cpu().long()
 
-        background = self._prepare_background_image(
-            image_batch=metric_input.image,
-            sample_idx=self.sample_idx,
-            fallback_shape=(height, width),
-        )
+            inferred_classes = int(
+                max(gt_sample.max().item(), warped_sample.max().item(), pred_sample.max().item()) + 1
+            )
+            class_labels = self._build_class_labels(inferred_classes)
+            height, width = int(gt_sample.shape[0]), int(gt_sample.shape[1])
 
-        overlay = WandbOverlay(
-            image=background,
-            masks={
-                "ground_truth": gt_sample,
-                "warped": warped_sample,
-                "predicted": pred_sample,
-            },
-            class_labels=class_labels,
-            caption="GT | warped | pred",
-        )
-        return MetricResult(wandb_overlays={self.image_tag: overlay})
+            background = self._prepare_background_image(
+                image_batch=metric_input.image,
+                sample_idx=sample_idx,
+                fallback_shape=(height, width),
+            )
+
+            overlay = WandbOverlay(
+                image=background,
+                masks={
+                    "ground_truth": gt_sample,
+                    "warped": warped_sample,
+                    "predicted": pred_sample,
+                },
+                class_labels=class_labels,
+                caption=f"GT | warped | pred | {self.stage} sample={sample_idx}",
+            )
+            overlays[f"{self.image_tag}_{self.stage}_s{sample_idx}"] = overlay
+
+        if not overlays:
+            return MetricResult()
+
+        return MetricResult(wandb_overlays=overlays)
 
 
 class LabelTripletImageMetricComputer(SegmentationOverlayMetricComputer):
@@ -243,18 +263,32 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
     def __init__(
         self,
         num_classes: int = 3,
-        overlay_stage: str = "val",
+        overlay_val_stage: str = "val",
+        overlay_train_stage: str = "train",
         overlay_every_n_epochs: int = 1,
-        overlay_sample_idx: int = 0,
+        overlay_val_sample_indices: list[int] | None = None,
+        overlay_train_sample_indices: list[int] | None = None,
         overlay_image_tag: str = "labels_overlay",
     ) -> None:
+        if overlay_val_sample_indices is None:
+            overlay_val_sample_indices = [0, 1]
+        if overlay_train_sample_indices is None:
+            overlay_train_sample_indices = [0]
+
         super().__init__(
             metric_computers=[
                 SegmentationIoUMetricComputer(num_classes=num_classes),
                 SegmentationOverlayMetricComputer(
-                    stage=overlay_stage,
+                    stage=overlay_val_stage,
                     every_n_epochs=overlay_every_n_epochs,
-                    sample_idx=overlay_sample_idx,
+                    sample_indices=overlay_val_sample_indices,
+                    num_classes=num_classes,
+                    image_tag=overlay_image_tag,
+                ),
+                SegmentationOverlayMetricComputer(
+                    stage=overlay_train_stage,
+                    every_n_epochs=overlay_every_n_epochs,
+                    sample_indices=overlay_train_sample_indices,
                     num_classes=num_classes,
                     image_tag=overlay_image_tag,
                 ),

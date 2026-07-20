@@ -1,3 +1,3 @@
 from constraints.test import f
-
-f()
+from pathlib import Path
+print(Path(__file__).name)

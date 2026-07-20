@@ -7,7 +7,7 @@ from ..transforms.transformers import SpatialTransformer
 from ..computers.loss_computers import ProjectLossComputer
 from ..computers.metric_computers import ProjectMetricComputer, NoOpMetricComputer
 from typing import Callable, Union, List, Tuple, Dict, Any
-
+from .sample_strategy import GtStrategy,NoGt
 # Whatever configure_optimizers() itself may legally return
 from pytorch_lightning.utilities.types import OptimizerLRScheduler
 OptimizerFactory = Callable[[nn.Module], OptimizerLRScheduler]
@@ -32,7 +32,8 @@ class ProjectLightning(pl.LightningModule):
                  spatial_transform: SpatialTransformer,
                  loss_computer: ProjectLossComputer,
                  metric_computer: ProjectMetricComputer | None = None,
-                 optimizer_callback: OptimizerFactory = lambda module: torch.optim.Adam(module.parameters(), lr=1e-3)):
+                 optimizer_callback: OptimizerFactory = lambda module: torch.optim.Adam(module.parameters(), lr=1e-3),
+                 gt_strategy: GtStrategy = NoGt()):
                   
         super().__init__()
         self.model = model
@@ -40,9 +41,9 @@ class ProjectLightning(pl.LightningModule):
         self.loss_computer = loss_computer
         self.metric_computer = metric_computer if metric_computer is not None else NoOpMetricComputer()
         self.optimizer_callback = optimizer_callback
-
-    def forward(self, img:torch.Tensor, template:torch.Tensor):
-        segmentation_logits, transform_spec = self.model(img, template)
+        self.gt_strategy = gt_strategy
+    def forward(self, img:torch.Tensor, template:torch.Tensor, gt: torch.Tensor |None = None,detach_seg: bool = False):
+        segmentation_logits, transform_spec = self.model(img, template, gt=gt, detach_seg=detach_seg)
         warp_result = self.spatial_transform(template, transform_spec)
         return segmentation_logits, warp_result
 
@@ -91,7 +92,8 @@ class ProjectLightning(pl.LightningModule):
     def _shared_step(self,batch:Sample,batch_idx,stage:str):
         template = batch['template'] # template is same for all samples in the batch, so we can take the first one
         img = batch['image']
-        segmentation_logits, warp_result = self.forward(img, template)
+        decision = self.gt_strategy.decide(batch, stage, int(self.current_epoch))
+        segmentation_logits, warp_result = self.forward(img, template,gt=decision.gt,detach_seg=decision.detach_seg)
         # Plug into loss computer
         loss_input = LossInput(segmentation_logits=segmentation_logits,
                                warped_template=warp_result.warped_template,

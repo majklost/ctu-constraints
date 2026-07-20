@@ -3,6 +3,8 @@ import torch
 import timm
 from .helpers import RigidTransformHead
 from ..types import RigidParams, TransformSpec
+
+
 class TwoBranch(torch.nn.Module):
     def __init__(self, max_translation=0.3):
         super().__init__()
@@ -57,12 +59,26 @@ class ProjectWithTemplateA(torch.nn.Module):
         )
         self.TransformHead = RigidTransformHead(max_translation=max_translation)
 
-    def forward(self, x,template) -> tuple[torch.Tensor,TransformSpec]:
-        segmentation_logits = self.unet(x) #B,C,H,W
-        segmentations_probs = torch.softmax(segmentation_logits, dim=1) #B,C,H,W
-        concatenated_input = torch.cat([segmentations_probs, template], dim=1)  # B,2C,H,W
+    def forward(
+        self,
+        x: torch.Tensor,
+        template: torch.Tensor,
+        gt: torch.Tensor | None = None,
+        detach_seg: bool = False,
+    ) -> tuple[torch.Tensor, TransformSpec]:
+        segmentation_logits = self.unet(x)  # (B, C, H, W)
+
+        registration_input: torch.Tensor
+        if gt is not None:
+            registration_input = gt
+        else:
+            registration_input = torch.softmax(segmentation_logits, dim=1)
+            if detach_seg:
+                registration_input = registration_input.detach()
+
+        concatenated_input = torch.cat([registration_input, template], dim=1)  # (B, 2C, H, W)
         features = self.encoder(concatenated_input)  # B, feature_dim
-        angle, translation = self.TransformHead(features)  # B,1 and B,2
+        angle, translation = self.TransformHead(features)  # (B, 1) and (B, 2)
         rigid = RigidParams(angle=angle, dx=translation[:, 0:1], dy=translation[:, 1:2])
         transform_spec = TransformSpec(rigid=rigid)
         return segmentation_logits, transform_spec

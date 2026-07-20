@@ -160,37 +160,76 @@ class TwoBranch(torch.nn.Module):
 
 class ProjectWithTemplateD(torch.nn.Module):
     """
-    Encode->Decode segmentations, then pass the segmentation map and template into registration network
-    Registration network processes both, return 2D deformation field
-    Deformation field is applied to spatial transform
-    
+    Encode->Decode segmentations, then pass the segmentation map (or ground
+    truth, if provided) and template into a registration network.
+    The registration network processes both and returns a 2D deformation field.
     ---
-    Return: segmentation map, deformation field
+    Return: segmentation logits, deformation field
     ---
     """
-    def __init__(self):
+
+    def __init__(self) -> None:
         super().__init__()
         self.unet = smp.Unet(
             "resnet18", encoder_weights="imagenet", in_channels=1, classes=3
         )
 
         nb_features = [
-            [32, 32, 32, 32], # encoder features
-            [32, 32, 32, 32]  # decoder features
+            [32, 32, 32, 32],  # encoder features
+            [32, 32, 32, 32],  # decoder features
         ]
         self.encoder = VxmPairwise(
             ndim=2,
             source_channels=3,
-            target_channels=3,  # concatenated channel count
+            target_channels=3,
             nb_features=nb_features,
         )
-        
-        
 
+    def forward(
+        self,
+        x: torch.Tensor,
+        template: torch.Tensor,
+        gt: torch.Tensor |None = None,
+        detach_seg: bool = False,
+    ) -> tuple[torch.Tensor, TransformSpec]:
+        """
+        Run the UNet to obtain segmentation logits, then feed either those
+        logits or a supplied ground-truth mask into the registration network
+        together with the template.
 
-    def forward(self, x,template) -> tuple[torch.Tensor,TransformSpec]:
-        segmentation_logits = self.unet(x) #B,C,H,W
-        deformation_field = self.encoder(segmentation_logits, template)
+        Args:
+            x: Input image, shape (B, 1, H, W).
+            template: Topologically-correct one-hot template, shape (B, C, H, W).
+            gt: Optional ground-truth one-hot segmentation, shape (B, C, H, W).
+                If provided, this is passed to the registration network
+                instead of the UNet's predicted logits, decoupling the
+                registration network's training from the UNet entirely
+                (no gradient path between the two).
+                If None, the UNet's own logits are used instead.
+            detach_seg: Only relevant when gt is None. If True, stop-gradient
+                is applied to the segmentation logits before they enter the
+                registration network, so the warp loss updates the
+                registration network only and does not backpropagate into
+                the UNet's weights.
+
+        Returns:
+            segmentation_logits: Raw UNet output, shape (B, C, H, W).
+            transform_spec: Predicted deformation field wrapped as a
+                TransformSpec, to be applied to the template via a spatial
+                transform.
+        """
+        segmentation_logits: torch.Tensor = self.unet(x)  # (B, C, H, W)
+
+        registration_input: torch.Tensor
+        if gt is not None:
+            registration_input = gt
+        else:
+            registration_input = segmentation_logits
+            if detach_seg:
+                registration_input = registration_input.detach()
+
+        deformation_field: torch.Tensor = self.encoder(registration_input, template)
         field_params = FieldParams(field=deformation_field)
         transform_spec = TransformSpec(field=field_params)
+
         return segmentation_logits, transform_spec
