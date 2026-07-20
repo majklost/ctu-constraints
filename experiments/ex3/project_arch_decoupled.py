@@ -82,36 +82,6 @@ def main(args):
     gt_strategy=sample_strategy
     )
 
-    BATCH_SIZE = args.batch_size
-    NUM_WORKERS = args.num_workers
-    EPOCHS = args.max_epochs
-
-    trn_loader = DataLoader(
-    trn_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    num_workers=NUM_WORKERS,
-    pin_memory=torch.cuda.is_available(),
-    )
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=torch.cuda.is_available(),
-    )
-
-
-    
-    wandb_logger = WandbLogger(
-        project=WANDB_PROJECT,
-        entity=WANDB_ENTITY,
-        name=f"ex3-{FILE_NAME}-{args.mode}-{args.modality}",
-        tags=["scratch", "overlay", "ex3", f"{FILE_NAME}", f"{args.mode}", f"{args.modality}"],
-        settings=wandb.Settings(console="wrap"),  # pass settings through here instead
-    )
-
-
 
 
     BATCH_SIZE = args.batch_size

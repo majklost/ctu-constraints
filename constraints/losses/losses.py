@@ -2,6 +2,19 @@ import torch
 import scipy
 import torch.nn.functional as F
 
+from ..visu.helpers import to_label_map
+
+
+class RawMaskCrossEntropyLoss(torch.nn.Module):
+    """Cross entropy that accepts this project's raw channel-mask targets."""
+
+    def __init__(self, reduction: str = "mean") -> None:
+        super().__init__()
+        self._cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction)
+
+    def forward(self, logits: torch.Tensor, raw_target: torch.Tensor) -> torch.Tensor:
+        return self._cross_entropy(logits, to_label_map(raw_target))
+
 # TODO: Make _Weighted loss from it
 class CentroidLoss(torch.nn.Module):
     def __init__(self, reduction="mean"):
@@ -93,7 +106,9 @@ class BlurredMSELoss(torch.nn.Module):
         b, c, h, w = x.shape
         pad = self.kernel_size // 2
 
-        kernel = self.kernel2d.to(device=x.device, dtype=x.dtype).expand(c, 1, -1, -1)  # [C,1,K,K]
+        kernel2d = self.kernel2d
+        assert isinstance(kernel2d, torch.Tensor)
+        kernel = kernel2d.to(device=x.device, dtype=x.dtype).expand(c, 1, -1, -1)  # [C,1,K,K]
         x = F.pad(x, (pad, pad, pad, pad), mode=self.padding_mode)
         return F.conv2d(x, kernel, groups=c)
 

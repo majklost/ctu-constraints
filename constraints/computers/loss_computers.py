@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 from ..types import LossInput, LossResult
-from ..losses import OneSideSDFSquare, CentroidLoss, BlurredMSELoss
+from ..losses import OneSideSDFSquare, CentroidLoss, BlurredMSELoss, RawMaskCrossEntropyLoss
 from ..utils import signed_distance_kornia_differentiable
 
 def _compute_grad_interaction_logs(
@@ -24,20 +24,19 @@ def _compute_grad_interaction_logs(
     if not refs:
         return None
 
-    grads1 = torch.autograd.grad(
-        loss1,
-        refs,
-        retain_graph=True,
-        create_graph=False,
-        allow_unused=True,
-    )
-    grads2 = torch.autograd.grad(
-        loss2,
-        refs,
-        retain_graph=True,
-        create_graph=False,
-        allow_unused=True,
-    )
+    def _grads_or_unused(loss: torch.Tensor) -> tuple[torch.Tensor | None, ...]:
+        if not loss.requires_grad:
+            return tuple(None for _ in refs)
+        return torch.autograd.grad(
+            loss,
+            refs,
+            retain_graph=True,
+            create_graph=False,
+            allow_unused=True,
+        )
+
+    grads1 = _grads_or_unused(loss1)
+    grads2 = _grads_or_unused(loss2)
 
     def _flatten(grads: tuple[torch.Tensor | None, ...]) -> torch.Tensor:
         chunks = []
@@ -135,7 +134,7 @@ class CrossEntrAndOneSide(ProjectLossComputer):
         self.seg_loss_weight = seg_loss_weight
         self.sdf_loss_weight = sdf_loss_weight
         self._one_sided = OneSideSDFSquare()
-        self._cross_entropy = torch.nn.CrossEntropyLoss()
+        self._cross_entropy = RawMaskCrossEntropyLoss()
 
     def compute(self, loss_input: LossInput) -> LossResult:
         gt_sdf = loss_input.gt_mask_sdf
@@ -176,7 +175,7 @@ class CrossEntrOnly(ProjectLossComputer):
         self.num_classes = num_classes
         self.seg_loss_weight = seg_loss_weight
         self.template_loss_weight = template_loss_weight
-        self._cross_entropy = torch.nn.CrossEntropyLoss()
+        self._cross_entropy = RawMaskCrossEntropyLoss()
 
     def compute(self, loss_input: LossInput) -> LossResult:
         gt_mask = loss_input.gt_mask
@@ -259,7 +258,7 @@ class CentroidComputer(ProjectLossComputer):
         self._seg_loss_weight = 1.0
         self.centroid_loss_weight = centroid_loss_weight
         self._centroid = CentroidLoss()
-        self._cross_entropy = torch.nn.CrossEntropyLoss()
+        self._cross_entropy = RawMaskCrossEntropyLoss()
         
     def compute(self, loss_input: LossInput) -> LossResult:
         gt_mask = loss_input.gt_mask
@@ -302,7 +301,7 @@ class DSDFComputer(ProjectLossComputer):
             raise ValueError(f"sdf_clip must be positive or None, got {sdf_clip}")
         self.sdf_clip = sdf_clip
         self._reg_loss = torch.nn.MSELoss()
-        self._cross_entropy = torch.nn.CrossEntropyLoss()
+        self._cross_entropy = RawMaskCrossEntropyLoss()
         
     def compute(self, loss_input: LossInput) -> LossResult:
         gt_sdf = loss_input.gt_mask_sdf
@@ -313,6 +312,7 @@ class DSDFComputer(ProjectLossComputer):
         assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_sdf is not None, "gt_sdf is required for loss computation"
+        assert gt_mask is not None, "gt_mask is required for loss computation"
 
         loss_seg = self.seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)
 
@@ -343,7 +343,7 @@ class BlurredMSEComputer(ProjectLossComputer):
         self.blur_sigma = blur_sigma
         self.reduction = reduction
         self._blurred_mse_loss = BlurredMSELoss(sigma=blur_sigma, reduction=reduction)
-        self._cross_entropy = torch.nn.CrossEntropyLoss()
+        self._cross_entropy = RawMaskCrossEntropyLoss()
         self.seg_loss_weight = 1.0
         self.reg_loss_weight = 1.0
 
@@ -355,6 +355,7 @@ class BlurredMSEComputer(ProjectLossComputer):
 
         assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
         assert warped_template is not None, "warped_template is required for loss computation"
+        assert gt_mask is not None, "gt_mask is required for loss computation"
         
 
         loss_seg = self.seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)

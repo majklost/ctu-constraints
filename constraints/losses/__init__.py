@@ -1,1 +1,1 @@
-from .losses import CentroidLoss, BlurredMSELoss,OneSideSDFSquare,OneSideSDF
+from .losses import CentroidLoss, BlurredMSELoss, OneSideSDFSquare, OneSideSDF, RawMaskCrossEntropyLoss

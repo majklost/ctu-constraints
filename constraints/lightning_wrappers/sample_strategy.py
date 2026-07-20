@@ -26,8 +26,7 @@ class NoGt:
 
 class AlwaysGt:
     def decide(self, batch: Sample, stage: str, epoch: int) -> GtStrategyResult:
-        gt = batch['mask'] if stage == "train" else None
-        return GtStrategyResult(gt=gt, detach_seg=False)
+        return GtStrategyResult(gt=batch['mask'], detach_seg=False)
 
 
 class WarmupGt:
