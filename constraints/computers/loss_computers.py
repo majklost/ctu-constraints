@@ -20,7 +20,9 @@ def _compute_grad_interaction_logs(
     if not torch.is_grad_enabled():
         return None
 
-    refs = [tensor for tensor in grad_refs if tensor is not None and tensor.requires_grad]
+    refs = [
+        tensor for tensor in grad_refs if tensor is not None and tensor.requires_grad
+    ]
     if not refs:
         return None
 
@@ -64,6 +66,42 @@ def _compute_grad_interaction_logs(
         "grad_ratio": grad_ratio,
         "grad_cosine": grad_cosine,
         "grad_share/loss1": grad_share,
+    }
+
+
+def _compute_grad_norm_logs(
+    loss: torch.Tensor,
+    grad_refs: list[torch.Tensor | None],
+    prefix: str,
+) -> dict[str, torch.Tensor] | None:
+    if not torch.is_grad_enabled() or not loss.requires_grad:
+        return None
+
+    refs = [
+        tensor for tensor in grad_refs if tensor is not None and tensor.requires_grad
+    ]
+    if not refs:
+        return None
+
+    grads = torch.autograd.grad(
+        loss,
+        refs,
+        retain_graph=True,
+        create_graph=False,
+        allow_unused=True,
+    )
+    chunks = []
+    for grad, ref in zip(grads, refs, strict=True):
+        if grad is None:
+            chunks.append(torch.zeros_like(ref).reshape(-1))
+        else:
+            chunks.append(grad.reshape(-1))
+
+    grad_vec = torch.cat(chunks)
+    return {
+        f"{prefix}/grad_norm": torch.linalg.vector_norm(grad_vec),
+        f"{prefix}/grad_abs_mean": grad_vec.abs().mean(),
+        f"{prefix}/grad_nonzero_share": (grad_vec != 0).float().mean(),
     }
 
 
@@ -214,6 +252,9 @@ class OneSideOnly(ProjectLossComputer):
 
     def __init__(self, num_classes=3, seg_loss_weight=1.0, sdf_loss_weight=1.0, ):
         super().__init__()
+        """
+        both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
+        """
         # Kept for constructor backward compatibility; IoU now lives in metric computers.
         self.num_classes = num_classes
         self.seg_loss_weight = seg_loss_weight
@@ -333,6 +374,14 @@ class DSDFComputer(ProjectLossComputer):
             loss2=loss_reg,
             grad_refs=[pred_mask_logits],
         )
+        branch_logs = _compute_grad_norm_logs(
+            loss=loss_reg,
+            grad_refs=[warped_template],
+            prefix="loss_MSE/warped_template",
+        )
+        if branch_logs:
+            logs = logs or {}
+            logs.update(branch_logs)
 
         return LossResult(total=loss, components=components, logs=logs)
 

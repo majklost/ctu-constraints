@@ -5,6 +5,7 @@ Extension of project_arch_initial.py in ex3
 
 
 from argparse import ArgumentParser
+import os
 from pathlib import Path
 import torch
 import pytorch_lightning as pl
@@ -32,9 +33,23 @@ MODES = ["decoupledOneSideSDF", "decoupledCE", "decoupledStandard", "decoupledDS
 FILE_NAME = Path(__file__).stem
 
 
+def configure_reproducibility(seed: int) -> None:
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    pl.seed_everything(seed, workers=True)
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(
+        True,
+        warn_only=True,
+    )
+
+
 def main(args):
     print(f"Experiment folder: {FOLDER}")
     print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
+    configure_reproducibility(seed=args.seed)
+    print(f"Seed: {args.seed}")
+    print("Determinism check: warn_only")
+
     if args.modality == "affine":
         TRN_FOLDER = DATA / "trn" / "affine"
         VAL_FOLDER = DATA / "val" / "affine"
@@ -87,6 +102,7 @@ def main(args):
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers
     EPOCHS = args.max_epochs
+    train_generator = torch.Generator().manual_seed(args.seed)
 
     trn_loader = DataLoader(
     trn_dataset,
@@ -94,6 +110,7 @@ def main(args):
     shuffle=True,
     num_workers=NUM_WORKERS,
     pin_memory=torch.cuda.is_available(),
+    generator=train_generator,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -124,6 +141,7 @@ def main(args):
     devices="auto",
     logger=logger,
     log_every_n_steps=1,
+    deterministic="warn",
     enable_checkpointing=False,
     enable_progress_bar=True,
     fast_dev_run=args.smoke_test,
@@ -142,6 +160,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_epochs", type=int, default=60)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--modality", type=str, choices=["affine", "deformed"])
     parser.add_argument("--mode", type=str, choices=MODES)
     parser.add_argument("--smoke_test", action="store_true",
