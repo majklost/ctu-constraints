@@ -1,6 +1,7 @@
 import segmentation_models_pytorch as smp
 import torch
 import timm
+from .composed import SegmentationRegistrationModel
 from .helpers import RigidTransformHead
 from ..types import RigidParams, TransformSpec
 
@@ -35,7 +36,27 @@ class TwoBranch(torch.nn.Module):
         return decoded, angle, translation
 
 
-class ProjectWithTemplateA(torch.nn.Module):
+class AffineRegistrationNet(torch.nn.Module):
+    def __init__(self, max_translation=0.3):
+        super().__init__()
+        self.encoder = timm.create_model(
+            'resnet34',
+            pretrained=True,
+            in_chans=6,
+            num_classes=0,
+            global_pool='avg',
+        )
+        self.transform_head = RigidTransformHead(max_translation=max_translation)
+
+    def forward(self, registration_input: torch.Tensor, template: torch.Tensor) -> TransformSpec:
+        concatenated_input = torch.cat([registration_input, template], dim=1)
+        features = self.encoder(concatenated_input)
+        angle, translation = self.transform_head(features)
+        rigid = RigidParams(angle=angle, dx=translation[:, 0:1], dy=translation[:, 1:2])
+        return TransformSpec(rigid=rigid)
+
+
+class ProjectWithTemplateA(SegmentationRegistrationModel):
     """
     Encode->Decode segmentations, then pass the segmentation map and template into registration network
     Registration network processes both, return the transformation parameters
@@ -46,39 +67,23 @@ class ProjectWithTemplateA(torch.nn.Module):
     ===
     """
     def __init__(self, max_translation=0.3):
-        super().__init__()
-        self.unet = smp.Unet(
+        segmentation_net = smp.Unet(
             "resnet18", encoder_weights="imagenet", in_channels=1, classes=3
         )
-        self.encoder = timm.create_model(
-            'resnet34',  
-            pretrained=True,
-            in_chans=6,  # concatenated channel count
-            num_classes=0,  # remove classification head, gives pooled features
-            global_pool='avg',
+        super().__init__(
+            segmentation_net=segmentation_net,
+            registration_net=AffineRegistrationNet(max_translation=max_translation),
+            registration_input_mode="probabilities",
         )
-        self.TransformHead = RigidTransformHead(max_translation=max_translation)
 
-    def forward(
-        self,
-        x: torch.Tensor,
-        template: torch.Tensor,
-        gt: torch.Tensor | None = None,
-        detach_seg: bool = False,
-    ) -> tuple[torch.Tensor, TransformSpec]:
-        segmentation_logits = self.unet(x)  # (B, C, H, W)
+    @property
+    def unet(self) -> torch.nn.Module:
+        return self.segmentation_net
 
-        registration_input: torch.Tensor
-        if gt is not None:
-            registration_input = gt
-        else:
-            registration_input = torch.softmax(segmentation_logits, dim=1)
-            if detach_seg:
-                registration_input = registration_input.detach()
+    @property
+    def encoder(self) -> torch.nn.Module:
+        return self.registration_net.encoder
 
-        concatenated_input = torch.cat([registration_input, template], dim=1)  # (B, 2C, H, W)
-        features = self.encoder(concatenated_input)  # B, feature_dim
-        angle, translation = self.TransformHead(features)  # (B, 1) and (B, 2)
-        rigid = RigidParams(angle=angle, dx=translation[:, 0:1], dy=translation[:, 1:2])
-        transform_spec = TransformSpec(rigid=rigid)
-        return segmentation_logits, transform_spec
+    @property
+    def TransformHead(self) -> RigidTransformHead:
+        return self.registration_net.transform_head

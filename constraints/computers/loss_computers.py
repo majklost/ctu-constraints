@@ -3,8 +3,16 @@ import torch
 from torch import nn
 
 from ..types import LossInput, LossResult
-from ..losses import OneSideSDFSquare, CentroidLoss, BlurredMSELoss, RawMaskCrossEntropyLoss
-from ..utils import signed_distance_kornia_differentiable
+from .loss_terms import (
+    LossTerm,
+    RegistrationBlurredMSETerm,
+    RegistrationCentroidTerm,
+    RegistrationCrossEntropyTerm,
+    RegistrationDSDFMSETerm,
+    RegistrationOneSideSDFTerm,
+    SegmentationCrossEntropyTerm,
+    SegmentationOneSideSDFTerm,
+)
 
 def _compute_grad_interaction_logs(
     loss1: torch.Tensor,
@@ -61,47 +69,11 @@ def _compute_grad_interaction_logs(
     grad_share = grad_norm1 / (grad_norm1 + grad_norm2 + eps)
 
     return {
-        "grad_norm/loss1": grad_norm1,
-        "grad_norm/loss2": grad_norm2,
-        "grad_ratio": grad_ratio,
-        "grad_cosine": grad_cosine,
-        "grad_share/loss1": grad_share,
-    }
-
-
-def _compute_grad_norm_logs(
-    loss: torch.Tensor,
-    grad_refs: list[torch.Tensor | None],
-    prefix: str,
-) -> dict[str, torch.Tensor] | None:
-    if not torch.is_grad_enabled() or not loss.requires_grad:
-        return None
-
-    refs = [
-        tensor for tensor in grad_refs if tensor is not None and tensor.requires_grad
-    ]
-    if not refs:
-        return None
-
-    grads = torch.autograd.grad(
-        loss,
-        refs,
-        retain_graph=True,
-        create_graph=False,
-        allow_unused=True,
-    )
-    chunks = []
-    for grad, ref in zip(grads, refs, strict=True):
-        if grad is None:
-            chunks.append(torch.zeros_like(ref).reshape(-1))
-        else:
-            chunks.append(grad.reshape(-1))
-
-    grad_vec = torch.cat(chunks)
-    return {
-        f"{prefix}/grad_norm": torch.linalg.vector_norm(grad_vec),
-        f"{prefix}/grad_abs_mean": grad_vec.abs().mean(),
-        f"{prefix}/grad_nonzero_share": (grad_vec != 0).float().mean(),
+        "coupling/segmentation_grad_norm": grad_norm1,
+        "coupling/registration_grad_norm": grad_norm2,
+        "coupling/grad_ratio_segmentation_to_registration": grad_ratio,
+        "coupling/grad_cosine": grad_cosine,
+        "coupling/segmentation_grad_share": grad_share,
     }
 
 
@@ -162,96 +134,96 @@ class ProjectLossComputer(LossComputer):
         """Implement project-specific loss from the typed `LossInput` contract."""
 
 
+class CompositeLossComputer(ProjectLossComputer):
+    """Compose weighted loss terms while preserving the ProjectLossComputer API."""
 
-
-class CrossEntrAndOneSide(ProjectLossComputer):
-    def __init__(self, num_classes=3, seg_loss_weight=20.0, sdf_loss_weight=1.0):
+    def __init__(self, terms: list[tuple[float, LossTerm]]) -> None:
         super().__init__()
+        if not terms:
+            raise ValueError("CompositeLossComputer requires at least one loss term")
+
+        self.weights = [float(weight) for weight, _ in terms]
+        self.terms = nn.ModuleList(term for _, term in terms)
+
+    def compute(self, loss_input: LossInput) -> LossResult:
+        components: dict[str, torch.Tensor] = {}
+        weighted_losses: list[torch.Tensor] = []
+        logs: dict[str, float | torch.Tensor] = {}
+
+        for weight, term_module in zip(self.weights, self.terms, strict=True):
+            assert isinstance(term_module, LossTerm)
+            if term_module.name in components:
+                raise ValueError(f"Duplicate loss component name: {term_module.name}")
+            weighted_loss = weight * term_module(loss_input)
+            components[term_module.name] = weighted_loss
+            weighted_losses.append(weighted_loss)
+
+            term_logs = term_module.logs(loss_input, weighted_loss)
+            if term_logs:
+                logs.update(term_logs)
+
+        total = weighted_losses[0]
+        for weighted_loss in weighted_losses[1:]:
+            total = total + weighted_loss
+
+        if len(weighted_losses) >= 2:
+            interaction_logs = _compute_grad_interaction_logs(
+                loss1=weighted_losses[0],
+                loss2=weighted_losses[1],
+                grad_refs=[loss_input.segmentation_logits],
+            )
+            if interaction_logs:
+                logs.update(interaction_logs)
+
+        return LossResult(total=total, components=components, logs=logs or None)
+
+
+
+
+class CrossEntrAndOneSide(CompositeLossComputer):
+    def __init__(self, num_classes=3, seg_loss_weight=20.0, sdf_loss_weight=1.0):
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationCrossEntropyTerm()),
+                (sdf_loss_weight, RegistrationOneSideSDFTerm()),
+            ]
+        )
         # Kept for constructor backward compatibility; IoU now lives in metric computers.
         self.num_classes = num_classes
         self.seg_loss_weight = seg_loss_weight
         self.sdf_loss_weight = sdf_loss_weight
-        self._one_sided = OneSideSDFSquare()
-        self._cross_entropy = RawMaskCrossEntropyLoss()
-
-    def compute(self, loss_input: LossInput) -> LossResult:
-        gt_sdf = loss_input.gt_mask_sdf
-        gt_mask = loss_input.gt_mask
-        pred_mask_logits = loss_input.segmentation_logits
-        warped_template = loss_input.warped_template
-
-        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
-        assert warped_template is not None, "warped_template is required for loss computation"
-        assert gt_mask is not None, "gt_mask is required for loss computation"
-
-        loss_seg = self.seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)
-        loss_sdf = self.sdf_loss_weight * self._one_sided(warped_template, gt_sdf)
-        loss = loss_seg + loss_sdf
-
-        components = {
-            "loss_seg": loss_seg,
-            "loss_sdf": loss_sdf,
-        }
-
-        logs = _compute_grad_interaction_logs(
-            loss1=loss_seg,
-            loss2=loss_sdf,
-            grad_refs=[pred_mask_logits],
-        )
-
-        return LossResult(total=loss, components=components, logs=logs)
 
 
-class CrossEntrOnly(ProjectLossComputer):
+class CrossEntrOnly(CompositeLossComputer):
     """
     both losses (warped template vs binary mask) and (segmentation logits vs binary mask) are computed using cross entropy loss
     """
 
     def __init__(self, num_classes=3, seg_loss_weight=1.0, template_loss_weight=1.0):
-        super().__init__()
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationCrossEntropyTerm()),
+                (template_loss_weight, RegistrationCrossEntropyTerm()),
+            ]
+        )
         # Kept for constructor backward compatibility; IoU now lives in metric computers.
         self.num_classes = num_classes
         self.seg_loss_weight = seg_loss_weight
         self.template_loss_weight = template_loss_weight
-        self._cross_entropy = RawMaskCrossEntropyLoss()
-
-    def compute(self, loss_input: LossInput) -> LossResult:
-        gt_mask = loss_input.gt_mask
-        pred_mask_logits = loss_input.segmentation_logits
-        warped_template = loss_input.warped_template
-
-        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
-        assert warped_template is not None, "warped_template is required for loss computation"
-        assert gt_mask is not None, "gt_mask is required for loss computation"
-
-        # Convert probabilities to log-space logits while staying numerically stable.
-        warped_template_logits = torch.log(warped_template.clamp_min(1e-8))
-
-        loss_seg = self.seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)
-        loss_template = self.template_loss_weight * self._cross_entropy(warped_template_logits, gt_mask)
-        loss = loss_seg + loss_template
-
-        components = {
-            "loss_seg": loss_seg,
-            "loss_template": loss_template,
-        }
-
-        logs = _compute_grad_interaction_logs(
-            loss1=loss_seg,
-            loss2=loss_template,
-            grad_refs=[pred_mask_logits],
-        )
-
-        return LossResult(total=loss, components=components, logs=logs)
 
 
-class OneSideOnly(ProjectLossComputer):
+class OneSideOnly(CompositeLossComputer):
     """
     both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
     """
 
     def __init__(self, num_classes=3, seg_loss_weight=1.0, sdf_loss_weight=1.0, ):
-        super().__init__()
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationOneSideSDFTerm()),
+                (sdf_loss_weight, RegistrationOneSideSDFTerm()),
+            ]
+        )
         """
         both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
         """
@@ -259,168 +231,51 @@ class OneSideOnly(ProjectLossComputer):
         self.num_classes = num_classes
         self.seg_loss_weight = seg_loss_weight
         self.sdf_loss_weight = sdf_loss_weight
-        self._one_sided = OneSideSDFSquare()
-
-    def compute(self, loss_input: LossInput) -> LossResult:
-        gt_sdf = loss_input.gt_mask_sdf
-        pred_mask_logits = loss_input.segmentation_logits
-        warped_template = loss_input.warped_template
-
-        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
-        assert warped_template is not None, "warped_template is required for loss computation"
-        assert gt_sdf is not None, "gt_mask_sdf is required for loss computation"
-
-        pred_mask_probs = torch.softmax(pred_mask_logits, dim=1)
-
-        loss_seg = self.seg_loss_weight * self._one_sided(pred_mask_probs, gt_sdf)
-        loss_sdf = self.sdf_loss_weight * self._one_sided(warped_template, gt_sdf)
-        loss = loss_seg + loss_sdf
-
-        components = {
-            "loss_seg": loss_seg,
-            "loss_sdf": loss_sdf,
-        }
-
-        logs = _compute_grad_interaction_logs(
-            loss1=loss_seg,
-            loss2=loss_sdf,
-            grad_refs=[pred_mask_logits],
-        )
-
-        return LossResult(total=loss, components=components, logs=logs)
 
 
-class CentroidComputer(ProjectLossComputer):
+class CentroidComputer(CompositeLossComputer):
     """
     Compute the centroid of the warped template and compare it to the centroid of the ground truth mask.
     """
     def __init__(self, centroid_loss_weight=1.0):
-        super().__init__()
+        super().__init__(
+            terms=[
+                (1.0, SegmentationCrossEntropyTerm()),
+                (centroid_loss_weight, RegistrationCentroidTerm()),
+            ]
+        )
         self._seg_loss_weight = 1.0
         self.centroid_loss_weight = centroid_loss_weight
-        self._centroid = CentroidLoss()
-        self._cross_entropy = RawMaskCrossEntropyLoss()
-        
-    def compute(self, loss_input: LossInput) -> LossResult:
-        gt_mask = loss_input.gt_mask
-        pred_mask_logits = loss_input.segmentation_logits
-        warped_template = loss_input.warped_template
-
-        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
-        assert warped_template is not None, "warped_template is required for loss computation"
-        assert gt_mask is not None, "gt_mask is required for loss computation"
-
-        loss_seg = self._seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)
-        loss_centroid = self.centroid_loss_weight * self._centroid(warped_template, gt_mask)
-        loss = loss_seg + loss_centroid
-
-        components = {
-            "loss_seg": loss_seg,
-            "loss_centroid": loss_centroid,
-        }
-
-        logs = _compute_grad_interaction_logs(
-            loss1=loss_seg,
-            loss2=loss_centroid,
-            grad_refs=[pred_mask_logits],
-        )
-
-        return LossResult(total=loss, components=components, logs=logs)
 
 
 
 
-class DSDFComputer(ProjectLossComputer):
+class DSDFComputer(CompositeLossComputer):
     """
     differeniable sign distance function computer
     """
     def __init__(self, reg_loss_weight=1.0, sdf_clip: float | None = None):
-        super().__init__()
+        super().__init__(
+            terms=[
+                (1.0, SegmentationCrossEntropyTerm()),
+                (reg_loss_weight, RegistrationDSDFMSETerm(sdf_clip=sdf_clip)),
+            ]
+        )
         self.seg_loss_weight = 1.0
         self.reg_loss_weight = reg_loss_weight
-        if sdf_clip is not None and sdf_clip <= 0:
-            raise ValueError(f"sdf_clip must be positive or None, got {sdf_clip}")
         self.sdf_clip = sdf_clip
-        self._reg_loss = torch.nn.MSELoss()
-        self._cross_entropy = RawMaskCrossEntropyLoss()
-        
-    def compute(self, loss_input: LossInput) -> LossResult:
-        gt_sdf = loss_input.gt_mask_sdf
-        gt_mask = loss_input.gt_mask
-        pred_mask_logits = loss_input.segmentation_logits
-        warped_template = loss_input.warped_template
-
-        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
-        assert warped_template is not None, "warped_template is required for loss computation"
-        assert gt_sdf is not None, "gt_sdf is required for loss computation"
-        assert gt_mask is not None, "gt_mask is required for loss computation"
-
-        loss_seg = self.seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)
 
 
-        warped_template_sdf = signed_distance_kornia_differentiable(warped_template)
-        if self.sdf_clip is not None:
-            warped_template_sdf = warped_template_sdf.clamp(-self.sdf_clip, self.sdf_clip)
-            gt_sdf = gt_sdf.clamp(-self.sdf_clip, self.sdf_clip)
-        loss_reg = self.reg_loss_weight * self._reg_loss(warped_template_sdf, gt_sdf)
-        loss = loss_seg + loss_reg
-        components = {
-            "loss_seg": loss_seg,
-            "loss_MSE": loss_reg,
-        }
-
-        logs = _compute_grad_interaction_logs(
-            loss1=loss_seg,
-            loss2=loss_reg,
-            grad_refs=[pred_mask_logits],
-        )
-        branch_logs = _compute_grad_norm_logs(
-            loss=loss_reg,
-            grad_refs=[warped_template],
-            prefix="loss_MSE/warped_template",
-        )
-        if branch_logs:
-            logs = logs or {}
-            logs.update(branch_logs)
-
-        return LossResult(total=loss, components=components, logs=logs)
-
-
-class BlurredMSEComputer(ProjectLossComputer):
+class BlurredMSEComputer(CompositeLossComputer):
     def __init__(self, blur_sigma=1.0, reduction="mean"):
-        super().__init__()
+        super().__init__(
+            terms=[
+                (1.0, SegmentationCrossEntropyTerm()),
+                (1.0, RegistrationBlurredMSETerm(blur_sigma=blur_sigma, reduction=reduction)),
+            ]
+        )
         self.blur_sigma = blur_sigma
         self.reduction = reduction
-        self._blurred_mse_loss = BlurredMSELoss(sigma=blur_sigma, reduction=reduction)
-        self._cross_entropy = RawMaskCrossEntropyLoss()
         self.seg_loss_weight = 1.0
         self.reg_loss_weight = 1.0
-
-
-    def compute(self, loss_input: LossInput) -> LossResult:
-        gt_mask = loss_input.gt_mask
-        pred_mask_logits = loss_input.segmentation_logits
-        warped_template = loss_input.warped_template
-
-        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
-        assert warped_template is not None, "warped_template is required for loss computation"
-        assert gt_mask is not None, "gt_mask is required for loss computation"
-        
-
-        loss_seg = self.seg_loss_weight * self._cross_entropy(pred_mask_logits, gt_mask)
-      
-        loss_reg = self.reg_loss_weight * self._blurred_mse_loss(warped_template, gt_mask)
-        loss = loss_seg + loss_reg
-        components = {
-            "loss_seg": loss_seg,
-            "loss_blurred_mse": loss_reg,
-        }
-
-        logs = _compute_grad_interaction_logs(
-            loss1=loss_seg,
-            loss2=loss_reg,
-            grad_refs=[pred_mask_logits],
-        )
-
-        return LossResult(total=loss, components=components, logs=logs)
 

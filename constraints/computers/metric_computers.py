@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import cast
 
 import torch
@@ -7,6 +8,28 @@ from torchmetrics.functional.classification import multiclass_jaccard_index
 
 from ..types import MetricInput, MetricResult, WandbOverlay
 from ..visu.helpers import to_label_map
+
+
+@dataclass(frozen=True)
+class LabelTriplet:
+    segmentation: torch.Tensor
+    registration: torch.Tensor
+    ground_truth: torch.Tensor
+
+
+def _label_triplet(metric_input: MetricInput) -> LabelTriplet | None:
+    pred_mask_logits = metric_input.segmentation_logits
+    warped_template = metric_input.warped_template
+    gt_mask = metric_input.gt_mask
+
+    if pred_mask_logits is None or warped_template is None or gt_mask is None:
+        return None
+
+    return LabelTriplet(
+        segmentation=to_label_map(pred_mask_logits),
+        registration=to_label_map(warped_template),
+        ground_truth=to_label_map(gt_mask),
+    )
 
 
 class MetricComputer(nn.Module, ABC):
@@ -82,34 +105,27 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
         self.num_classes = int(num_classes)
 
     def compute(self, metric_input: MetricInput) -> MetricResult:
-        pred_mask_logits = metric_input.segmentation_logits
-        warped_template = metric_input.warped_template
-        gt_mask = metric_input.gt_mask
-
-        if pred_mask_logits is None or warped_template is None or gt_mask is None:
+        labels = _label_triplet(metric_input)
+        if labels is None:
             return MetricResult()
 
-        pred_labels = to_label_map(pred_mask_logits)
-        warped_labels = to_label_map(warped_template)
-        gt_labels = to_label_map(gt_mask)
-
         iou_pred_vs_gt = multiclass_jaccard_index(
-            preds=pred_labels,
-            target=gt_labels,
+            preds=labels.segmentation,
+            target=labels.ground_truth,
             num_classes=self.num_classes,
             average="macro",
         )
         iou_warped_vs_gt = multiclass_jaccard_index(
-            preds=warped_labels,
-            target=gt_labels,
+            preds=labels.registration,
+            target=labels.ground_truth,
             num_classes=self.num_classes,
             average="macro",
         )
 
         return MetricResult(
             logs={
-                "iou/pred_vs_gt": iou_pred_vs_gt,
-                "iou/warped_vs_gt": iou_warped_vs_gt,
+                "segmentation/iou/pred_vs_gt": iou_pred_vs_gt,
+                "registration/iou/warped_vs_gt": iou_warped_vs_gt,
             }
         )
 
@@ -199,18 +215,15 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         if not self.should_compute(metric_input):
             return MetricResult()
 
-        pred_mask_logits = metric_input.segmentation_logits
-        warped_template = metric_input.warped_template
-        gt_mask = metric_input.gt_mask
-
-        if pred_mask_logits is None or warped_template is None or gt_mask is None:
+        labels = _label_triplet(metric_input)
+        if labels is None:
             return MetricResult()
 
-        gt_labels = to_label_map(gt_mask)
-        warped_labels = to_label_map(warped_template)
-        pred_labels = to_label_map(pred_mask_logits)
-
-        batch_size = min(gt_labels.shape[0], warped_labels.shape[0], pred_labels.shape[0])
+        batch_size = min(
+            labels.ground_truth.shape[0],
+            labels.registration.shape[0],
+            labels.segmentation.shape[0],
+        )
         if batch_size <= 0:
             return MetricResult()
 
@@ -219,9 +232,9 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
             if sample_idx >= batch_size:
                 continue
 
-            gt_sample = gt_labels[sample_idx].detach().cpu().long()
-            warped_sample = warped_labels[sample_idx].detach().cpu().long()
-            pred_sample = pred_labels[sample_idx].detach().cpu().long()
+            gt_sample = labels.ground_truth[sample_idx].detach().cpu().long()
+            warped_sample = labels.registration[sample_idx].detach().cpu().long()
+            pred_sample = labels.segmentation[sample_idx].detach().cpu().long()
 
             inferred_classes = int(
                 max(gt_sample.max().item(), warped_sample.max().item(), pred_sample.max().item()) + 1
