@@ -27,6 +27,44 @@ ROT_ONLY = AffineSampleBound(
 SMALL = AffineSampleBound(
     dx_min=-0.08, dx_max=0.08, dy_min=-0.08, dy_max=0.08, angle_min=-np.pi / 18, angle_max=np.pi / 18
 )
+NO_AFFINE = AffineSampleBound(
+    dx_min=0, dx_max=0, dy_min=0, dy_max=0, angle_min=0, angle_max=0
+)
+
+
+def _sample_affine_matrix(
+    sample_specs: AffineSampleBound,
+    rng: np.random.Generator,
+) -> torch.Tensor:
+    random_theta = rng.uniform(sample_specs.angle_min, sample_specs.angle_max)
+    random_dx = rng.uniform(sample_specs.dx_min, sample_specs.dx_max)
+    random_dy = rng.uniform(sample_specs.dy_min, sample_specs.dy_max)
+    return torch.tensor(
+        [
+            [np.cos(random_theta), -np.sin(random_theta), random_dx],
+            [np.sin(random_theta), np.cos(random_theta), random_dy],
+        ],
+        dtype=torch.float32,
+    ).unsqueeze(0)
+
+
+def _apply_affine(template: torch.Tensor, affine_matrix: torch.Tensor) -> torch.Tensor:
+    batched_template = template.unsqueeze(0)
+    grid = F.affine_grid(
+        affine_matrix,
+        list(batched_template.size()),
+        align_corners=False,
+    )
+    return F.grid_sample(
+        batched_template,
+        grid,
+        mode="bilinear",
+        align_corners=False,
+    ).squeeze(0)
+
+
+def _mask_to_image(mask: torch.Tensor) -> torch.Tensor:
+    return (mask[0] * 0.2) + (mask[1] * 0.4) + (mask[2] * 0.7)
 
 
 class ArteryGeneratorAffine(Dataset):
@@ -80,37 +118,10 @@ class ArteryGeneratorAffine(Dataset):
         idx = int(idx)
         if idx < 0 or idx >= self.num_samples:
             raise IndexError("Index out of range for the dataset.")
-        # Generate a distinct random spatial offset for this training instance
-        # Random rotation between -pi and +pi
         rng = np.random.default_rng(self._sample_seed(idx, stream=0))
-        random_theta = rng.uniform(
-            self.sample_specs.angle_min, self.sample_specs.angle_max
-        )
-        random_dx = rng.uniform(self.sample_specs.dx_min, self.sample_specs.dx_max)
-        random_dy = rng.uniform(self.sample_specs.dy_min, self.sample_specs.dy_max)
-        # Build the exact affine target matrix
-        affine_matrix = torch.tensor(
-            [
-                [np.cos(random_theta), -np.sin(random_theta), random_dx],
-                [np.sin(random_theta), np.cos(random_theta), random_dy],
-            ],
-            dtype=torch.float32,
-        ).unsqueeze(0)
-
-        # Warp the canonical template to form our unique Target Ground Truth Mask
-        grid = F.affine_grid(
-            affine_matrix, list(self.template.unsqueeze(0).size()), align_corners=False
-        )
-        target_mask = F.grid_sample(
-            self.template.unsqueeze(0),
-            grid,
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)
-
-        # Create a synthetic ultrasound scan out of the ground truth channels
-        # Wall is grey, plaque is brighter/textured, background has speckle noise
-        img = (target_mask[0] * 0.2) + (target_mask[1] * 0.4) + (target_mask[2] * 0.7)
+        affine_matrix = _sample_affine_matrix(self.sample_specs, rng)
+        target_mask = _apply_affine(self.template, affine_matrix)
+        img = _mask_to_image(target_mask)
 
         # Apply deterministic ultrasound speckle noise in-memory.
         if self.speckle is not None:
@@ -143,6 +154,7 @@ class ArteryGeneratorDeformed(Dataset):
         num_samples=1000,
         img_size=(256, 256),
         template: torch.Tensor | None = None,
+        sample_specs: AffineSampleBound = NO_AFFINE,
         scales: float | int | list[float] = 10,
         magnitude: float = 3.0,
         integrations: int = 0,
@@ -166,12 +178,13 @@ class ArteryGeneratorDeformed(Dataset):
             ).squeeze(0)
         self.template = self.template.contiguous()
         self._batched_template = self.template.unsqueeze(0)
-        self.scales = scales
+        self.scales: float | int | list[float] = scales
         self.magnitude = magnitude
         self.integrations = integrations
+        self.sample_specs: AffineSampleBound = sample_specs
         self.fixed_seed = fixed_seed
         self.speckle = speckle
-        self.fractal_mode = fractal_mode
+        self.fractal_mode: Literal["blur", "upsample"] = fractal_mode
 
     def _sample_seed(self, idx: int, stream: int = 0) -> int:
         """Derive a deterministic, stream-specific seed for this sample."""
@@ -189,7 +202,10 @@ class ArteryGeneratorDeformed(Dataset):
         if idx < 0 or idx >= self.num_samples:
             raise IndexError("Index out of range for the dataset.")
 
-        batched_template = self._batched_template  # Shape: [1, C, H, W]
+        rng = np.random.default_rng(self._sample_seed(idx, stream=2))
+        affine_matrix = _sample_affine_matrix(self.sample_specs, rng)
+        affine_template = _apply_affine(self.template, affine_matrix).contiguous()
+        batched_template = affine_template.unsqueeze(0)  # Shape: [1, C, H, W]
         trf_seed = self._sample_seed(idx, stream=0)
         # Keep per-sample randomness deterministic without mutating global RNG state.
         with torch.random.fork_rng(devices=[]):
@@ -202,7 +218,7 @@ class ArteryGeneratorDeformed(Dataset):
                 fractal_mode=self.fractal_mode,
             )
         target_mask = spatial_transform(batched_template, field, isdisp=True).squeeze(0)
-        img = (target_mask[0] * 0.2) + (target_mask[1] * 0.4) + (target_mask[2] * 0.7)
+        img = _mask_to_image(target_mask)
 
         # Apply deterministic ultrasound speckle noise in-memory.
         if self.speckle is not None:
@@ -222,4 +238,5 @@ class ArteryGeneratorDeformed(Dataset):
             "mask": target_mask,  # Shape: [C, H, W]
             "template": self.template,  # Shape: [C, H, W]
             "field": field.squeeze(0),  # Shape: [2, H, W]
+            "affine": affine_matrix.squeeze(0),  # Shape: [2, 3]
         }
