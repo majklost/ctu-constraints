@@ -1,12 +1,29 @@
 #!/bin/bash
-#SBATCH --job-name=dl_job
+#SBATCH --job-name=artificial_data
 #SBATCH --partition=cpu
-#SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
-#SBATCH --time=12:00:00
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=32G
+#SBATCH --time=24:00:00
 #SBATCH --output=slurm/slurm-%j.out
 #SBATCH --error=slurm/slurm-%j.err
 
+set -euo pipefail
+
 PROJECT_DIR="/mnt/personal/mrkosmic/synced/constraints"
-cd ${PROJECT_DIR}
-make both
+cd "${PROJECT_DIR}"
+. ./load_env.sh
+
+mkdir -p slurm
+
+MAKE_JOBS=${MAKE_JOBS:-3}
+THREADS_PER_JOB=$((SLURM_CPUS_PER_TASK / MAKE_JOBS))
+if [ "${THREADS_PER_JOB}" -lt 1 ]; then
+	THREADS_PER_JOB=1
+fi
+
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-${THREADS_PER_JOB}}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-${THREADS_PER_JOB}}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-${THREADS_PER_JOB}}
+
+echo "Running artificial dataset generation with MAKE_JOBS=${MAKE_JOBS}, OMP_NUM_THREADS=${OMP_NUM_THREADS}"
+make -j "${MAKE_JOBS}" all PYTHON="python -u"

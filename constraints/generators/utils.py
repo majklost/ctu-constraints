@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from ..datatools.datasets import artificial_foreground_mask_to_explicit
+
 
 def create_one_hot_ellipses_masks(height, width, ellipses_list) -> np.ndarray:
     """
@@ -38,7 +40,7 @@ def create_one_hot_ellipses_masks(height, width, ellipses_list) -> np.ndarray:
 
 
 def get_standard_mask() -> torch.Tensor:
-    return (
+    foreground_mask = (
         torch.tensor(
             create_one_hot_ellipses_masks(
                 256,
@@ -46,7 +48,7 @@ def get_standard_mask() -> torch.Tensor:
                 [
                     {
                         "center": (128, 128),
-                        "axes": (78, 78),
+                        "axes": (85, 85),
                         "class_id": 0,
                     },  # Red ellipse
                     {
@@ -78,3 +80,4 @@ def get_standard_mask() -> torch.Tensor:
         .float()
         / 255.0
     )
+    return artificial_foreground_mask_to_explicit(foreground_mask)

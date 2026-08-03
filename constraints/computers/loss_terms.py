@@ -3,9 +3,23 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 
-from ..losses import BlurredMSELoss, CentroidLoss, OneSideSDFSquare, RawMaskCrossEntropyLoss
+from ..datatools.datasets import (
+    ARTIFICIAL_MASK_NUM_CLASSES,
+    ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS,
+)
+from ..losses_metrics import BlurredMSELoss, CentroidLoss, OneSideSDFSquare, RawMaskCrossEntropyLoss
 from ..types import LossInput
 from ..utils import signed_distance_kornia_differentiable
+
+
+def _require_channels(tensor: torch.Tensor, expected_channels: int, name: str) -> None:
+    if tensor.ndim != 4:
+        raise ValueError(f"{name} must have shape [B, C, H, W], got {tuple(tensor.shape)}")
+    if tensor.shape[1] != expected_channels:
+        raise ValueError(
+            f"{name} must have {expected_channels} channels, got {tensor.shape[1]} "
+            f"with shape {tuple(tensor.shape)}"
+        )
 
 
 def _compute_grad_norm_logs(
@@ -77,6 +91,8 @@ class SegmentationCrossEntropyTerm(LossTerm):
 
         assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
         assert gt_mask is not None, "gt_mask is required for loss computation"
+        _require_channels(pred_mask_logits, ARTIFICIAL_MASK_NUM_CLASSES, "segmentation_logits")
+        _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
 
         return self._cross_entropy(pred_mask_logits, gt_mask)
 
@@ -92,8 +108,11 @@ class SegmentationOneSideSDFTerm(LossTerm):
 
         assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
         assert gt_sdf is not None, "gt_mask_sdf is required for loss computation"
+        _require_channels(pred_mask_logits, ARTIFICIAL_MASK_NUM_CLASSES, "segmentation_logits")
+        _require_channels(gt_sdf, ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS, "gt_mask_sdf")
 
         pred_mask_probs = torch.softmax(pred_mask_logits, dim=1)
+        pred_mask_probs = pred_mask_probs[:, 1:]
         return self._one_sided(pred_mask_probs, gt_sdf)
 
 
@@ -108,7 +127,10 @@ class RegistrationOneSideSDFTerm(LossTerm):
 
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_sdf is not None, "gt_mask_sdf is required for loss computation"
+        _require_channels(warped_template, ARTIFICIAL_MASK_NUM_CLASSES, "warped_template")
+        _require_channels(gt_sdf, ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS, "gt_mask_sdf")
 
+        warped_template = warped_template[:, 1:]
         return self._one_sided(warped_template, gt_sdf)
 
 
@@ -123,6 +145,8 @@ class RegistrationCrossEntropyTerm(LossTerm):
 
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_mask is not None, "gt_mask is required for loss computation"
+        _require_channels(warped_template, ARTIFICIAL_MASK_NUM_CLASSES, "warped_template")
+        _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
 
         warped_template_logits = torch.log(warped_template.clamp_min(1e-8))
         return self._cross_entropy(warped_template_logits, gt_mask)
@@ -139,6 +163,8 @@ class RegistrationCentroidTerm(LossTerm):
 
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_mask is not None, "gt_mask is required for loss computation"
+        _require_channels(warped_template, ARTIFICIAL_MASK_NUM_CLASSES, "warped_template")
+        _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
 
         return self._centroid(warped_template, gt_mask)
 
@@ -157,8 +183,10 @@ class RegistrationDSDFMSETerm(LossTerm):
 
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_sdf is not None, "gt_sdf is required for loss computation"
+        _require_channels(warped_template, ARTIFICIAL_MASK_NUM_CLASSES, "warped_template")
+        _require_channels(gt_sdf, ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS, "gt_sdf")
 
-        warped_template_sdf = signed_distance_kornia_differentiable(warped_template)
+        warped_template_sdf = signed_distance_kornia_differentiable(warped_template[:, 1:])
         if self.sdf_clip is not None:
             warped_template_sdf = warped_template_sdf.clamp(-self.sdf_clip, self.sdf_clip)
             gt_sdf = gt_sdf.clamp(-self.sdf_clip, self.sdf_clip)
@@ -189,5 +217,7 @@ class RegistrationBlurredMSETerm(LossTerm):
 
         assert warped_template is not None, "warped_template is required for loss computation"
         assert gt_mask is not None, "gt_mask is required for loss computation"
+        _require_channels(warped_template, ARTIFICIAL_MASK_NUM_CLASSES, "warped_template")
+        _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
 
         return self._blurred_mse_loss(warped_template, gt_mask)

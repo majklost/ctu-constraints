@@ -1,9 +1,12 @@
-import segmentation_models_pytorch as smp
+from typing import cast
+
 import torch
 import timm
+from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
 from .composed import SegmentationRegistrationModel
 from .helpers import RigidTransformHead
 from ..types import RigidParams, TransformSpec
+from .segmentator import get_learned_segmentator
 
 
 class TwoBranch(torch.nn.Module):
@@ -11,7 +14,7 @@ class TwoBranch(torch.nn.Module):
         super().__init__()
         raise ValueError("TwoBranch is deprecated.")
         self.unet = smp.Unet(
-            "resnet18", encoder_weights="imagenet", in_channels=1, classes=3
+            "resnet18", encoder_weights="imagenet", in_channels=1, classes=ARTIFICIAL_MASK_NUM_CLASSES
         )
         # keep it simple - linear layer to each layer of the UNET encoder
         self.projector = torch.nn.LazyConv2d(64, kernel_size=1)
@@ -42,7 +45,7 @@ class AffineRegistrationNet(torch.nn.Module):
         self.encoder = timm.create_model(
             'resnet34',
             pretrained=True,
-            in_chans=6,
+            in_chans=2 * ARTIFICIAL_MASK_NUM_CLASSES,
             num_classes=0,
             global_pool='avg',
         )
@@ -67,9 +70,7 @@ class ProjectWithTemplateA(SegmentationRegistrationModel):
     ===
     """
     def __init__(self, max_translation=0.3):
-        segmentation_net = smp.Unet(
-            "resnet18", encoder_weights="imagenet", in_channels=1, classes=3
-        )
+        segmentation_net = get_learned_segmentator()
         super().__init__(
             segmentation_net=segmentation_net,
             registration_net=AffineRegistrationNet(max_translation=max_translation),
@@ -82,8 +83,10 @@ class ProjectWithTemplateA(SegmentationRegistrationModel):
 
     @property
     def encoder(self) -> torch.nn.Module:
-        return self.registration_net.encoder
+        registration_net = cast(AffineRegistrationNet, self.registration_net)
+        return registration_net.encoder
 
     @property
     def TransformHead(self) -> RigidTransformHead:
-        return self.registration_net.transform_head
+        registration_net = cast(AffineRegistrationNet, self.registration_net)
+        return registration_net.transform_head

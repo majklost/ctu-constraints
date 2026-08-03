@@ -76,8 +76,8 @@ def signed_distance_scipy(
 
     Returns:
         sdf: Signed distance field matching the input type and shape.
-             > 0 inside the object
-             < 0 outside the object
+             < 0 inside the object
+             > 0 outside the object
              0 on the boundary
     """
     if isinstance(mask, torch.Tensor):
@@ -102,9 +102,9 @@ def signed_distance_scipy(
         # Apply scipy EDT independently over spatial dimensions
         for i in range(np_mask.shape[0]):
             m = np_mask[i]
-            inside = np.asarray(ndimage.distance_transform_edt(~m), dtype=np.float32)
-            outside = np.asarray(ndimage.distance_transform_edt(m), dtype=np.float32)
-            sdf[i] = inside - outside
+            outside = np.asarray(ndimage.distance_transform_edt(~m), dtype=np.float32)
+            inside = np.asarray(ndimage.distance_transform_edt(m), dtype=np.float32)
+            sdf[i] = outside - inside
 
         # Reshape back to original torch shape and push back to original device
         sdf = sdf.reshape(original_shape)
@@ -151,8 +151,8 @@ def signed_distance_kornia(
 
     Returns:
         sdf: Signed distance field matching the input type and shape.
-             > 0 inside the object
-             < 0 outside the object
+             < 0 inside the object
+             > 0 outside the object
              0 on the boundary
     """
     if isinstance(mask, torch.Tensor):
@@ -170,7 +170,9 @@ def signed_distance_kornia(
         if mask.ndim == 3:
             torch_mask = torch_mask.unsqueeze(0)
 
-        sdf = kornia_distance_transform(torch_mask)
+        outside = kornia_distance_transform(torch_mask)
+        inside = kornia_distance_transform(1.0 - torch_mask)
+        sdf = outside - inside
 
         if mask.ndim == 3:
             sdf = sdf.squeeze(0)
@@ -185,9 +187,11 @@ def signed_distance_kornia(
 
         np_mask = mask.astype(np.float32)
         torch_mask = torch.from_numpy(np_mask).permute(2, 0, 1).unsqueeze(0)
-        sdf = kornia_distance_transform(torch_mask)
+        outside = kornia_distance_transform(torch_mask)
+        inside = kornia_distance_transform(1.0 - torch_mask)
+        sdf = outside - inside
         sdf = sdf.squeeze(0).permute(1, 2, 0).numpy()
-        return sdf.cpu().numpy().astype(np.float32)
+        return sdf.astype(np.float32)
 
     else:
         raise TypeError(f"Input must be np.ndarray or torch.Tensor, got {type(mask)}")
@@ -202,7 +206,9 @@ def signed_distance_kornia_differentiable(mask: torch.Tensor) -> torch.Tensor:
     if squeeze_back:
         torch_mask = torch_mask.unsqueeze(0)
 
-    sdf = kornia_distance_transform(torch_mask)
+    outside = kornia_distance_transform(torch_mask)
+    inside = kornia_distance_transform(1.0 - torch_mask)
+    sdf = outside - inside
 
     if squeeze_back:
         sdf = sdf.squeeze(0)

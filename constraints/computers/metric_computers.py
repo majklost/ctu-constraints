@@ -6,6 +6,11 @@ import torch
 from torch import nn
 from torchmetrics.functional.classification import multiclass_jaccard_index
 
+from ..datatools.datasets import (
+    ARTIFICIAL_MASK_CLASS_LABELS,
+    ARTIFICIAL_MASK_NUM_CLASSES,
+    artificial_mask_to_label_map,
+)
 from ..types import MetricInput, MetricResult, WandbOverlay
 from ..visu.helpers import to_label_map
 
@@ -27,8 +32,8 @@ def _label_triplet(metric_input: MetricInput) -> LabelTriplet | None:
 
     return LabelTriplet(
         segmentation=to_label_map(pred_mask_logits),
-        registration=to_label_map(warped_template),
-        ground_truth=to_label_map(gt_mask),
+        registration=artificial_mask_to_label_map(warped_template),
+        ground_truth=artificial_mask_to_label_map(gt_mask),
     )
 
 
@@ -97,7 +102,7 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
 
     def __init__(
         self,
-        num_classes: int = 3,
+        num_classes: int = ARTIFICIAL_MASK_NUM_CLASSES,
     ) -> None:
         super().__init__()
         if num_classes <= 0:
@@ -169,6 +174,8 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         class_count = inferred_num_classes
         if self.num_classes is not None:
             class_count = max(class_count, int(self.num_classes))
+        if class_count == ARTIFICIAL_MASK_NUM_CLASSES:
+            return ARTIFICIAL_MASK_CLASS_LABELS
         return {idx: f"class_{idx}" for idx in range(max(class_count, 1))}
 
     def _prepare_background_image(
@@ -275,7 +282,7 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
 
     def __init__(
         self,
-        num_classes: int = 3,
+        num_classes: int = ARTIFICIAL_MASK_NUM_CLASSES,
         overlay_val_stage: str = "val",
         overlay_train_stage: str = "train",
         overlay_every_n_epochs: int = 1,

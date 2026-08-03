@@ -10,10 +10,14 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from constraints.datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
 from constraints.generators.generators import (
     ArteryGeneratorAffine,
     ArteryGeneratorDeformed,
-    AffineSampleBound,ROT_ONLY,SMALL
+    AffineSampleBound,
+    NO_AFFINE,
+    ROT_ONLY,
+    SMALL,
 )
 from constraints.utils import (
     save_manifest,
@@ -22,8 +26,10 @@ from constraints.utils import (
 )
 
 
-def _to_numpy(tensor: torch.Tensor) -> np.ndarray:
-    return tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+def _to_numpy(array: torch.Tensor | np.ndarray) -> np.ndarray:
+    if isinstance(array, torch.Tensor):
+        array = array.detach().cpu().numpy()
+    return array.astype(np.float32, copy=False)
 
 
 def _prepare_files(
@@ -47,17 +53,27 @@ def _save_template(output_dir: Path, template: torch.Tensor):
     np.save(output_dir / "template.npy", _to_numpy(template))
 
 
-def create_affine(args) -> None:
-    affine_mode = args.affine_mode
+def _foreground_channels(mask: torch.Tensor) -> torch.Tensor:
+    if mask.shape[0] == ARTIFICIAL_MASK_NUM_CLASSES:
+        return mask[1:]
+    return mask
+
+
+def _resolve_affine_sample_specs(affine_mode: str) -> AffineSampleBound:
     if affine_mode == "rot":
-        sample_specs = ROT_ONLY
+        return ROT_ONLY
     elif affine_mode == "small":
-        sample_specs = SMALL
+        return SMALL
+    elif affine_mode == "large":
+        return AffineSampleBound()
+    elif affine_mode == "none":
+        return NO_AFFINE
     else:
-        sample_specs = None
+        raise ValueError(f"Unknown affine mode: {affine_mode}")
 
 
-
+def create_affine(args) -> None:
+    sample_specs = _resolve_affine_sample_specs(args.affine_mode)
     output_dir = Path(args.output_dir)
     dataset = ArteryGeneratorAffine(
         fixed_seed=args.seed,
@@ -69,6 +85,7 @@ def create_affine(args) -> None:
     first_sample = dataset[0]
     img_shape = tuple(first_sample["img"].shape)
     mask_shape = tuple(first_sample["mask"].shape)
+    sdf_shape = tuple(_foreground_channels(first_sample["mask"]).shape)
     affine_shape = tuple(first_sample["affine"].shape)
 
     category_shapes = {
@@ -77,9 +94,9 @@ def create_affine(args) -> None:
         "transform": affine_shape,
     }
     if args.sdf_type in ("scipy", "both"):
-        category_shapes["sdf_scipy"] = mask_shape
+        category_shapes["sdf_scipy"] = sdf_shape
     if args.sdf_type in ("kornia", "both"):
-        category_shapes["sdf_kornia"] = mask_shape
+        category_shapes["sdf_kornia"] = sdf_shape
 
     files = _prepare_files(output_dir, args.num_samples, category_shapes)
     _save_template(output_dir, first_sample["template"])
@@ -96,11 +113,12 @@ def create_affine(args) -> None:
         files["img"][idx] = _to_numpy(img)
         files["mask"][idx] = _to_numpy(mask)
         files["transform"][idx] = _to_numpy(affine)
+        foreground_mask = _foreground_channels(mask)
 
         if args.sdf_type in ("scipy", "both"):
-            files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(mask))
+            files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(foreground_mask))
         if args.sdf_type in ("kornia", "both"):
-            files["sdf_kornia"][idx] = _to_numpy(signed_distance_kornia(mask))
+            files["sdf_kornia"][idx] = _to_numpy(signed_distance_kornia(foreground_mask))
 
         if idx == 0 and template.shape != first_sample["template"].shape:
             raise RuntimeError("Template shape changed across samples unexpectedly.")
@@ -111,10 +129,12 @@ def create_affine(args) -> None:
 
 
 def create_deformed(args) -> None:
+    sample_specs = _resolve_affine_sample_specs(args.affine_mode)
     output_dir = Path(args.output_dir)
     dataset = ArteryGeneratorDeformed(
         num_samples=args.num_samples,
         fixed_seed=args.seed,
+        sample_specs=sample_specs,
         magnitude=7.0,
         integrations=2,
         scales=14,
@@ -125,6 +145,7 @@ def create_deformed(args) -> None:
     first_sample = dataset[0]
     img_shape = tuple(first_sample["img"].shape)
     mask_shape = tuple(first_sample["mask"].shape)
+    sdf_shape = tuple(_foreground_channels(first_sample["mask"]).shape)
     field_shape = tuple(first_sample["field"].shape)
 
     category_shapes = {
@@ -133,9 +154,9 @@ def create_deformed(args) -> None:
         "transform": field_shape,
     }
     if args.sdf_type in ("scipy", "both"):
-        category_shapes["sdf_scipy"] = mask_shape
+        category_shapes["sdf_scipy"] = sdf_shape
     if args.sdf_type in ("kornia", "both"):
-        category_shapes["sdf_kornia"] = mask_shape
+        category_shapes["sdf_kornia"] = sdf_shape
 
     files = _prepare_files(output_dir, args.num_samples, category_shapes)
     _save_template(output_dir, first_sample["template"])
@@ -152,11 +173,12 @@ def create_deformed(args) -> None:
         files["img"][idx] = _to_numpy(img)
         files["mask"][idx] = _to_numpy(mask)
         files["transform"][idx] = _to_numpy(field)
+        foreground_mask = _foreground_channels(mask)
 
         if args.sdf_type in ("scipy", "both"):
-            files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(mask))
+            files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(foreground_mask))
         if args.sdf_type in ("kornia", "both"):
-            files["sdf_kornia"][idx] = _to_numpy(signed_distance_kornia(mask))
+            files["sdf_kornia"][idx] = _to_numpy(signed_distance_kornia(foreground_mask))
 
         if idx == 0 and template.shape != first_sample["template"].shape:
             raise RuntimeError("Template shape changed across samples unexpectedly.")
@@ -197,8 +219,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--affine_mode",
         type=str,
-        choices=["rot","small","large"],
-        help="Mode for affine transformation",
+        choices=["none", "rot", "small", "large"],
+        help="Mode for affine transformation before optional deformation",
         default="large",
     )
 

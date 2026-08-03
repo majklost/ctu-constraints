@@ -16,7 +16,7 @@ from constraints.datatools.datasets import CachedArtificalDataset
 from constraints import get_experiment_folder, get_data_folder, show_torch_image
 from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
 from constraints.computers.loss_computers import BlurredMSEComputer, CentroidComputer, ProjectLossComputer, DSDFComputer
-from constraints.losses import OneSideSDFSquare
+from constraints.losses_metrics import OneSideSDFSquare
 from constraints.models.affine import ProjectWithTemplateA 
 from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.computers.loss_computers import CrossEntrAndOneSide, CrossEntrOnly,OneSideOnly

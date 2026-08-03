@@ -5,6 +5,16 @@ import torch
 import numpy as np
 
 
+def _as_torch_tensor(tensor: torch.Tensor | np.ndarray) -> torch.Tensor:
+    if isinstance(tensor, np.ndarray):
+        if not tensor.flags.writeable:
+            tensor = tensor.copy()
+
+        return torch.from_numpy(tensor)
+
+    return tensor
+
+
 def to_label_map(x: torch.Tensor) -> torch.Tensor:
     """Convert logits/one-hot/labels to a batched integer label map [B, H, W]."""
     if x.ndim == 4:
@@ -91,17 +101,12 @@ def build_labels_triplet_image(
 
 
 def show_torch_image(
-    tensor: torch.Tensor,
+    tensor: torch.Tensor | np.ndarray,
     title: str | None = None,
     cmap: str | None = None,
     save_path: Path | str | None = None,
 ):
-    #if numpy array convert to torch tensor
-    if isinstance(tensor, np.ndarray):
-        if not tensor.flags.writeable:
-            tensor = tensor.copy()
-
-        tensor = torch.from_numpy(tensor)
+    tensor = _as_torch_tensor(tensor)
     # 1. Prepare data safely
     image = tensor.detach().cpu().squeeze()
 
@@ -128,3 +133,28 @@ def show_torch_image(
     # 4. Explicitly display and close to free cluster node memory
     plt.show()
     plt.close(fig)
+
+
+def show_torch_mask(
+    mask: torch.Tensor | np.ndarray,
+    title: str | None = None,
+    sample_idx: int = 0,
+    num_classes: int | None = None,
+    save_path: Path | str | None = None,
+):
+    """Visualize a one-hot/logits/label mask with channel 0 as black background."""
+    mask = _as_torch_tensor(mask)
+    labels = to_label_map(mask)
+
+    batch_size = labels.shape[0]
+    if sample_idx < 0 or sample_idx >= batch_size:
+        raise IndexError(
+            f"sample_idx={sample_idx} out of range for effective batch size {batch_size}"
+        )
+
+    if num_classes is None and mask.ndim in (3, 4) and mask.dtype.is_floating_point:
+        channel_dim = 0 if mask.ndim == 3 else 1
+        num_classes = int(mask.shape[channel_dim])
+
+    rgb_mask = colorize_label_map(labels[sample_idx], num_classes=num_classes)
+    show_torch_image(rgb_mask, title=title, save_path=save_path)

@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
+from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
 from ..voxelmorph.utils import random_disp, spatial_transform
 from .utils import get_standard_mask
 
@@ -64,7 +65,18 @@ def _apply_affine(template: torch.Tensor, affine_matrix: torch.Tensor) -> torch.
 
 
 def _mask_to_image(mask: torch.Tensor) -> torch.Tensor:
+    if mask.shape[0] == ARTIFICIAL_MASK_NUM_CLASSES:
+        mask = mask[1:]
     return (mask[0] * 0.2) + (mask[1] * 0.4) + (mask[2] * 0.7)
+
+
+def _fill_missing_background(mask: torch.Tensor) -> torch.Tensor:
+    if mask.shape[0] != ARTIFICIAL_MASK_NUM_CLASSES:
+        return mask
+
+    mask = mask.clamp(0.0, 1.0)
+    missing_mass = (1.0 - mask.sum(dim=0, keepdim=True)).clamp_min(0.0)
+    return torch.cat([mask[0:1] + missing_mass, mask[1:]], dim=0).clamp(0.0, 1.0)
 
 
 class ArteryGeneratorAffine(Dataset):
@@ -120,7 +132,7 @@ class ArteryGeneratorAffine(Dataset):
             raise IndexError("Index out of range for the dataset.")
         rng = np.random.default_rng(self._sample_seed(idx, stream=0))
         affine_matrix = _sample_affine_matrix(self.sample_specs, rng)
-        target_mask = _apply_affine(self.template, affine_matrix)
+        target_mask = _fill_missing_background(_apply_affine(self.template, affine_matrix))
         img = _mask_to_image(target_mask)
 
         # Apply deterministic ultrasound speckle noise in-memory.
@@ -217,7 +229,7 @@ class ArteryGeneratorDeformed(Dataset):
                 integrations=self.integrations,
                 fractal_mode=self.fractal_mode,
             )
-        target_mask = spatial_transform(batched_template, field, isdisp=True).squeeze(0)
+        target_mask = _fill_missing_background(spatial_transform(batched_template, field, isdisp=True).squeeze(0))
         img = _mask_to_image(target_mask)
 
         # Apply deterministic ultrasound speckle noise in-memory.

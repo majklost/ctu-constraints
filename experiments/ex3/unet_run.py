@@ -11,8 +11,12 @@ from torchmetrics.functional.classification import multiclass_jaccard_index
 from pytorch_lightning.loggers import WandbLogger
 
 from constraints import get_experiment_folder, get_data_folder
-from constraints.datatools.datasets import CachedArtificalDataset
-from constraints.visu.helpers import to_label_map
+from constraints.datatools.datasets import (
+    ARTIFICIAL_MASK_CLASS_LABELS,
+    ARTIFICIAL_MASK_NUM_CLASSES,
+    CachedArtificalDataset,
+    artificial_mask_to_label_map,
+)
 import segmentation_models_pytorch as smp
 
 
@@ -24,15 +28,8 @@ WANDB_ENTITY = "ksicht"
 FILE_NAME = Path(__file__).stem
 
 
-CLASS_LABELS = {
-    0: "background",
-    1: "class_1",
-    2: "class_2",
-}
-
-
 class UnetProjectLightning(pl.LightningModule):
-    def __init__(self, learning_rate: float = 1e-3, num_classes: int = 3):
+    def __init__(self, learning_rate: float = 1e-3, num_classes: int = ARTIFICIAL_MASK_NUM_CLASSES):
         super().__init__()
         self.save_hyperparameters()
         self.learning_rate = learning_rate
@@ -88,11 +85,11 @@ class UnetProjectLightning(pl.LightningModule):
                         masks={
                             "ground_truth": {
                                 "mask_data": target_labels[sample_idx].detach().cpu().numpy().astype("int32"),
-                                "class_labels": CLASS_LABELS,
+                                "class_labels": ARTIFICIAL_MASK_CLASS_LABELS,
                             },
                             "predicted": {
                                 "mask_data": pred_labels[sample_idx].detach().cpu().numpy().astype("int32"),
-                                "class_labels": CLASS_LABELS,
+                                "class_labels": ARTIFICIAL_MASK_CLASS_LABELS,
                             },
                         },
                         caption=f"GT | pred | epoch={int(self.current_epoch)}",
@@ -104,7 +101,7 @@ class UnetProjectLightning(pl.LightningModule):
 
     def _shared_step(self, batch, batch_idx, stage: str):
         image = batch["image"]
-        target_labels = to_label_map(batch["mask"])
+        target_labels = artificial_mask_to_label_map(batch["mask"])
         logits = self.forward(image)
         loss = F.cross_entropy(logits, target_labels)
 

@@ -8,7 +8,7 @@ import torch
 from constraints import get_data_folder, get_experiment_folder
 from constraints.datatools import CachedArtificalDataset
 from constraints.datatools.datasets import Sample
-from constraints.losses import BlurredMSELoss, CentroidLoss, OneSideSDF, OneSideSDFSquare
+from constraints.losses_metrics import BlurredMSELoss, CentroidLoss, OneSideSDF, OneSideSDFSquare
 from constraints.transforms import differentiable_rigid
 
 FOLDER = get_experiment_folder(Path("ex3") / "affine_losscomp")

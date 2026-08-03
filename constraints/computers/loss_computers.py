@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 
+from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
 from ..types import LossInput, LossResult
 from .loss_terms import (
     LossTerm,
@@ -181,7 +182,7 @@ class CompositeLossComputer(ProjectLossComputer):
 
 
 class CrossEntrAndOneSide(CompositeLossComputer):
-    def __init__(self, num_classes=3, seg_loss_weight=20.0, sdf_loss_weight=1.0):
+    def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=20.0, sdf_loss_weight=1.0):
         super().__init__(
             terms=[
                 (seg_loss_weight, SegmentationCrossEntropyTerm()),
@@ -199,7 +200,7 @@ class CrossEntrOnly(CompositeLossComputer):
     both losses (warped template vs binary mask) and (segmentation logits vs binary mask) are computed using cross entropy loss
     """
 
-    def __init__(self, num_classes=3, seg_loss_weight=1.0, template_loss_weight=1.0):
+    def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=1.0, template_loss_weight=1.0):
         super().__init__(
             terms=[
                 (seg_loss_weight, SegmentationCrossEntropyTerm()),
@@ -217,7 +218,7 @@ class OneSideOnly(CompositeLossComputer):
     both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
     """
 
-    def __init__(self, num_classes=3, seg_loss_weight=1.0, sdf_loss_weight=1.0, ):
+    def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=1.0, sdf_loss_weight=1.0, ):
         super().__init__(
             terms=[
                 (seg_loss_weight, SegmentationOneSideSDFTerm()),

@@ -1,17 +1,17 @@
 from collections.abc import Sequence
 from typing import Any, Literal, cast
 
-import segmentation_models_pytorch as smp
+
 import torch
 import torch.nn.functional as nnf
-from segmentation_models_pytorch.base import SegmentationHead
-from segmentation_models_pytorch.decoders.unet.decoder import UnetDecoder
 
 
 from ..voxelmorph import modules
 from ..voxelmorph.models import VxmPairwise
+from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
 from ..types import FieldParams, TransformSpec
 from .composed import SegmentationRegistrationModel
+from .segmentator import get_learned_segmentator
 
 class TwoBranch(torch.nn.Module):
     """
@@ -36,7 +36,7 @@ class TwoBranch(torch.nn.Module):
     def __init__(
         self,
         source_channels: int = 1,
-        target_channels: int = 3,
+        target_channels: int = ARTIFICIAL_MASK_NUM_CLASSES,
         integration_steps: int = 5,
         nb_features: Sequence[int] = (16, 16, 16, 16, 16),
         encoder_name: str = "resnet18",
@@ -168,8 +168,8 @@ class DeformableRegistrationNet(torch.nn.Module):
         ]
         self.encoder = VxmPairwise(
             ndim=2,
-            source_channels=3,
-            target_channels=3,
+            source_channels=ARTIFICIAL_MASK_NUM_CLASSES,
+            target_channels=ARTIFICIAL_MASK_NUM_CLASSES,
             nb_features=nb_features,
         )
 
@@ -190,9 +190,7 @@ class ProjectWithTemplateD(SegmentationRegistrationModel):
     """
 
     def __init__(self) -> None:
-        segmentation_net = smp.Unet(
-            "resnet18", encoder_weights="imagenet", in_channels=1, classes=3
-        )
+        segmentation_net = get_learned_segmentator()
         super().__init__(
             segmentation_net=segmentation_net,
             registration_net=DeformableRegistrationNet(),
