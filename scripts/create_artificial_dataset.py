@@ -10,7 +10,10 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from constraints.datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
+from constraints.datatools.datasets import (
+    ARTIFICIAL_MASK_NUM_CLASSES,
+    write_bad_indices,
+)
 from constraints.generators.generators import (
     ArteryGeneratorAffine,
     ArteryGeneratorDeformed,
@@ -23,6 +26,7 @@ from constraints.utils import (
     save_manifest,
     signed_distance_kornia,
     signed_distance_scipy,
+    foreground_channels,
 )
 
 
@@ -53,10 +57,7 @@ def _save_template(output_dir: Path, template: torch.Tensor):
     np.save(output_dir / "template.npy", _to_numpy(template))
 
 
-def _foreground_channels(mask: torch.Tensor) -> torch.Tensor:
-    if mask.shape[0] == ARTIFICIAL_MASK_NUM_CLASSES:
-        return mask[1:]
-    return mask
+
 
 
 def _resolve_affine_sample_specs(affine_mode: str) -> AffineSampleBound:
@@ -85,7 +86,7 @@ def create_affine(args) -> None:
     first_sample = dataset[0]
     img_shape = tuple(first_sample["img"].shape)
     mask_shape = tuple(first_sample["mask"].shape)
-    sdf_shape = tuple(_foreground_channels(first_sample["mask"]).shape)
+    sdf_shape = tuple(foreground_channels(first_sample["mask"]).shape)
     affine_shape = tuple(first_sample["affine"].shape)
 
     category_shapes = {
@@ -113,7 +114,7 @@ def create_affine(args) -> None:
         files["img"][idx] = _to_numpy(img)
         files["mask"][idx] = _to_numpy(mask)
         files["transform"][idx] = _to_numpy(affine)
-        foreground_mask = _foreground_channels(mask)
+        foreground_mask = foreground_channels(mask)
 
         if args.sdf_type in ("scipy", "both"):
             files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(foreground_mask))
@@ -125,6 +126,8 @@ def create_affine(args) -> None:
 
     for mmap in files.values():
         mmap.flush()
+    bad_indices = write_bad_indices(output_dir, check_wall_integrity=False)
+    print(f"Saved {len(bad_indices)} invalid sample indices to {output_dir / 'bad_indices.csv'}")
     save_manifest(output_dir, args)
 
 
@@ -145,7 +148,7 @@ def create_deformed(args) -> None:
     first_sample = dataset[0]
     img_shape = tuple(first_sample["img"].shape)
     mask_shape = tuple(first_sample["mask"].shape)
-    sdf_shape = tuple(_foreground_channels(first_sample["mask"]).shape)
+    sdf_shape = tuple(foreground_channels(first_sample["mask"]).shape)
     field_shape = tuple(first_sample["field"].shape)
 
     category_shapes = {
@@ -173,7 +176,7 @@ def create_deformed(args) -> None:
         files["img"][idx] = _to_numpy(img)
         files["mask"][idx] = _to_numpy(mask)
         files["transform"][idx] = _to_numpy(field)
-        foreground_mask = _foreground_channels(mask)
+        foreground_mask = foreground_channels(mask)
 
         if args.sdf_type in ("scipy", "both"):
             files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(foreground_mask))
@@ -185,6 +188,8 @@ def create_deformed(args) -> None:
 
     for mmap in files.values():
         mmap.flush()
+    bad_indices = write_bad_indices(output_dir, check_wall_integrity=False)
+    print(f"Saved {len(bad_indices)} invalid sample indices to {output_dir / 'bad_indices.csv'}")
     save_manifest(output_dir, args)
 
 

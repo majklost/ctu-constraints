@@ -1,13 +1,23 @@
-import torch
-from torch.utils.data import Dataset
-import torchvision.transforms.v2 as transforms
+import csv
 from pathlib import Path
-import numpy as np
 from typing import Literal, NotRequired, TypedDict
+
+import numpy as np
+import torch
+import torchvision.transforms.v2 as transforms
+from torch.utils.data import Dataset
+
+from ..utils import signed_distance_scipy, signed_distance_kornia
 
 SDFMode = Literal["kornia", "scipy"]
 ArtificialMaskLabel = Literal["background", "boundary", "lumen", "plaque"]
 ArtificialForegroundMaskLabel = Literal["boundary", "lumen", "plaque"]
+
+
+def foreground_channels(mask: torch.Tensor) -> torch.Tensor:
+    if mask.shape[0] == ARTIFICIAL_MASK_NUM_CLASSES:
+        return mask[1:]
+    return mask
 
 ARTIFICIAL_MASK_FOREGROUND_CHANNELS: dict[ArtificialForegroundMaskLabel, int] = {
     "boundary": 0,
@@ -25,6 +35,56 @@ ARTIFICIAL_MASK_CLASS_LABELS: dict[int, str] = {
 }
 ARTIFICIAL_MASK_NUM_CLASSES = len(ARTIFICIAL_MASK_LABEL_IDS)
 ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS = len(ARTIFICIAL_MASK_FOREGROUND_CHANNELS)
+BAD_INDICES_FILENAME = "bad_indices.csv"
+
+
+def _load_valid_indices(folder: Path, num_samples: int) -> np.ndarray:
+    bad_indices_path = folder / BAD_INDICES_FILENAME
+    if not bad_indices_path.exists():
+        return np.arange(num_samples)
+
+    with bad_indices_path.open(newline="") as file:
+        reader = csv.DictReader(file)
+        if reader.fieldnames is None or "index" not in reader.fieldnames:
+            raise ValueError(f"{bad_indices_path} must contain an 'index' column.")
+        bad_indices = {
+            int(row["index"])
+            for row in reader
+            if row.get("index") is not None and row["index"].strip()
+        }
+
+    invalid_indices = sorted(index for index in bad_indices if index < 0 or index >= num_samples)
+    if invalid_indices:
+        raise ValueError(
+            f"{bad_indices_path} contains indices outside [0, {num_samples}): {invalid_indices}"
+        )
+
+    valid_mask = np.ones(num_samples, dtype=bool)
+    valid_mask[list(bad_indices)] = False
+    return np.flatnonzero(valid_mask)
+
+
+def write_bad_indices(
+    folder: Path, check_wall_integrity: bool = True
+) -> list[int]:
+    """Validate cached masks and persist invalid source indices for later filtering."""
+    from ..losses_metrics.constraint_function import does_violation_occur_with_wall
+
+    masks = np.load(folder / "mask.npy", mmap_mode="r")
+    bad_indices: list[int] = []
+    with (folder / BAD_INDICES_FILENAME).open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=["index", "violations"])
+        writer.writeheader()
+        for index in range(len(masks)):
+            mask = torch.from_numpy(np.array(masks[index]))
+            label_map = artificial_mask_to_label_map(mask)
+            has_violation, violations = does_violation_occur_with_wall(
+                label_map, check_wall_integrity=check_wall_integrity
+            )
+            if has_violation:
+                writer.writerow({"index": index, "violations": " | ".join(violations)})
+                bad_indices.append(index)
+    return bad_indices
 
 
 def artificial_mask_to_label_map(mask: torch.Tensor) -> torch.Tensor:
@@ -70,10 +130,11 @@ class Sample(TypedDict):
     mask: torch.Tensor
     template: torch.Tensor
     sdf: torch.Tensor
+    template_sdf: NotRequired[torch.Tensor]  # key may be missing entirely
     transform: NotRequired[torch.Tensor]  # key may be missing entirely
 
 class CachedArtificalDataset(Dataset):
-    def __init__(self, folder:Path, augmentation:transforms.Compose|None=None, sdf_mode:SDFMode="scipy", return_transform:bool=False):
+    def __init__(self, folder:Path, augmentation:transforms.Compose|None=None, sdf_mode:SDFMode="scipy", return_transform:bool=False, return_template_sdf:bool=False):
         assert augmentation is None, "Augmentation is not supported now"
         self._images = np.load(f'{folder}/img.npy', mmap_mode='r')
         self._masks  = np.load(f'{folder}/mask.npy',  mmap_mode='r')
@@ -81,14 +142,22 @@ class CachedArtificalDataset(Dataset):
         self._sdf_scipy    = np.load(f'{folder}/sdf_scipy.npy',    mmap_mode='r')
         self._template      = np.load(f'{folder}/template.npy')
         self._transform = np.load(f'{folder}/transform.npy', mmap_mode='r')
+        self._valid_indices = _load_valid_indices(folder, len(self._images))
         if sdf_mode not in set(SDFMode.__args__):
             raise ValueError(f"Unknown sdf_mode: {sdf_mode}")
         self._sdf_mode = sdf_mode
         self._return_transform = return_transform
-    
+        self._return_template_sdf = return_template_sdf
+        if return_template_sdf:
+            template = torch.from_numpy(self._template)
+            if sdf_mode == "kornia":
+                self._template_sdf = signed_distance_kornia(foreground_channels(template))
+            elif sdf_mode == "scipy":
+                self._template_sdf = signed_distance_scipy(foreground_channels(template))
     def __len__(self):
-        return len(self._images)
+        return len(self._valid_indices)
     def __getitem__(self, idx) -> Sample:
+        idx = int(self._valid_indices[idx])
         if self._sdf_mode == "kornia":
             sdf = torch.from_numpy(np.array(self._sdf_kornia[idx]))
         elif self._sdf_mode == "scipy":
@@ -107,5 +176,6 @@ class CachedArtificalDataset(Dataset):
         }
         if self._return_transform:
             sample['transform'] = torch.from_numpy(np.array(self._transform[idx]))
-
+        if self._return_template_sdf:
+            sample['template_sdf'] = torch.from_numpy(np.array(self._template_sdf))
         return sample
