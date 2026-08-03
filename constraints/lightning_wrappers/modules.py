@@ -25,15 +25,24 @@ except Exception:  # pragma: no cover - optional runtime dependency
 
 
 class ProjectLightning(pl.LightningModule):
-    """
-    The Project Architecture implemented in Lightning
+    """The project architecture implemented in Lightning.
+
+    Args:
+        gt_strategy: Chooses whether ground truth is passed to the model during
+            training and the primary validation pass. Its results are logged as
+            ``train/*`` and ``val/*``.
+        validation_strategy: Optionally runs a second validation forward pass
+            for every batch. It is intended for a logits-only strategy such as
+            ``NoGt()`` and logs independently as ``val_logits/*``. Set it to
+            ``None`` to run only the primary validation pass.
     """
     def __init__(self, model: nn.Module,
                  spatial_transform: SpatialTransformer,
                  loss_computer: ProjectLossComputer,
                  metric_computer: ProjectMetricComputer | None = None,
                  optimizer_callback: OptimizerFactory = lambda module: torch.optim.Adam(module.parameters(), lr=1e-3),
-                 gt_strategy: GtStrategy = NoGt()):
+                 gt_strategy: GtStrategy = NoGt(),
+                 validation_strategy: GtStrategy | None = None):
                   
         super().__init__()
         self.model = model
@@ -42,6 +51,7 @@ class ProjectLightning(pl.LightningModule):
         self.metric_computer = metric_computer if metric_computer is not None else NoOpMetricComputer()
         self.optimizer_callback = optimizer_callback
         self.gt_strategy = gt_strategy
+        self.validation_strategy = validation_strategy
     def forward(self, img:torch.Tensor, template:torch.Tensor, gt: torch.Tensor |None = None,detach_seg: bool = False):
         segmentation_logits, transform_spec = self.model(img, template, gt=gt, detach_seg=detach_seg)
         warp_result = self.spatial_transform(template, transform_spec)
@@ -89,10 +99,16 @@ class ProjectLightning(pl.LightningModule):
         }
         )
 
-    def _shared_step(self,batch:Sample,batch_idx,stage:str):
+    def _shared_step(
+        self,
+        batch: Sample,
+        batch_idx,
+        stage: str,
+        strategy: GtStrategy,
+    ):
         template = batch['template'] # template is same for all samples in the batch, so we can take the first one
         img = batch['image']
-        decision = self.gt_strategy.decide(batch, stage, int(self.current_epoch))
+        decision = strategy.decide(batch, stage, int(self.current_epoch))
         segmentation_logits, warp_result = self.forward(img, template,gt=decision.gt,detach_seg=decision.detach_seg)
         # Plug into loss computer
         loss_input = LossInput(segmentation_logits=segmentation_logits,
@@ -142,10 +158,18 @@ class ProjectLightning(pl.LightningModule):
         return loss_output.total
 
     def training_step(self, batch:Sample, batch_idx):
-        return self._shared_step(batch, batch_idx, stage='train')
+        return self._shared_step(batch, batch_idx, stage='train', strategy=self.gt_strategy)
 
     def validation_step(self, batch:Sample, batch_idx):
-        return self._shared_step(batch, batch_idx, stage='val')
+        loss = self._shared_step(batch, batch_idx, stage='val', strategy=self.gt_strategy)
+        if self.validation_strategy is not None:
+            self._shared_step(
+                batch,
+                batch_idx,
+                stage='val_extra',
+                strategy=self.validation_strategy,
+            )
+        return loss
 
 
     def configure_optimizers(self):
