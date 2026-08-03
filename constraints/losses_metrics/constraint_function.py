@@ -16,8 +16,19 @@ def _label_components(mask: np.ndarray, structure: np.ndarray) -> tuple[np.ndarr
     return labeled, int(component_count)
 
 
+def _as_single_label_map(prediction: torch.Tensor) -> np.ndarray:
+    pred_np = prediction.detach().cpu().numpy()
+    if pred_np.ndim == 3 and pred_np.shape[0] == 1:
+        pred_np = pred_np[0]
+    if pred_np.ndim != 2:
+        raise ValueError(
+            f"Expected prediction shape [H, W] or [1, H, W], got {tuple(pred_np.shape)}"
+        )
+    return pred_np
+
+
 def does_violation_occur_with_wall(
-    prediction: torch.Tensor, blob_threshold: int = 50
+    prediction: torch.Tensor, blob_threshold: int = 50, check_wall_integrity: bool = True
 ) -> tuple[bool, list[str]]:
     """Check Violations according to the following rules for 4-class vessel segmentation:
     
@@ -40,7 +51,7 @@ def does_violation_occur_with_wall(
       (i.e. broken or fragmented ring).
 
     INPUT:
-        - prediction: (H, W) tensor with values from ARTIFICIAL_MASK_LABEL_IDS
+        - prediction: (H, W) or (1, H, W) tensor with values from ARTIFICIAL_MASK_LABEL_IDS
             representing the predicted segmentation mask
     - blob_threshold: minimum number of pixels required for a connected component to be considered a detection
     
@@ -51,7 +62,7 @@ def does_violation_occur_with_wall(
     violations = []
 
     # Move to CPU and convert to NumPy for morphological operations
-    pred_np = prediction.detach().cpu().numpy()
+    pred_np = _as_single_label_map(prediction)
 
     # Connectivity structures:
     # 8-connectivity for component grouping & spatial adjacency
@@ -79,20 +90,21 @@ def does_violation_occur_with_wall(
             f"Lumen violation: Found {significant_lumens} main Lumen components (expected exactly 1)."
         )
 
-    # ---------------------------------------------------------
-    # Rule 2: Wall Continuity (BG must NOT touch Lumen or Plaque)
-    # ---------------------------------------------------------
-    bg_dilated = binary_dilation(bg_mask, structure=s8)
+    if check_wall_integrity:
+        # ---------------------------------------------------------
+        # Rule 2: Wall Continuity (BG must NOT touch Lumen or Plaque)
+        # ---------------------------------------------------------
+        bg_dilated = binary_dilation(bg_mask, structure=s8)
 
-    if np.any(bg_dilated & lumen_mask):
-        violations.append(
-            "Wall integrity violation: Background touches Lumen directly (Wall gap/tear)."
-        )
+        if np.any(bg_dilated & lumen_mask):
+            violations.append(
+                "Wall integrity violation: Background touches Lumen directly (Wall gap/tear)."
+            )
 
-    if np.any(bg_dilated & plaque_mask):
-        violations.append(
-            "Wall integrity violation: Background touches Plaque directly (Wall gap/tear)."
-        )
+        if np.any(bg_dilated & plaque_mask):
+            violations.append(
+                "Wall integrity violation: Background touches Plaque directly (Wall gap/tear)."
+            )
 
     # ---------------------------------------------------------
     # Rule 3: Plaque Adjacency Rules
@@ -179,7 +191,7 @@ def does_violation_occur_no_wall(
     violations = []
 
     # Move to CPU and convert to NumPy for morphological operations
-    pred_np = prediction.detach().cpu().numpy()
+    pred_np = _as_single_label_map(prediction)
 
     # Use 8-connectivity (diagonals count as connected) to be strict about topology
     s = generate_binary_structure(2, 2)
