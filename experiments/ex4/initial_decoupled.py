@@ -157,12 +157,12 @@ def main(args):
     print(f"Seed: {args.seed}")
 
     if args.modality == "affine":
-        TRN_FOLDER = DATA / "trn" / "affine"
-        VAL_FOLDER = DATA / "val" / "affine"
+        TRN_FOLDER = DATA / "affine" / "trn"
+        VAL_FOLDER = DATA / "affine" / "val"
         transformer = RigidTransformer()
     elif args.modality == "deformed":
-        TRN_FOLDER = DATA / "trn" / "deformed"
-        VAL_FOLDER = DATA / "val" / "deformed"
+        TRN_FOLDER = DATA / "deformed" / "trn"
+        VAL_FOLDER = DATA / "deformed" / "val"
         transformer = DeformableTransformer()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
