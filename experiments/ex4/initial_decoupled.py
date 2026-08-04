@@ -10,20 +10,279 @@ Tested pairs (segm + reg):
 - BCE + CentroidLoss x
 - BCE + BlurredLoss x
 - BCE + DSDF_MSE x
-- BCE + SDFTEMPLATE_MSE
-- BCE + SDFTEMPLATE_OneSideSDFSQUARE
+- BCE + SDFTEMPLATE_MSE x
+- BCE + SDFTEMPLATE_OneSideSDFSQUARE x
 - OneSideSDFSquared + OneSideSDFSquared x
-- OneSideSDFPlain + OneSideSDFPlain
+- OneSideSDFPlain + OneSideSDFPlain x
+- UNET
 """
 
-from argparse import ArgumentParser
 import os
+from argparse import ArgumentParser
 from pathlib import Path
-import torch
-import pytorch_lightning as pl
-import wandb
 
-from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightning
+import pytorch_lightning as pl
+import torch
+import wandb
+from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader
+
+from constraints import (
+    get_data_folder,
+    get_experiment_folder,
+    show_torch_image,
+    show_torch_mask,
+)
+from constraints.computers.loss_computers import (
+    SBCE_RBCE,
+    SBCE_RDSDF_MSE,
+    SBCE_RMSE_SDFTEMPLATE,
+    ProjectLossComputer,
+    SBCE_RBlurredMSE,
+    SBCE_RCentroid,
+    SBCE_ROneSideSDF,
+    SBCE_ROneSideSDF_SDFTEMPLATE,
+    SBCE_ROneSideSDFSquared,
+    SOneSideSDFPlain_ROneSideSDFPlain,
+    SOneSideSDFSquared_ROneSideSDFSquared,
+)
+from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
 from constraints.datatools.datasets import CachedArtificalDataset
-from constraints import get_experiment_folder, get_data_folder, show_torch_image, show_torch_mask
-from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
+from constraints.lightning_wrappers.callbacks import (
+    SegmentationRegistrationEarlyStopping,
+)
+from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightning
+from constraints.lightning_wrappers.sample_strategy import AlwaysGt, NoGt
+from constraints.models.affine import ProjectWithTemplateA
+from constraints.models.deform_only import ProjectWithTemplateD
+from constraints.transforms.transformers import (
+    DeformableTransformer,
+    RigidTransformer,
+    SpatialTransformer,
+)
+
+FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
+DATA = get_data_folder() / "artificial" / "downloaded"
+WANDB_PROJECT = "Constraints"
+WANDB_ENTITY = "ksicht"
+MODES = [
+    "UNET",
+    "BCE_OneSideSDFSquared",
+    "BCE_OneSideSDFPlain",
+    "BCE_BCE",
+    "BCE_CentroidLoss",
+    "BCE_BlurredLoss",
+    "BCE_DSDF_MSE",
+    "BCE_SDFTEMPLATE_MSE",
+    "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
+    "OneSideSDFSquared_OneSideSDFSquared",
+    "OneSideSDFPlain_OneSideSDFPlain",
+]
+
+MODALITIES = ["affine", "deformed"]
+FILE_NAME = Path(__file__).stem
+
+
+def configure_reproducibility(seed: int) -> None:
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    pl.seed_everything(seed, workers=True)
+
+
+def handle_unet(
+    args, metric_computer: DefaultSegmentationMetricComputer
+) -> pl.LightningModule:
+    return UnetLightning(
+        learning_rate=args.learning_rate, metric_computer=metric_computer
+    )
+
+
+def handle_decoupled(
+    args,
+    transformer: SpatialTransformer,
+    metric_computer: DefaultSegmentationMetricComputer,
+) -> pl.LightningModule:
+    match args.modality:
+        case "affine":
+            net = ProjectWithTemplateA(max_translation=0.5)
+        case "deformed":
+            net = ProjectWithTemplateD()
+        case _:
+            raise ValueError(f"Unknown modality: {args.modality}")
+
+    match args.mode:
+        case "BCE_OneSideSDFSquared":
+            loss_computer = SBCE_ROneSideSDFSquared()
+        case "BCE_OneSideSDFPlain":
+            loss_computer = SBCE_ROneSideSDF()
+        case "BCE_BCE":
+            loss_computer = SBCE_RBCE()
+        case "BCE_CentroidLoss":
+            loss_computer = SBCE_RCentroid()
+        case "BCE_BlurredLoss":
+            loss_computer = SBCE_RBlurredMSE()
+        case "BCE_DSDF_MSE":
+            loss_computer = SBCE_RDSDF_MSE()
+        case "BCE_SDFTEMPLATE_MSE":
+            loss_computer = SBCE_RMSE_SDFTEMPLATE()
+        case "BCE_SDFTEMPLATE_OneSideSDFSQUARE":
+            loss_computer = SBCE_ROneSideSDF_SDFTEMPLATE()
+        case "OneSideSDFSquared_OneSideSDFSquared":
+            loss_computer = SOneSideSDFSquared_ROneSideSDFSquared()
+        case "OneSideSDFPlain_OneSideSDFPlain":
+            loss_computer = SOneSideSDFPlain_ROneSideSDFPlain()
+        case _:
+            raise ValueError(f"Unknown mode: {args.mode}")
+    optimizer_callback = lambda module: torch.optim.Adam(
+        module.parameters(), lr=args.learning_rate
+    )
+    sample_strategy = AlwaysGt()
+    validation_strategy = NoGt(detach_seg=True)
+
+    module = ProjectLightning(
+        model=net,
+        spatial_transform=transformer,
+        loss_computer=loss_computer,
+        metric_computer=metric_computer,
+        optimizer_callback=optimizer_callback,
+        gt_strategy=sample_strategy,
+        validation_strategy=validation_strategy,
+    )
+    return module
+
+
+def main(args):
+    print(f"Experiment folder: {FOLDER}")
+    print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
+    configure_reproducibility(seed=args.seed)
+    print(f"Seed: {args.seed}")
+
+    if args.modality == "affine":
+        TRN_FOLDER = DATA / "trn" / "affine"
+        VAL_FOLDER = DATA / "val" / "affine"
+        transformer = RigidTransformer()
+    elif args.modality == "deformed":
+        TRN_FOLDER = DATA / "trn" / "deformed"
+        VAL_FOLDER = DATA / "val" / "deformed"
+        transformer = DeformableTransformer()
+    else:
+        raise ValueError(f"Unknown modality: {args.modality}")
+
+    metric_computer = DefaultSegmentationMetricComputer()
+
+    if args.mode == "UNET":
+        module = handle_unet(args, metric_computer)
+    else:
+        module = handle_decoupled(args, transformer, metric_computer)
+
+    return_template_sdf = args.mode in [
+        "BCE_SDFTEMPLATE_MSE",
+        "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
+    ]
+    trn_dataset = CachedArtificalDataset(
+        TRN_FOLDER, sdf_mode="scipy", return_template_sdf=return_template_sdf
+    )
+    val_dataset = CachedArtificalDataset(
+        VAL_FOLDER, sdf_mode="scipy", return_template_sdf=return_template_sdf
+    )
+
+    BATCH_SIZE = args.batch_size
+    NUM_WORKERS = args.num_workers
+    EPOCHS = args.max_epochs
+    train_generator = torch.Generator().manual_seed(args.seed)
+    trn_loader = DataLoader(
+        trn_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=torch.cuda.is_available(),
+        generator=train_generator,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=NUM_WORKERS,
+        pin_memory=torch.cuda.is_available(),
+    )
+
+    group_name = (
+        f"ex3-{FILE_NAME}-{args.mode}-{args.modality}"  # identifies the "approach"
+    )
+
+    wandb_logger = WandbLogger(
+        project=WANDB_PROJECT,
+        entity=WANDB_ENTITY,
+        name=f"{group_name}-seed{args.seed}",  # unique per run, human-readable
+        group=group_name,  # ties all seeds of this approach together
+        job_type="train",  # distinguishes from later "aggregate" runs
+        tags=["scratch", "overlay", "ex3", FILE_NAME, args.mode, args.modality],
+        settings=wandb.Settings(console="wrap"),
+    )
+
+    if not args.smoke_test:
+        wandb_logger.experiment.config.update(vars(args), allow_val_change=True)
+
+    logger = False if args.smoke_test else wandb_logger
+    callbacks = []
+    if not args.smoke_test:
+        callbacks.append(
+            SegmentationRegistrationEarlyStopping(
+                patience=args.early_stopping_patience,
+                segmentation_min_delta=args.early_stopping_min_delta,
+                registration_min_delta=args.registration_early_stopping_min_delta,
+            )
+        )
+
+    trainer = pl.Trainer(
+        max_epochs=EPOCHS,
+        accelerator="auto",
+        devices="auto",
+        logger=logger,
+        log_every_n_steps=1,
+        deterministic="warn",
+        enable_checkpointing=False,
+        enable_progress_bar=True,
+        fast_dev_run=args.smoke_test,
+        callbacks=callbacks,
+    )
+
+    trainer.fit(module, train_dataloaders=trn_loader, val_dataloaders=val_loader)
+
+    if not args.smoke_test:
+        wandb_logger.experiment.finish()
+
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument("--mode", type=str, choices=MODES, required=True)
+    parser.add_argument("--modality", type=str, choices=MODALITIES, required=True)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--max_epochs", type=int, default=100)
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--early_stopping_patience",
+        type=int,
+        default=15,
+        help=(
+            "Stop after this many validation epochs without a meaningful IoU "
+            "improvement."
+        ),
+    )
+    parser.add_argument(
+        "--early_stopping_min_delta",
+        type=float,
+        default=1e-3,
+        help="Minimum validation macro-IoU increase required to reset patience.",
+    )
+    parser.add_argument(
+        "--registration_early_stopping_min_delta",
+        type=float,
+        default=1e-3,
+        help="Minimum validation registration-IoU increase required to reset patience.",
+    )
+    parser.add_argument("--smoke_test", action="store_true")
+    args = parser.parse_args()
+
+    main(args)

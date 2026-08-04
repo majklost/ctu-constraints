@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
+
 import torch
 
 
@@ -8,6 +9,7 @@ class RigidParams:
     angle: torch.Tensor
     dx: torch.Tensor
     dy: torch.Tensor
+
 
 @dataclass
 class FieldParams:
@@ -19,7 +21,6 @@ class FieldApplicationResult:
     field: torch.Tensor | None = None
     warped_source: torch.Tensor | None = None
     warped_target: torch.Tensor | None = None
-
 
 
 @dataclass
@@ -52,7 +53,6 @@ class LossInput:
     gt_mask_sdf: torch.Tensor | None = None
     transform_spec: TransformSpec | None = None
     extras: dict[str, torch.Tensor] | None = None
-
 
 
 @dataclass
@@ -98,5 +98,3 @@ class WandbOverlay:
     masks: dict[str, torch.Tensor]
     class_labels: dict[int, str] | None = None
     caption: str | None = None
-
-

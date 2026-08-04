@@ -1,32 +1,28 @@
-
 from argparse import ArgumentParser
 from pathlib import Path
+
 import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-import pytorch_lightning as pl
 import wandb
-from torch.utils.data import DataLoader
 from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader
 
-from constraints import get_experiment_folder, get_data_folder
+from constraints import get_data_folder, get_experiment_folder
 from constraints.datatools.datasets import (
     ARTIFICIAL_MASK_CLASS_LABELS,
     ARTIFICIAL_MASK_NUM_CLASSES,
     CachedArtificalDataset,
     artificial_mask_to_label_map,
 )
-
 from constraints.lightning_wrappers.modules import UnetLightning as UnetProjectLightning
 
-
-FOLDER = get_experiment_folder(Path("ex3")/"project_arch_unet")
+FOLDER = get_experiment_folder(Path("ex3") / "project_arch_unet")
 DATA = get_data_folder() / "artificial" / "downloaded"
 WANDB_PROJECT = "Constraints"
 WANDB_ENTITY = "ksicht"
 FILE_NAME = Path(__file__).stem
-
-
 
 
 def main(args):
@@ -41,7 +37,6 @@ def main(args):
         VAL_FOLDER = DATA / "val" / "deformed"
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
-    
 
     trn_dataset = CachedArtificalDataset(TRN_FOLDER, sdf_mode="scipy")
     val_dataset = CachedArtificalDataset(VAL_FOLDER, sdf_mode="scipy")
@@ -92,14 +87,19 @@ def main(args):
     if not args.smoke_test:
         wandb_logger.experiment.finish()
 
-if  __name__ == "__main__":
+
+if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_epochs", type=int, default=60)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--modality", type=str, choices=["affine", "deformed"])
-    parser.add_argument("--smoke_test", action="store_true", help="Run a quick test with a small dataset and fewer epochs.")
+    parser.add_argument(
+        "--smoke_test",
+        action="store_true",
+        help="Run a quick test with a small dataset and fewer epochs.",
+    )
     args = parser.parse_args()
 
     main(args)

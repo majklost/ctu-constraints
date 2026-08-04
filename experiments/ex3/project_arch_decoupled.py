@@ -3,33 +3,47 @@ Determine coupling of UNET and registration network
 Extension of project_arch_initial.py in ex3
 """
 
-
-from argparse import ArgumentParser
 import os
+from argparse import ArgumentParser
 from pathlib import Path
-import torch
+
 import pytorch_lightning as pl
+import torch
 import wandb
-
-from constraints.lightning_wrappers.modules import ProjectLightning
-from constraints.datatools.datasets import CachedArtificalDataset
-from constraints import get_experiment_folder, get_data_folder, show_torch_image
-from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
-from constraints.computers.loss_computers import SBCE_RBlurredMSE, SBCE_RCentroid, ProjectLossComputer, SBCE_RDSDF_MSE
-from constraints.losses_metrics import OneSideSDFSquare
-from constraints.models.affine import ProjectWithTemplateA 
-from constraints.models.deform_only import ProjectWithTemplateD
-from constraints.computers.loss_computers import SBCE_ROneSideSDFSquared, SBCE_RBCE,SOneSideSDFSquared_ROneSideSDFSquared
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
-from torch.utils.data import DataLoader
 from pytorch_lightning.loggers import WandbLogger
-from constraints.lightning_wrappers.sample_strategy import AlwaysGt
+from torch.utils.data import DataLoader
 
-FOLDER = get_experiment_folder(Path("ex3")/"project_arch_coupling")
+from constraints import get_data_folder, get_experiment_folder, show_torch_image
+from constraints.computers.loss_computers import (
+    SBCE_RBCE,
+    SBCE_RDSDF_MSE,
+    ProjectLossComputer,
+    SBCE_RBlurredMSE,
+    SBCE_RCentroid,
+    SBCE_ROneSideSDFSquared,
+    SOneSideSDFSquared_ROneSideSDFSquared,
+)
+from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
+from constraints.datatools.datasets import CachedArtificalDataset
+from constraints.lightning_wrappers.modules import ProjectLightning
+from constraints.lightning_wrappers.sample_strategy import AlwaysGt
+from constraints.losses_metrics import OneSideSDFSquare
+from constraints.models.affine import ProjectWithTemplateA
+from constraints.models.deform_only import ProjectWithTemplateD
+from constraints.transforms.transformers import DeformableTransformer, RigidTransformer
+
+FOLDER = get_experiment_folder(Path("ex3") / "project_arch_coupling")
 DATA = get_data_folder() / "artificial" / "downloaded"
 WANDB_PROJECT = "Constraints"
 WANDB_ENTITY = "ksicht"
-MODES = ["decoupledOneSideSDF", "decoupledCE", "decoupledStandard", "decoupledDSDF", "decoupledCentroid", "decoupledBlurred"]
+MODES = [
+    "decoupledOneSideSDF",
+    "decoupledCE",
+    "decoupledStandard",
+    "decoupledDSDF",
+    "decoupledCentroid",
+    "decoupledBlurred",
+]
 FILE_NAME = Path(__file__).stem
 
 
@@ -67,13 +81,16 @@ def main(args):
     val_dataset = CachedArtificalDataset(VAL_FOLDER, sdf_mode="scipy")
     sample_strategy = AlwaysGt()
 
-
     if args.mode == "decoupledOneSideSDF":
-        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(
+            seg_loss_weight=1.0, sdf_loss_weight=1.0
+        )
     elif args.mode == "decoupledCE":
         loss_computer = SBCE_RBCE(seg_loss_weight=1.0, template_loss_weight=1.0)
     elif args.mode == "decoupledStandard":
-        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = SBCE_ROneSideSDFSquared(
+            seg_loss_weight=1.0, sdf_loss_weight=1.0
+        )
     elif args.mode == "decoupledDSDF":
         loss_computer = SBCE_RDSDF_MSE()
     elif args.mode == "decoupledCentroid":
@@ -83,21 +100,20 @@ def main(args):
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 
-    metric_computer = DefaultSegmentationMetricComputer(
-    )
+    metric_computer = DefaultSegmentationMetricComputer()
 
-    optimizer_callback = lambda module: torch.optim.Adam(module.parameters(), lr=args.learning_rate)
+    optimizer_callback = lambda module: torch.optim.Adam(
+        module.parameters(), lr=args.learning_rate
+    )
 
     module = ProjectLightning(
-    net,
-    transformer,
-    loss_computer,
-    metric_computer=metric_computer,
-    optimizer_callback=optimizer_callback,
-    gt_strategy=sample_strategy
+        net,
+        transformer,
+        loss_computer,
+        metric_computer=metric_computer,
+        optimizer_callback=optimizer_callback,
+        gt_strategy=sample_strategy,
     )
-
-
 
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers
@@ -105,12 +121,12 @@ def main(args):
     train_generator = torch.Generator().manual_seed(args.seed)
 
     trn_loader = DataLoader(
-    trn_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    num_workers=NUM_WORKERS,
-    pin_memory=torch.cuda.is_available(),
-    generator=train_generator,
+        trn_dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=NUM_WORKERS,
+        pin_memory=torch.cuda.is_available(),
+        generator=train_generator,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -120,13 +136,19 @@ def main(args):
         pin_memory=torch.cuda.is_available(),
     )
 
-
-    
     wandb_logger = WandbLogger(
         project=WANDB_PROJECT,
         entity=WANDB_ENTITY,
-        name=f"ex3-{FILE_NAME}-{args.mode}-{args.modality}",
-        tags=["scratch", "overlay", "ex3", f"{FILE_NAME}", f"{args.mode}", f"{args.modality}"],
+        group=f"ex4-{FILE_NAME}-{args.mode}-{args.modality}",
+        name=f"seed{args.seed}-bs{args.batch_size}-lr{args.learning_rate}-epochs{args.max_epochs}",
+        tags=[
+            "scratch",
+            "overlay",
+            "ex4",
+            f"{FILE_NAME}",
+            f"{args.mode}",
+            f"{args.modality}",
+        ],
         settings=wandb.Settings(console="wrap"),  # pass settings through here instead
     )
     # Log all CLI arguments into W&B run config.
@@ -136,17 +158,17 @@ def main(args):
     logger = False if args.smoke_test else wandb_logger
 
     trainer = pl.Trainer(
-    max_epochs=EPOCHS,
-    accelerator="auto",
-    devices="auto",
-    logger=logger,
-    log_every_n_steps=1,
-    deterministic="warn",
-    enable_checkpointing=False,
-    enable_progress_bar=True,
-    fast_dev_run=args.smoke_test,
-    callbacks=[],
-)
+        max_epochs=EPOCHS,
+        accelerator="auto",
+        devices="auto",
+        logger=logger,
+        log_every_n_steps=1,
+        deterministic="warn",
+        enable_checkpointing=False,
+        enable_progress_bar=True,
+        fast_dev_run=args.smoke_test,
+        callbacks=[],
+    )
 
     trainer.fit(module, train_dataloaders=trn_loader, val_dataloaders=val_loader)
 
@@ -163,8 +185,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--modality", type=str, choices=["affine", "deformed"])
     parser.add_argument("--mode", type=str, choices=MODES)
-    parser.add_argument("--smoke_test", action="store_true",
-                        help="Use Lightning's fast_dev_run to sanity-check the run.")
+    parser.add_argument(
+        "--smoke_test",
+        action="store_true",
+        help="Use Lightning's fast_dev_run to sanity-check the run.",
+    )
     args = parser.parse_args()
 
     main(args)

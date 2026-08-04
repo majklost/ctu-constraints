@@ -88,19 +88,28 @@ class CompositeMetricComputer(ProjectMetricComputer):
             if result.logs:
                 for key, value in result.logs.items():
                     if key in merged_logs or key in merged_sum_logs:
-                        raise ValueError(f"Duplicate metric log key in CompositeMetricComputer: {key}")
+                        raise ValueError(
+                            "Duplicate metric log key in CompositeMetricComputer: "
+                            f"{key}"
+                        )
                     merged_logs[key] = value
 
             if result.sum_logs:
                 for key, value in result.sum_logs.items():
                     if key in merged_logs or key in merged_sum_logs:
-                        raise ValueError(f"Duplicate metric log key in CompositeMetricComputer: {key}")
+                        raise ValueError(
+                            "Duplicate metric log key in CompositeMetricComputer: "
+                            f"{key}"
+                        )
                     merged_sum_logs[key] = value
 
             if result.wandb_overlays:
                 for key, value in result.wandb_overlays.items():
                     if key in merged_wandb_overlays:
-                        raise ValueError(f"Duplicate metric overlay key in CompositeMetricComputer: {key}")
+                        raise ValueError(
+                            "Duplicate metric overlay key in CompositeMetricComputer: "
+                            f"{key}"
+                        )
                     merged_wandb_overlays[key] = value
 
         return MetricResult(
@@ -140,7 +149,7 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
             average="none",
         )
 
-        logs: dict[str, torch.Tensor] = {
+        logs: dict[str, float | torch.Tensor] = {
             "segmentation/iou/pred_vs_gt": iou_pred_vs_gt,
         }
         for class_index, class_iou in enumerate(per_class_iou):
@@ -185,29 +194,48 @@ class ConstraintViolationMetricComputer(ProjectMetricComputer):
         if labels is None:
             return MetricResult()
 
+        logs: dict[str, float | torch.Tensor] = {}
+        sum_logs: dict[str, float | torch.Tensor] = {}
+        self._add_violation_logs(
+            labels=labels.segmentation,
+            metric_prefix="segmentation/constraint",
+            logs=logs,
+            sum_logs=sum_logs,
+        )
+        if labels.registration is not None:
+            self._add_violation_logs(
+                labels=labels.registration,
+                metric_prefix="registration/constraint",
+                logs=logs,
+                sum_logs=sum_logs,
+            )
+
+        return MetricResult(logs=logs or None, sum_logs=sum_logs or None)
+
+    def _add_violation_logs(
+        self,
+        labels: torch.Tensor,
+        metric_prefix: str,
+        logs: dict[str, float | torch.Tensor],
+        sum_logs: dict[str, float | torch.Tensor],
+    ) -> None:
+        sample_count = labels.shape[0]
+        if sample_count == 0:
+            return
+
         violating_samples = sum(
             does_violation_occur_with_wall(
                 prediction,
                 blob_threshold=self.blob_threshold,
                 check_wall_integrity=self.check_wall_integrity,
             )[0]
-            for prediction in labels.segmentation
+            for prediction in labels
         )
-        sample_count = labels.segmentation.shape[0]
-        if sample_count == 0:
-            return MetricResult()
-
-        count_tensor = torch.tensor(
-            float(violating_samples), device=labels.segmentation.device
-        )
-        total_tensor = torch.tensor(float(sample_count), device=labels.segmentation.device)
-        return MetricResult(
-            logs={"segmentation/constraint/violation_rate": count_tensor / total_tensor},
-            sum_logs={
-                "segmentation/constraint/violating_samples": count_tensor,
-                "segmentation/constraint/total_samples": total_tensor,
-            },
-        )
+        count_tensor = torch.tensor(float(violating_samples), device=labels.device)
+        total_tensor = torch.tensor(float(sample_count), device=labels.device)
+        logs[f"{metric_prefix}/violation_rate"] = count_tensor / total_tensor
+        sum_logs[f"{metric_prefix}/violating_samples"] = count_tensor
+        sum_logs[f"{metric_prefix}/total_samples"] = total_tensor
 
 
 class SegmentationOverlayMetricComputer(ProjectMetricComputer):
@@ -267,7 +295,9 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         elif image_batch.ndim == 3:
             sample = image_batch
         else:
-            raise ValueError(f"Unsupported image shape for W&B overlays: {tuple(image_batch.shape)}")
+            raise ValueError(
+                f"Unsupported image shape for W&B overlays: {tuple(image_batch.shape)}"
+            )
 
         sample = sample.detach().cpu().float()
         if sample.ndim == 3 and sample.shape[0] == 1:
@@ -339,7 +369,9 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
                 image=background,
                 masks=masks,
                 class_labels=class_labels,
-                caption=f"{' | '.join(caption_parts)} | {self.stage} sample={sample_idx}",
+                caption=(
+                    f"{' | '.join(caption_parts)} | {self.stage} sample={sample_idx}"
+                ),
             )
             overlays[f"{self.image_tag}_{self.stage}_s{sample_idx}"] = overlay
 

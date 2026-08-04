@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as functional
 from torch import nn
+from unittest.mock import patch
 
 from constraints.computers.loss_computers import (
     SBCE_RMSE_SDFTEMPLATE,
@@ -76,3 +77,24 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
         assert logits.grad is not None and logits.grad.abs().sum() > 0
         assert warped_template_sdf.grad is not None
         assert warped_template_sdf.grad.abs().sum() > 0
+
+
+def test_gradient_diagnostics_are_opt_in():
+    batch_size, height, width = 2, 12, 12
+    target = _one_hot_target(batch_size, height, width)
+    loss_input = LossInput(
+        segmentation_logits=torch.randn(batch_size, 4, height, width, requires_grad=True),
+        warped_template=torch.rand(batch_size, 4, height, width, requires_grad=True),
+        warped_template_sdf=torch.randn(batch_size, 3, height, width, requires_grad=True),
+        gt_mask=target,
+    )
+
+    with patch("torch.autograd.grad", side_effect=AssertionError("unexpected gradient diagnostic")):
+        result = SBCE_RMSE_SDFTEMPLATE().compute(loss_input)
+
+    assert result.logs is None
+
+    result = SBCE_RMSE_SDFTEMPLATE(grad_diagnostics=True).compute(loss_input)
+    assert result.logs is not None
+    assert "coupling/segmentation_grad_norm" in result.logs
+    assert "registration/warped_template_sdf/grad_norm" in result.logs

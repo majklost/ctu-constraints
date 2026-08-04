@@ -2,11 +2,14 @@ from collections.abc import Callable
 
 import pytorch_lightning as pl
 import torch
+import torch.nn.functional as F
+import wandb
+from pytorch_lightning.loggers import WandbLogger
 
 # Whatever configure_optimizers() itself may legally return
 from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch import nn
-import torch.nn.functional as F
+
 from ..computers.loss_computers import ProjectLossComputer
 from ..computers.metric_computers import (
     DefaultSegmentationMetricComputer,
@@ -18,16 +21,12 @@ from ..datatools.datasets import (
     Sample,
     artificial_mask_to_label_map,
 )
+from ..models.segmentator import get_learned_segmentator
 from ..transforms.transformers import SpatialTransformer
 from ..types import LossInput, MetricInput, WandbOverlay, WarpResult
 from .sample_strategy import GtStrategy, NoGt
 
 OptimizerFactory = Callable[[nn.Module], OptimizerLRScheduler]
-
-from pytorch_lightning.loggers import WandbLogger
-
-from ..models.segmentator import get_learned_segmentator
-import wandb
 
 
 # TODO: Handling template better save memory, template is same for all samples in the batch
@@ -76,7 +75,9 @@ class MetricLoggingMixin(pl.LightningModule):
             }
         )
 
-    def _log_metric_output(self, stage: str, image: torch.Tensor, metric_output) -> None:
+    def _log_metric_output(
+        self, stage: str, image: torch.Tensor, metric_output
+    ) -> None:
         if metric_output.logs:
             self.log_dict(
                 {
@@ -182,7 +183,11 @@ class ProjectLightning(MetricLoggingMixin):
 
         decision = strategy.decide(batch, stage, int(self.current_epoch))
         segmentation_logits, warp_result = self.forward(
-            img, template, gt=decision.gt, detach_seg=decision.detach_seg, template_sdf=template_sdf
+            img,
+            template,
+            gt=decision.gt,
+            detach_seg=decision.detach_seg,
+            template_sdf=template_sdf,
         )
         # Plug into loss computer
         loss_input = LossInput(
@@ -256,7 +261,6 @@ class ProjectLightning(MetricLoggingMixin):
 
     def configure_optimizers(self):
         return self.optimizer_callback(self)
-
 
 
 class UnetLightning(MetricLoggingMixin):

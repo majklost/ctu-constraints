@@ -3,6 +3,7 @@ Various callbacks for Lightning Wrappers.
 - debugging, inspection
 - saving runs, etc...
 """
+
 import math
 
 import torch
@@ -45,4 +46,87 @@ class GradientNormLogger(Callback):
             return
 
         total_norm = math.sqrt(sq_norm_sum)
-        pl_module.log("debug/grad_norm", total_norm, on_step=True, on_epoch=False, prog_bar=False)
+        pl_module.log(
+            "debug/grad_norm", total_norm, on_step=True, on_epoch=False, prog_bar=False
+        )
+
+
+class SegmentationRegistrationEarlyStopping(Callback):
+    """Stop only after segmentation and registration IoU both plateau.
+
+    Models without ``val/registration/iou/warped_vs_gt``, such as the plain
+    U-Net baseline, are stopped solely based on segmentation IoU.
+    """
+
+    def __init__(
+        self,
+        patience: int,
+        segmentation_min_delta: float,
+        registration_min_delta: float = 1e-3,
+    ) -> None:
+        if patience <= 0:
+            raise ValueError("patience must be > 0")
+        if segmentation_min_delta < 0:
+            raise ValueError("segmentation_min_delta must be >= 0")
+        if registration_min_delta < 0:
+            raise ValueError("registration_min_delta must be >= 0")
+
+        self.patience = patience
+        self.segmentation_min_delta = segmentation_min_delta
+        self.registration_min_delta = registration_min_delta
+        self.best_segmentation_iou = float("-inf")
+        self.best_registration_iou = float("-inf")
+        self.wait_count = 0
+
+    @staticmethod
+    def _metric_value(metric: torch.Tensor | float) -> float:
+        if isinstance(metric, torch.Tensor):
+            return float(metric.detach().cpu().item())
+        return float(metric)
+
+    def on_validation_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        del pl_module
+        if trainer.sanity_checking:
+            return
+
+        metrics = trainer.callback_metrics
+        segmentation_metric = metrics.get("val/segmentation/iou/pred_vs_gt")
+        if segmentation_metric is None:
+            raise RuntimeError(
+                "SegmentationRegistrationEarlyStopping requires "
+                "'val/segmentation/iou/pred_vs_gt'."
+            )
+
+        segmentation_iou = self._metric_value(segmentation_metric)
+        if not math.isfinite(segmentation_iou):
+            trainer.should_stop = True
+            return
+
+        segmentation_improved = (
+            segmentation_iou > self.best_segmentation_iou + self.segmentation_min_delta
+        )
+        if segmentation_improved:
+            self.best_segmentation_iou = segmentation_iou
+
+        registration_improved = False
+        registration_metric = metrics.get("val/registration/iou/warped_vs_gt")
+        if registration_metric is not None:
+            registration_iou = self._metric_value(registration_metric)
+            if not math.isfinite(registration_iou):
+                trainer.should_stop = True
+                return
+
+            registration_improved = (
+                registration_iou
+                > self.best_registration_iou + self.registration_min_delta
+            )
+            if registration_improved:
+                self.best_registration_iou = registration_iou
+
+        if segmentation_improved or registration_improved:
+            self.wait_count = 0
+            return
+
+        self.wait_count += 1
+        if self.wait_count >= self.patience:
+            trainer.should_stop = True
