@@ -21,7 +21,7 @@ from ..datatools.datasets import (
     Sample,
     artificial_mask_to_label_map,
 )
-from ..models.segmentator import get_learned_segmentator
+from ..models.segmentator import get_segmentator
 from ..transforms.transformers import SpatialTransformer
 from ..types import LossInput, MetricInput, WandbOverlay, WarpResult
 from .sample_strategy import GtStrategy, NoGt
@@ -274,7 +274,7 @@ class UnetLightning(MetricLoggingMixin):
         self.save_hyperparameters(ignore=["metric_computer"])
         self.learning_rate = learning_rate
         self.num_classes = num_classes
-        self.unet = get_learned_segmentator()
+        self.unet = get_segmentator()
         self.metric_computer = (
             metric_computer
             if metric_computer is not None

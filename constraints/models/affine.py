@@ -1,12 +1,13 @@
 from typing import cast
 
-import torch
 import timm
+import torch
+
 from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
+from ..types import RigidParams, TransformSpec
 from .composed import SegmentationRegistrationModel
 from .helpers import RigidTransformHead
-from ..types import RigidParams, TransformSpec
-from .segmentator import get_learned_segmentator
+from .segmentator import get_segmentator
 
 
 class TwoBranch(torch.nn.Module):
@@ -14,7 +15,10 @@ class TwoBranch(torch.nn.Module):
         super().__init__()
         raise ValueError("TwoBranch is deprecated.")
         self.unet = smp.Unet(
-            "resnet18", encoder_weights="imagenet", in_channels=1, classes=ARTIFICIAL_MASK_NUM_CLASSES
+            "resnet18",
+            encoder_weights="imagenet",
+            in_channels=1,
+            classes=ARTIFICIAL_MASK_NUM_CLASSES,
         )
         # keep it simple - linear layer to each layer of the UNET encoder
         self.projector = torch.nn.LazyConv2d(64, kernel_size=1)
@@ -43,15 +47,17 @@ class AffineRegistrationNet(torch.nn.Module):
     def __init__(self, max_translation=0.3):
         super().__init__()
         self.encoder = timm.create_model(
-            'resnet34',
+            "resnet34",
             pretrained=True,
             in_chans=2 * ARTIFICIAL_MASK_NUM_CLASSES,
             num_classes=0,
-            global_pool='avg',
+            global_pool="avg",
         )
         self.transform_head = RigidTransformHead(max_translation=max_translation)
 
-    def forward(self, registration_input: torch.Tensor, template: torch.Tensor) -> TransformSpec:
+    def forward(
+        self, registration_input: torch.Tensor, template: torch.Tensor
+    ) -> TransformSpec:
         concatenated_input = torch.cat([registration_input, template], dim=1)
         features = self.encoder(concatenated_input)
         angle, translation = self.transform_head(features)
@@ -63,14 +69,15 @@ class ProjectWithTemplateA(SegmentationRegistrationModel):
     """
     Encode->Decode segmentations, then pass the segmentation map and template into registration network
     Registration network processes both, return the transformation parameters
-    Transformation parameters are applied to spatial transform 
-    
+    Transformation parameters are applied to spatial transform
+
     ===
     Return: segmentation map, angle, translation
     ===
     """
+
     def __init__(self, max_translation=0.3):
-        segmentation_net = get_learned_segmentator()
+        segmentation_net = get_segmentator()
         super().__init__(
             segmentation_net=segmentation_net,
             registration_net=AffineRegistrationNet(max_translation=max_translation),

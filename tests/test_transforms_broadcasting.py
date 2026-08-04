@@ -1,10 +1,16 @@
 import torch
 
+from constraints.transforms.transformers import (
+    DeformableTransformer,
+    RigidTransformer,
+    SequentialTransformer,
+)
 from constraints.transforms.transforms import (
     differentiable_rigid,
     differentiable_rotation,
     field_application,
 )
+from constraints.types import FieldParams, RigidParams, TransformSpec
 
 
 def test_differentiable_rigid_broadcasts_single_image_to_parameter_batch():
@@ -54,3 +60,29 @@ def test_field_application_broadcasts_single_source_to_field_batch():
 
     assert warped.shape == (displacement.shape[0], *source.shape)
     assert torch.allclose(warped, warped_expected, atol=1e-6, rtol=1e-6)
+
+
+def test_sequential_transformer_replays_rigid_then_deformable_with_gradients():
+    template = torch.arange(12 * 12, dtype=torch.float32).reshape(1, 1, 12, 12)
+    angle = torch.tensor([0.1], requires_grad=True)
+    dx = torch.tensor([0.05], requires_grad=True)
+    dy = torch.tensor([-0.03], requires_grad=True)
+    field = torch.full((1, 2, 12, 12), 0.1, requires_grad=True)
+
+    rigid_spec = TransformSpec(rigid=RigidParams(angle=angle, dx=dx, dy=dy))
+    field_spec = TransformSpec(field=FieldParams(field=field))
+    sequential_spec = TransformSpec(steps=(rigid_spec, field_spec))
+
+    expected = DeformableTransformer()(
+        RigidTransformer()(template, rigid_spec).warped_template, field_spec
+    ).warped_template
+    actual = SequentialTransformer()(template, sequential_spec).warped_template
+
+    assert torch.allclose(actual, expected, atol=1e-6, rtol=1e-6)
+
+    actual.square().mean().backward()
+
+    for parameter in (angle, dx, dy, field):
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+        assert parameter.grad.abs().sum() > 0

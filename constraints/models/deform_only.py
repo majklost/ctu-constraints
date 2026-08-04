@@ -1,17 +1,16 @@
 from collections.abc import Sequence
 from typing import Any, Literal, cast
 
-
 import torch
 import torch.nn.functional as nnf
 
-
-from ..voxelmorph import modules
-from ..voxelmorph.models import VxmPairwise
 from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
 from ..types import FieldParams, TransformSpec
+from ..voxelmorph import modules
+from ..voxelmorph.models import VxmPairwise
 from .composed import SegmentationRegistrationModel
-from .segmentator import get_learned_segmentator
+from .segmentator import get_segmentator
+
 
 class TwoBranch(torch.nn.Module):
     """
@@ -159,6 +158,7 @@ class TwoBranch(torch.nn.Module):
                 f"({self.target_channels})"
             )
 
+
 class DeformableRegistrationNet(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -173,7 +173,9 @@ class DeformableRegistrationNet(torch.nn.Module):
             nb_features=nb_features,
         )
 
-    def forward(self, registration_input: torch.Tensor, template: torch.Tensor) -> TransformSpec:
+    def forward(
+        self, registration_input: torch.Tensor, template: torch.Tensor
+    ) -> TransformSpec:
         deformation_field = self.encoder(registration_input, template)
         field_params = FieldParams(field=deformation_field)
         return TransformSpec(field=field_params)
@@ -190,7 +192,7 @@ class ProjectWithTemplateD(SegmentationRegistrationModel):
     """
 
     def __init__(self) -> None:
-        segmentation_net = get_learned_segmentator()
+        segmentation_net = get_segmentator()
         super().__init__(
             segmentation_net=segmentation_net,
             registration_net=DeformableRegistrationNet(),

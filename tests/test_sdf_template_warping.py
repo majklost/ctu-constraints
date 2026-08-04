@@ -13,8 +13,17 @@ from constraints.computers.loss_terms import (
     RegistrationMSE_SDFTEMPLATETerm,
 )
 from constraints.lightning_wrappers.modules import ProjectLightning
-from constraints.transforms.transformers import SpatialTransformer
-from constraints.types import LossInput, TransformSpec, WarpResult
+from constraints.transforms.transformers import (
+    SequentialTransformer,
+    SpatialTransformer,
+)
+from constraints.types import (
+    FieldParams,
+    LossInput,
+    RigidParams,
+    TransformSpec,
+    WarpResult,
+)
 from constraints.utils import signed_distance_kornia_differentiable
 
 
@@ -37,6 +46,22 @@ class _IdentityTransformer(SpatialTransformer):
         return WarpResult(warped_template=template, transform_spec=transform_spec)
 
 
+class _SequentialModel(nn.Module):
+    def __init__(self, transform_spec: TransformSpec) -> None:
+        super().__init__()
+        self.transform_spec = transform_spec
+
+    def forward(
+        self,
+        image: torch.Tensor,
+        template: torch.Tensor,
+        gt: torch.Tensor | None = None,
+        detach_seg: bool = False,
+    ) -> tuple[torch.Tensor, TransformSpec]:
+        del template, gt, detach_seg
+        return image, self.transform_spec
+
+
 def _one_hot_target(batch_size: int, height: int, width: int) -> torch.Tensor:
     labels = torch.randint(0, 4, (batch_size, height, width))
     return functional.one_hot(labels, num_classes=4).permute(0, 3, 1, 2).float()
@@ -57,7 +82,36 @@ def test_project_lightning_keeps_mask_and_sdf_template_warps_separate():
 
     assert torch.equal(predicted_logits, logits)
     assert torch.equal(result.warped_template, template)
+    assert result.warped_template_sdf is not None
     assert torch.equal(result.warped_template_sdf, template_sdf)
+
+
+def test_project_lightning_replays_sequential_transforms_for_mask_and_sdf():
+    template = torch.arange(12 * 12, dtype=torch.float32).reshape(1, 1, 12, 12)
+    template_sdf = template * 0.5
+    rigid_spec = TransformSpec(
+        rigid=RigidParams(
+            angle=torch.tensor([0.1]),
+            dx=torch.tensor([0.05]),
+            dy=torch.tensor([-0.03]),
+        )
+    )
+    field_spec = TransformSpec(field=FieldParams(field=torch.full((1, 2, 12, 12), 0.1)))
+    transform_spec = TransformSpec(steps=(rigid_spec, field_spec))
+    transformer = SequentialTransformer()
+    module = ProjectLightning(
+        _SequentialModel(transform_spec), transformer, SBCE_RMSE_SDFTEMPLATE()
+    )
+
+    logits = torch.randn(1, 4, 12, 12)
+    _, result = module.forward(logits, template, template_sdf=template_sdf)
+
+    expected_template = transformer(template, transform_spec).warped_template
+    expected_template_sdf = transformer(template_sdf, transform_spec).warped_template
+
+    assert torch.allclose(result.warped_template, expected_template)
+    assert result.warped_template_sdf is not None
+    assert torch.allclose(result.warped_template_sdf, expected_template_sdf)
 
 
 def test_sdf_template_losses_use_dedicated_sdf_warp():

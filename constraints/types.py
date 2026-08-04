@@ -27,6 +27,7 @@ class FieldApplicationResult:
 class TransformSpec:
     rigid: RigidParams | None = None
     field: FieldParams | None = None
+    steps: tuple["TransformSpec", ...] | None = None
     meta: dict | None = None
 
 
