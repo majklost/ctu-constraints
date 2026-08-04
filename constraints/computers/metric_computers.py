@@ -11,6 +11,7 @@ from ..datatools.datasets import (
     ARTIFICIAL_MASK_NUM_CLASSES,
     artificial_mask_to_label_map,
 )
+from ..losses_metrics.constraint_function import does_violation_occur_with_wall
 from ..types import MetricInput, MetricResult, WandbOverlay
 from ..visu.helpers import to_label_map
 
@@ -18,7 +19,7 @@ from ..visu.helpers import to_label_map
 @dataclass(frozen=True)
 class LabelTriplet:
     segmentation: torch.Tensor
-    registration: torch.Tensor
+    registration: torch.Tensor | None
     ground_truth: torch.Tensor
 
 
@@ -27,12 +28,16 @@ def _label_triplet(metric_input: MetricInput) -> LabelTriplet | None:
     warped_template = metric_input.warped_template
     gt_mask = metric_input.gt_mask
 
-    if pred_mask_logits is None or warped_template is None or gt_mask is None:
+    if pred_mask_logits is None or gt_mask is None:
         return None
 
     return LabelTriplet(
         segmentation=to_label_map(pred_mask_logits),
-        registration=artificial_mask_to_label_map(warped_template),
+        registration=(
+            artificial_mask_to_label_map(warped_template)
+            if warped_template is not None
+            else None
+        ),
         ground_truth=artificial_mask_to_label_map(gt_mask),
     )
 
@@ -73,6 +78,7 @@ class CompositeMetricComputer(ProjectMetricComputer):
 
     def compute(self, metric_input: MetricInput) -> MetricResult:
         merged_logs: dict[str, float | torch.Tensor] = {}
+        merged_sum_logs: dict[str, float | torch.Tensor] = {}
         merged_wandb_overlays: dict[str, WandbOverlay] = {}
 
         for metric_module in self.metric_computers:
@@ -81,9 +87,15 @@ class CompositeMetricComputer(ProjectMetricComputer):
 
             if result.logs:
                 for key, value in result.logs.items():
-                    if key in merged_logs:
+                    if key in merged_logs or key in merged_sum_logs:
                         raise ValueError(f"Duplicate metric log key in CompositeMetricComputer: {key}")
                     merged_logs[key] = value
+
+            if result.sum_logs:
+                for key, value in result.sum_logs.items():
+                    if key in merged_logs or key in merged_sum_logs:
+                        raise ValueError(f"Duplicate metric log key in CompositeMetricComputer: {key}")
+                    merged_sum_logs[key] = value
 
             if result.wandb_overlays:
                 for key, value in result.wandb_overlays.items():
@@ -93,12 +105,13 @@ class CompositeMetricComputer(ProjectMetricComputer):
 
         return MetricResult(
             logs=merged_logs or None,
+            sum_logs=merged_sum_logs or None,
             wandb_overlays=merged_wandb_overlays or None,
         )
 
 
 class SegmentationIoUMetricComputer(ProjectMetricComputer):
-    """Compute IoU metrics from predicted and warped label maps."""
+    """Compute macro and per-class IoU from predicted and warped label maps."""
 
     def __init__(
         self,
@@ -120,18 +133,80 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
             num_classes=self.num_classes,
             average="macro",
         )
-        iou_warped_vs_gt = multiclass_jaccard_index(
-            preds=labels.registration,
+        per_class_iou = multiclass_jaccard_index(
+            preds=labels.segmentation,
             target=labels.ground_truth,
             num_classes=self.num_classes,
-            average="macro",
+            average="none",
         )
 
+        logs: dict[str, torch.Tensor] = {
+            "segmentation/iou/pred_vs_gt": iou_pred_vs_gt,
+        }
+        for class_index, class_iou in enumerate(per_class_iou):
+            class_name = ARTIFICIAL_MASK_CLASS_LABELS.get(
+                class_index, f"class_{class_index}"
+            )
+            logs[f"segmentation/iou/{class_name}_vs_gt"] = class_iou
+
+        if labels.registration is not None:
+            logs["registration/iou/warped_vs_gt"] = multiclass_jaccard_index(
+                preds=labels.registration,
+                target=labels.ground_truth,
+                num_classes=self.num_classes,
+                average="macro",
+            )
+
+        return MetricResult(logs=logs)
+
+
+class ConstraintViolationMetricComputer(ProjectMetricComputer):
+    """Count validation predictions that violate the vessel topology constraints."""
+
+    def __init__(
+        self,
+        stage: str = "val",
+        blob_threshold: int = 50,
+        check_wall_integrity: bool = True,
+    ) -> None:
+        super().__init__()
+        if blob_threshold <= 0:
+            raise ValueError("blob_threshold must be > 0")
+
+        self.stage = stage
+        self.blob_threshold = blob_threshold
+        self.check_wall_integrity = check_wall_integrity
+
+    def compute(self, metric_input: MetricInput) -> MetricResult:
+        if metric_input.stage != self.stage:
+            return MetricResult()
+
+        labels = _label_triplet(metric_input)
+        if labels is None:
+            return MetricResult()
+
+        violating_samples = sum(
+            does_violation_occur_with_wall(
+                prediction,
+                blob_threshold=self.blob_threshold,
+                check_wall_integrity=self.check_wall_integrity,
+            )[0]
+            for prediction in labels.segmentation
+        )
+        sample_count = labels.segmentation.shape[0]
+        if sample_count == 0:
+            return MetricResult()
+
+        count_tensor = torch.tensor(
+            float(violating_samples), device=labels.segmentation.device
+        )
+        total_tensor = torch.tensor(float(sample_count), device=labels.segmentation.device)
         return MetricResult(
-            logs={
-                "segmentation/iou/pred_vs_gt": iou_pred_vs_gt,
-                "registration/iou/warped_vs_gt": iou_warped_vs_gt,
-            }
+            logs={"segmentation/constraint/violation_rate": count_tensor / total_tensor},
+            sum_logs={
+                "segmentation/constraint/violating_samples": count_tensor,
+                "segmentation/constraint/total_samples": total_tensor,
+            },
         )
 
 
@@ -226,11 +301,10 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         if labels is None:
             return MetricResult()
 
-        batch_size = min(
-            labels.ground_truth.shape[0],
-            labels.registration.shape[0],
-            labels.segmentation.shape[0],
-        )
+        batch_sizes = [labels.ground_truth.shape[0], labels.segmentation.shape[0]]
+        if labels.registration is not None:
+            batch_sizes.append(labels.registration.shape[0])
+        batch_size = min(batch_sizes)
         if batch_size <= 0:
             return MetricResult()
 
@@ -240,12 +314,18 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
                 continue
 
             gt_sample = labels.ground_truth[sample_idx].detach().cpu().long()
-            warped_sample = labels.registration[sample_idx].detach().cpu().long()
             pred_sample = labels.segmentation[sample_idx].detach().cpu().long()
 
-            inferred_classes = int(
-                max(gt_sample.max().item(), warped_sample.max().item(), pred_sample.max().item()) + 1
-            )
+            masks = {"ground_truth": gt_sample, "predicted": pred_sample}
+            caption_parts = ["GT"]
+            inferred_label_max = max(gt_sample.max().item(), pred_sample.max().item())
+            if labels.registration is not None:
+                warped_sample = labels.registration[sample_idx].detach().cpu().long()
+                masks["warped"] = warped_sample
+                caption_parts.append("warped")
+                inferred_label_max = max(inferred_label_max, warped_sample.max().item())
+            caption_parts.append("pred")
+            inferred_classes = int(inferred_label_max + 1)
             class_labels = self._build_class_labels(inferred_classes)
             height, width = int(gt_sample.shape[0]), int(gt_sample.shape[1])
 
@@ -257,13 +337,9 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
 
             overlay = WandbOverlay(
                 image=background,
-                masks={
-                    "ground_truth": gt_sample,
-                    "warped": warped_sample,
-                    "predicted": pred_sample,
-                },
+                masks=masks,
                 class_labels=class_labels,
-                caption=f"GT | warped | pred | {self.stage} sample={sample_idx}",
+                caption=f"{' | '.join(caption_parts)} | {self.stage} sample={sample_idx}",
             )
             overlays[f"{self.image_tag}_{self.stage}_s{sample_idx}"] = overlay
 
@@ -298,6 +374,7 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
         super().__init__(
             metric_computers=[
                 SegmentationIoUMetricComputer(num_classes=num_classes),
+                ConstraintViolationMetricComputer(stage=overlay_val_stage),
                 SegmentationOverlayMetricComputer(
                     stage=overlay_val_stage,
                     every_n_epochs=overlay_every_n_epochs,
