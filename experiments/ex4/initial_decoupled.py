@@ -65,6 +65,7 @@ FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
 WANDB_PROJECT = "Constraints"
 WANDB_ENTITY = "ksicht"
+COUPLING_OPTIONS = ["full", "decoupled"]
 MODES = [
     "UNET",
     "BCE_OneSideSDFSquared",
@@ -135,9 +136,16 @@ def handle_decoupled(
     optimizer_callback = lambda module: torch.optim.Adam(
         module.parameters(), lr=args.learning_rate
     )
-    sample_strategy = AlwaysGt()
-    validation_strategy = NoGt(detach_seg=True)
-
+    if args.coupling == "decoupled":
+        sample_strategy = AlwaysGt()
+        validation_strategy = NoGt(detach_seg=True)
+    elif args.coupling == "full":
+        sample_strategy = NoGt(detach_seg=True)
+        validation_strategy = (
+            AlwaysGt()
+        )  # will give more information than to do this twice
+    else:
+        raise ValueError(f"Unknown coupling: {args.coupling}")
     module = ProjectLightning(
         model=net,
         spatial_transform=transformer,
@@ -179,10 +187,10 @@ def main(args):
         "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
     ]
     trn_dataset = CachedArtificalDataset(
-        TRN_FOLDER, sdf_mode="scipy", return_template_sdf=return_template_sdf
+        TRN_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
     )
     val_dataset = CachedArtificalDataset(
-        VAL_FOLDER, sdf_mode="scipy", return_template_sdf=return_template_sdf
+        VAL_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
     )
 
     BATCH_SIZE = args.batch_size
@@ -283,6 +291,12 @@ if __name__ == "__main__":
         help="Minimum validation registration-IoU increase required to reset patience.",
     )
     parser.add_argument("--smoke_test", action="store_true")
+    parser.add_argument(
+        "--coupling", type=str, choices=COUPLING_OPTIONS, default="decoupled"
+    )
+    parser.add_argument(
+        "--sdf_mode", type=str, choices=["scipy", "kornia"], default="scipy"
+    )
     args = parser.parse_args()
 
     main(args)

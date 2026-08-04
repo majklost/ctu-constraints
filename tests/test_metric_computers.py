@@ -55,3 +55,7 @@ def test_default_metrics_log_per_class_iou_and_validation_violation_counts():
     assert result.sum_logs["registration/constraint/violating_samples"].item() == 0
     assert result.sum_logs["registration/constraint/total_samples"].item() == 2
     assert "registration/iou/warped_vs_gt" in result.logs
+    assert "registration/iou/background_vs_gt" in result.logs
+    assert "registration/iou/boundary_vs_gt" in result.logs
+    assert "registration/iou/lumen_vs_gt" in result.logs
+    assert "registration/iou/plaque_vs_gt" in result.logs

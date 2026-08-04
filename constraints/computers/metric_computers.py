@@ -165,6 +165,17 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
                 num_classes=self.num_classes,
                 average="macro",
             )
+            registration_per_class_iou = multiclass_jaccard_index(
+                preds=labels.registration,
+                target=labels.ground_truth,
+                num_classes=self.num_classes,
+                average="none",
+            )
+            for class_index, class_iou in enumerate(registration_per_class_iou):
+                class_name = ARTIFICIAL_MASK_CLASS_LABELS.get(
+                    class_index, f"class_{class_index}"
+                )
+                logs[f"registration/iou/{class_name}_vs_gt"] = class_iou
 
         return MetricResult(logs=logs)
 
@@ -407,6 +418,7 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
             metric_computers=[
                 SegmentationIoUMetricComputer(num_classes=num_classes),
                 ConstraintViolationMetricComputer(stage=overlay_val_stage),
+                ConstraintViolationMetricComputer(stage="val_extra"),
                 SegmentationOverlayMetricComputer(
                     stage=overlay_val_stage,
                     every_n_epochs=overlay_every_n_epochs,
