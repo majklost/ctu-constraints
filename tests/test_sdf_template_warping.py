@@ -1,15 +1,21 @@
+from unittest.mock import patch
+
 import torch
 import torch.nn.functional as functional
 from torch import nn
-from unittest.mock import patch
 
 from constraints.computers.loss_computers import (
     SBCE_RMSE_SDFTEMPLATE,
     SBCE_ROneSideSDF_SDFTEMPLATE,
 )
+from constraints.computers.loss_terms import (
+    RegistrationDSDFMSETerm,
+    RegistrationMSE_SDFTEMPLATETerm,
+)
 from constraints.lightning_wrappers.modules import ProjectLightning
 from constraints.transforms.transformers import SpatialTransformer
 from constraints.types import LossInput, TransformSpec, WarpResult
+from constraints.utils import signed_distance_kornia_differentiable
 
 
 class _DummyModel(nn.Module):
@@ -45,7 +51,9 @@ def test_project_lightning_keeps_mask_and_sdf_template_warps_separate():
         _DummyModel(), _IdentityTransformer(), SBCE_RMSE_SDFTEMPLATE()
     )
 
-    predicted_logits, result = module.forward(logits, template, template_sdf=template_sdf)
+    predicted_logits, result = module.forward(
+        logits, template, template_sdf=template_sdf
+    )
 
     assert torch.equal(predicted_logits, logits)
     assert torch.equal(result.warped_template, template)
@@ -55,6 +63,7 @@ def test_project_lightning_keeps_mask_and_sdf_template_warps_separate():
 def test_sdf_template_losses_use_dedicated_sdf_warp():
     batch_size, height, width = 2, 12, 12
     target = _one_hot_target(batch_size, height, width)
+    target_sdf = torch.randn(batch_size, 3, height, width)
 
     for loss_computer in (SBCE_RMSE_SDFTEMPLATE(), SBCE_ROneSideSDF_SDFTEMPLATE()):
         logits = torch.randn(batch_size, 4, height, width, requires_grad=True)
@@ -69,6 +78,7 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
                 warped_template=warped_template,
                 warped_template_sdf=warped_template_sdf,
                 gt_mask=target,
+                gt_mask_sdf=target_sdf,
             )
         ).total
         total.backward()
@@ -79,17 +89,63 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
         assert warped_template_sdf.grad.abs().sum() > 0
 
 
+def test_dsdf_mse_has_finite_gradients_for_binary_foreground_template():
+    target = torch.zeros(1, 4, 32, 32)
+    target[:, 0] = 1
+    target[:, 0, 8:24, 8:24] = 0
+    target[:, 1, 8:24, 8:24] = 1
+    target_sdf = signed_distance_kornia_differentiable(target[:, 1:])
+    warped_template = target.clone().requires_grad_()
+
+    loss = RegistrationDSDFMSETerm()(
+        LossInput(
+            warped_template=warped_template,
+            gt_mask=target,
+            gt_mask_sdf=target_sdf,
+        )
+    )
+    loss.backward()
+
+    assert torch.isfinite(loss)
+    assert loss < 1e-6
+    assert warped_template.grad is not None
+    assert torch.isfinite(warped_template.grad).all()
+
+
+def test_sdf_template_mse_compares_matching_signed_distances():
+    warped_template_sdf = torch.tensor(
+        [[[[-10.0, 10.0]], [[-10.0, 10.0]], [[-10.0, 10.0]]]]
+    )
+
+    loss = RegistrationMSE_SDFTEMPLATETerm()(
+        LossInput(
+            warped_template_sdf=warped_template_sdf,
+            gt_mask_sdf=warped_template_sdf.clone(),
+        )
+    )
+
+    assert loss < 1e-8
+
+
 def test_gradient_diagnostics_are_opt_in():
     batch_size, height, width = 2, 12, 12
     target = _one_hot_target(batch_size, height, width)
     loss_input = LossInput(
-        segmentation_logits=torch.randn(batch_size, 4, height, width, requires_grad=True),
+        segmentation_logits=torch.randn(
+            batch_size, 4, height, width, requires_grad=True
+        ),
         warped_template=torch.rand(batch_size, 4, height, width, requires_grad=True),
-        warped_template_sdf=torch.randn(batch_size, 3, height, width, requires_grad=True),
+        warped_template_sdf=torch.randn(
+            batch_size, 3, height, width, requires_grad=True
+        ),
         gt_mask=target,
+        gt_mask_sdf=torch.randn(batch_size, 3, height, width),
     )
 
-    with patch("torch.autograd.grad", side_effect=AssertionError("unexpected gradient diagnostic")):
+    with patch(
+        "torch.autograd.grad",
+        side_effect=AssertionError("unexpected gradient diagnostic"),
+    ):
         result = SBCE_RMSE_SDFTEMPLATE().compute(loss_input)
 
     assert result.logs is None

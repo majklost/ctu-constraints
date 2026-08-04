@@ -285,7 +285,10 @@ class SBCE_RDSDF_MSE(CompositeLossComputer):
     """
 
     def __init__(
-        self, reg_loss_weight=1.0, sdf_clip: float | None = None, grad_diagnostics=False
+        self,
+        reg_loss_weight=1e-3,
+        sdf_clip: float | None = None,
+        grad_diagnostics=False,
     ):
         super().__init__(
             terms=[

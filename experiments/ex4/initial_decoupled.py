@@ -266,7 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("--modality", type=str, choices=MODALITIES, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--max_epochs", type=int, default=100)
+    parser.add_argument("--max_epochs", type=int, default=200)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
