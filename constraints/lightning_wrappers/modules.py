@@ -19,7 +19,7 @@ from ..datatools.datasets import (
     artificial_mask_to_label_map,
 )
 from ..transforms.transformers import SpatialTransformer
-from ..types import LossInput, MetricInput, WandbOverlay
+from ..types import LossInput, MetricInput, WandbOverlay, WarpResult
 from .sample_strategy import GtStrategy, NoGt
 
 OptimizerFactory = Callable[[nn.Module], OptimizerLRScheduler]
@@ -128,7 +128,6 @@ class ProjectLightning(MetricLoggingMixin):
             module.parameters(), lr=1e-3
         ),
         gt_strategy: GtStrategy = NoGt(),
-        template_as_sdf: bool = False,
         validation_strategy: GtStrategy | None = None,
     ):
 
@@ -140,7 +139,6 @@ class ProjectLightning(MetricLoggingMixin):
             metric_computer if metric_computer is not None else NoOpMetricComputer()
         )
         self.optimizer_callback = optimizer_callback
-        self.template_as_sdf = template_as_sdf
         self.gt_strategy = gt_strategy
         self.validation_strategy = validation_strategy
 
@@ -155,10 +153,18 @@ class ProjectLightning(MetricLoggingMixin):
         segmentation_logits, transform_spec = self.model(
             img, template, gt=gt, detach_seg=detach_seg
         )
-        if template_sdf is None:
-            warp_result = self.spatial_transform(template, transform_spec)
-        else:
-            warp_result = self.spatial_transform(template_sdf, transform_spec)
+        mask_warp_result = self.spatial_transform(template, transform_spec)
+        warped_template_sdf = None
+        if template_sdf is not None:
+            warped_template_sdf = self.spatial_transform(
+                template_sdf, transform_spec
+            ).warped_template
+        warp_result = WarpResult(
+            warped_template=mask_warp_result.warped_template,
+            transform_spec=mask_warp_result.transform_spec,
+            warped_mask=mask_warp_result.warped_mask,
+            warped_template_sdf=warped_template_sdf,
+        )
         return segmentation_logits, warp_result
 
     def _shared_step(
@@ -172,9 +178,7 @@ class ProjectLightning(MetricLoggingMixin):
             "template"
         ]  # template is same for all samples in the batch, so we can take the first one
         img = batch["image"]
-        template_sdf = None
-        if self.template_as_sdf and "template_sdf" in batch:
-            template_sdf = batch["template_sdf"]
+        template_sdf = batch["template_sdf"] if "template_sdf" in batch else None
 
         decision = strategy.decide(batch, stage, int(self.current_epoch))
         segmentation_logits, warp_result = self.forward(
@@ -184,6 +188,7 @@ class ProjectLightning(MetricLoggingMixin):
         loss_input = LossInput(
             segmentation_logits=segmentation_logits,
             warped_template=warp_result.warped_template,
+            warped_template_sdf=warp_result.warped_template_sdf,
             gt_mask=batch["mask"],
             gt_mask_sdf=batch["sdf"],
             transform_spec=warp_result.transform_spec,

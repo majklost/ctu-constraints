@@ -10,9 +10,13 @@ from .loss_terms import (
     RegistrationCentroidTerm,
     RegistrationCrossEntropyTerm,
     RegistrationDSDFMSETerm,
+    RegistrationOneSideSDFSquareTerm,
     RegistrationOneSideSDFTerm,
     SegmentationCrossEntropyTerm,
+    SegmentationOneSideSDFSquareTerm,
     SegmentationOneSideSDFTerm,
+    RegistrationMSE_SDFTEMPLATETerm,
+    RegistrationOneside_SDFTEMPLATETerm
 )
 
 def _compute_grad_interaction_logs(
@@ -179,9 +183,23 @@ class CompositeLossComputer(ProjectLossComputer):
         return LossResult(total=total, components=components, logs=logs or None)
 
 
+# BCE0segmentation metrics
+
+class SBCE_ROneSideSDFSquared(CompositeLossComputer):
+    def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=20.0, sdf_loss_weight=1.0):
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationCrossEntropyTerm()),
+                (sdf_loss_weight, RegistrationOneSideSDFSquareTerm()),
+            ]
+        )
+        # Kept for constructor backward compatibility; IoU now lives in metric computers.
+        self.num_classes = num_classes
+        self.seg_loss_weight = seg_loss_weight
+        self.sdf_loss_weight = sdf_loss_weight
 
 
-class CrossEntrAndOneSide(CompositeLossComputer):
+class SBCE_ROneSideSDF(CompositeLossComputer):
     def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=20.0, sdf_loss_weight=1.0):
         super().__init__(
             terms=[
@@ -194,8 +212,7 @@ class CrossEntrAndOneSide(CompositeLossComputer):
         self.seg_loss_weight = seg_loss_weight
         self.sdf_loss_weight = sdf_loss_weight
 
-
-class CrossEntrOnly(CompositeLossComputer):
+class SBCE_RBCE(CompositeLossComputer):
     """
     both losses (warped template vs binary mask) and (segmentation logits vs binary mask) are computed using cross entropy loss
     """
@@ -213,28 +230,8 @@ class CrossEntrOnly(CompositeLossComputer):
         self.template_loss_weight = template_loss_weight
 
 
-class OneSideOnly(CompositeLossComputer):
-    """
-    both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
-    """
 
-    def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=1.0, sdf_loss_weight=1.0, ):
-        super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationOneSideSDFTerm()),
-                (sdf_loss_weight, RegistrationOneSideSDFTerm()),
-            ]
-        )
-        """
-        both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
-        """
-        # Kept for constructor backward compatibility; IoU now lives in metric computers.
-        self.num_classes = num_classes
-        self.seg_loss_weight = seg_loss_weight
-        self.sdf_loss_weight = sdf_loss_weight
-
-
-class CentroidComputer(CompositeLossComputer):
+class SBCE_RCentroid(CompositeLossComputer):
     """
     Compute the centroid of the warped template and compare it to the centroid of the ground truth mask.
     """
@@ -251,7 +248,7 @@ class CentroidComputer(CompositeLossComputer):
 
 
 
-class DSDFComputer(CompositeLossComputer):
+class SBCE_RDSDF_MSE(CompositeLossComputer):
     """
     differeniable sign distance function computer
     """
@@ -267,7 +264,7 @@ class DSDFComputer(CompositeLossComputer):
         self.sdf_clip = sdf_clip
 
 
-class BlurredMSEComputer(CompositeLossComputer):
+class SBCE_RBlurredMSE(CompositeLossComputer):
     def __init__(self, blur_sigma=1.0, reduction="mean"):
         super().__init__(
             terms=[
@@ -280,3 +277,84 @@ class BlurredMSEComputer(CompositeLossComputer):
         self.seg_loss_weight = 1.0
         self.reg_loss_weight = 1.0
 
+
+class SBCE_RMSE_SDFTEMPLATE(CompositeLossComputer):
+    def __init__(
+        self,
+        num_classes=ARTIFICIAL_MASK_NUM_CLASSES,
+        seg_loss_weight=1.0,
+        template_loss_weight=1.0,
+    ):
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationCrossEntropyTerm()),
+                (template_loss_weight, RegistrationMSE_SDFTEMPLATETerm()),
+            ]
+        )
+        self.num_classes = num_classes
+        self.seg_loss_weight = seg_loss_weight
+        self.template_loss_weight = template_loss_weight
+
+
+class SBCE_ROneSideSDF_SDFTEMPLATE(CompositeLossComputer):
+    def __init__(
+        self,
+        num_classes=ARTIFICIAL_MASK_NUM_CLASSES,
+        seg_loss_weight=1.0,
+        template_loss_weight=1.0,
+    ):
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationCrossEntropyTerm()),
+                (template_loss_weight, RegistrationOneside_SDFTEMPLATETerm()),
+            ]
+        )
+        self.num_classes = num_classes
+        self.seg_loss_weight = seg_loss_weight
+        self.template_loss_weight = template_loss_weight
+
+
+# Misc
+
+
+class SOneSideSDFSquared_ROneSideSDFSquared(CompositeLossComputer):
+    """
+    both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
+    """
+
+    def __init__(self, num_classes=ARTIFICIAL_MASK_NUM_CLASSES, seg_loss_weight=1.0, sdf_loss_weight=1.0, ):
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationOneSideSDFSquareTerm()),
+                (sdf_loss_weight, RegistrationOneSideSDFSquareTerm()),
+            ]
+        )
+        """
+        both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
+        """
+        # Kept for constructor backward compatibility; IoU now lives in metric computers.
+        self.num_classes = num_classes
+        self.seg_loss_weight = seg_loss_weight
+        self.sdf_loss_weight = sdf_loss_weight
+
+
+
+class SOneSideSDFPlain_ROneSideSDFPlain(CompositeLossComputer):
+    """
+    both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
+    """
+    def __init__(
+        self,
+        num_classes=ARTIFICIAL_MASK_NUM_CLASSES,
+        seg_loss_weight=1.0,
+        sdf_loss_weight=1.0,
+    ):
+        super().__init__(
+            terms=[
+                (seg_loss_weight, SegmentationOneSideSDFTerm()),
+                (sdf_loss_weight, RegistrationOneSideSDFTerm()),
+            ]
+        )
+        self.num_classes = num_classes
+        self.seg_loss_weight = seg_loss_weight
+        self.sdf_loss_weight = sdf_loss_weight

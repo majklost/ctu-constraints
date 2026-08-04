@@ -7,7 +7,7 @@ from ..datatools.datasets import (
     ARTIFICIAL_MASK_NUM_CLASSES,
     ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS,
 )
-from ..losses_metrics import BlurredMSELoss, CentroidLoss, OneSideSDFSquare, RawMaskCrossEntropyLoss
+from ..losses_metrics import BlurredMSELoss, CentroidLoss, OneSideSDFSquare, OneSideSDF,RawMaskCrossEntropyLoss
 from ..types import LossInput
 from ..utils import signed_distance_kornia_differentiable
 
@@ -97,7 +97,7 @@ class SegmentationCrossEntropyTerm(LossTerm):
         return self._cross_entropy(pred_mask_logits, gt_mask)
 
 
-class SegmentationOneSideSDFTerm(LossTerm):
+class SegmentationOneSideSDFSquareTerm(LossTerm):
     def __init__(self) -> None:
         super().__init__("segmentation/one_side_sdf")
         self._one_sided = OneSideSDFSquare()
@@ -116,7 +116,43 @@ class SegmentationOneSideSDFTerm(LossTerm):
         return self._one_sided(pred_mask_probs, gt_sdf)
 
 
+class SegmentationOneSideSDFTerm(LossTerm):
+    def __init__(self) -> None:
+        super().__init__("segmentation/one_side_sdf_plain")
+        self._one_sided = OneSideSDF()
+
+    def forward(self, loss_input: LossInput) -> torch.Tensor:
+        pred_mask_logits = loss_input.segmentation_logits
+        gt_sdf = loss_input.gt_mask_sdf
+
+        assert pred_mask_logits is not None, "segmentation_logits is required for loss computation"
+        assert gt_sdf is not None, "gt_mask_sdf is required for loss computation"
+        _require_channels(pred_mask_logits, ARTIFICIAL_MASK_NUM_CLASSES, "segmentation_logits")
+        _require_channels(gt_sdf, ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS, "gt_mask_sdf")
+
+        pred_mask_probs = torch.softmax(pred_mask_logits, dim=1)
+        pred_mask_probs = pred_mask_probs[:, 1:]
+        return self._one_sided(pred_mask_probs, gt_sdf)
+    
+
 class RegistrationOneSideSDFTerm(LossTerm):
+    def __init__(self) -> None:
+        super().__init__("registration/one_side_sdf_plain")
+        self._one_sided = OneSideSDF()
+
+    def forward(self, loss_input: LossInput) -> torch.Tensor:
+        warped_template = loss_input.warped_template
+        gt_sdf = loss_input.gt_mask_sdf
+
+        assert warped_template is not None, "warped_template is required for loss computation"
+        assert gt_sdf is not None, "gt_mask_sdf is required for loss computation"
+        _require_channels(warped_template, ARTIFICIAL_MASK_NUM_CLASSES, "warped_template")
+        _require_channels(gt_sdf, ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS, "gt_mask_sdf")
+
+        warped_template = warped_template[:, 1:]
+        return self._one_sided(warped_template, gt_sdf)
+
+class RegistrationOneSideSDFSquareTerm(LossTerm):
     def __init__(self) -> None:
         super().__init__("registration/one_side_sdf")
         self._one_sided = OneSideSDFSquare()
@@ -132,6 +168,8 @@ class RegistrationOneSideSDFTerm(LossTerm):
 
         warped_template = warped_template[:, 1:]
         return self._one_sided(warped_template, gt_sdf)
+
+
 
 
 class RegistrationCrossEntropyTerm(LossTerm):
@@ -221,3 +259,70 @@ class RegistrationBlurredMSETerm(LossTerm):
         _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
 
         return self._blurred_mse_loss(warped_template, gt_mask)
+
+class RegistrationMSE_SDFTEMPLATETerm(LossTerm):
+    """Compare a warped foreground SDF template with the target foreground mask."""
+
+    def __init__(self) -> None:
+        super().__init__("registration/sdf_template_mse")
+        self._mse = nn.MSELoss()
+
+    def forward(self, loss_input: LossInput) -> torch.Tensor:
+        warped_template_sdf = loss_input.warped_template_sdf
+        gt_mask = loss_input.gt_mask
+
+        assert warped_template_sdf is not None, "warped_template_sdf is required for loss computation"
+        assert gt_mask is not None, "gt_mask is required for loss computation"
+        _require_channels(
+            warped_template_sdf,
+            ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS,
+            "warped_template_sdf",
+        )
+        _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
+
+        return self._mse(warped_template_sdf, gt_mask[:, 1:])
+
+    def logs(
+        self,
+        loss_input: LossInput,
+        weighted_loss: torch.Tensor,
+    ) -> dict[str, float | torch.Tensor] | None:
+        return _compute_grad_norm_logs(
+            loss=weighted_loss,
+            grad_refs=[loss_input.warped_template_sdf],
+            prefix="registration/warped_template_sdf",
+        )
+
+
+class RegistrationOneside_SDFTEMPLATETerm(LossTerm):
+    """Apply one-sided SDF loss to a warped foreground SDF template."""
+
+    def __init__(self) -> None:
+        super().__init__("registration/sdf_template_one_side_sdf")
+        self._one_sided = OneSideSDFSquare()
+
+    def forward(self, loss_input: LossInput) -> torch.Tensor:
+        warped_template_sdf = loss_input.warped_template_sdf
+        gt_mask = loss_input.gt_mask
+
+        assert warped_template_sdf is not None, "warped_template_sdf is required for loss computation"
+        assert gt_mask is not None, "gt_mask is required for loss computation"
+        _require_channels(
+            warped_template_sdf,
+            ARTIFICIAL_MASK_NUM_FOREGROUND_CHANNELS,
+            "warped_template_sdf",
+        )
+        _require_channels(gt_mask, ARTIFICIAL_MASK_NUM_CLASSES, "gt_mask")
+
+        return self._one_sided(gt_mask[:, 1:], warped_template_sdf)
+
+    def logs(
+        self,
+        loss_input: LossInput,
+        weighted_loss: torch.Tensor,
+    ) -> dict[str, float | torch.Tensor] | None:
+        return _compute_grad_norm_logs(
+            loss=weighted_loss,
+            grad_refs=[loss_input.warped_template_sdf],
+            prefix="registration/warped_template_sdf",
+        )

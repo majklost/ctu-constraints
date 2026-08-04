@@ -15,11 +15,11 @@ from constraints.lightning_wrappers.modules import ProjectLightning
 from constraints.datatools.datasets import CachedArtificalDataset
 from constraints import get_experiment_folder, get_data_folder, show_torch_image
 from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
-from constraints.computers.loss_computers import BlurredMSEComputer, CentroidComputer, ProjectLossComputer, DSDFComputer
+from constraints.computers.loss_computers import SBCE_RBlurredMSE, SBCE_RCentroid, ProjectLossComputer, SBCE_RDSDF_MSE
 from constraints.losses_metrics import OneSideSDFSquare
 from constraints.models.affine import ProjectWithTemplateA 
 from constraints.models.deform_only import ProjectWithTemplateD
-from constraints.computers.loss_computers import CrossEntrAndOneSide, CrossEntrOnly,OneSideOnly
+from constraints.computers.loss_computers import SBCE_ROneSideSDFSquared, SBCE_RBCE,SOneSideSDFSquared_ROneSideSDFSquared
 from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
 from torch.utils.data import DataLoader
 from pytorch_lightning.loggers import WandbLogger
@@ -69,17 +69,17 @@ def main(args):
 
 
     if args.mode == "decoupledOneSideSDF":
-        loss_computer = OneSideOnly(seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(seg_loss_weight=1.0, sdf_loss_weight=1.0)
     elif args.mode == "decoupledCE":
-        loss_computer = CrossEntrOnly(seg_loss_weight=1.0, template_loss_weight=1.0)
+        loss_computer = SBCE_RBCE(seg_loss_weight=1.0, template_loss_weight=1.0)
     elif args.mode == "decoupledStandard":
-        loss_computer = CrossEntrAndOneSide(seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=1.0, sdf_loss_weight=1.0)
     elif args.mode == "decoupledDSDF":
-        loss_computer = DSDFComputer()
+        loss_computer = SBCE_RDSDF_MSE()
     elif args.mode == "decoupledCentroid":
-        loss_computer = CentroidComputer()
+        loss_computer = SBCE_RCentroid()
     elif args.mode == "decoupledBlurred":
-        loss_computer = BlurredMSEComputer()
+        loss_computer = SBCE_RBlurredMSE()
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 

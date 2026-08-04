@@ -30,7 +30,7 @@ from constraints import get_experiment_folder, get_data_folder, show_torch_image
 from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
 from constraints.models.affine import ProjectWithTemplateA 
 from constraints.models.deform_only import ProjectWithTemplateD
-from constraints.computers.loss_computers import CrossEntrAndOneSide, CrossEntrOnly,OneSideOnly
+from constraints.computers.loss_computers import SBCE_ROneSideSDFSquared, SBCE_RBCE,SOneSideSDFSquared_ROneSideSDFSquared
 from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
 from torch.utils.data import DataLoader
 from pytorch_lightning.loggers import WandbLogger
@@ -77,15 +77,15 @@ def main(args):
     val_dataset = CachedArtificalDataset(VAL_FOLDER, sdf_mode="scipy")
 
     if args.loss_mode == "sanityS":
-        loss_computer = CrossEntrAndOneSide(seg_loss_weight=20.0, sdf_loss_weight=0)
+        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=20.0, sdf_loss_weight=0)
     elif args.loss_mode == "sanityD":
-        loss_computer = CrossEntrAndOneSide(seg_loss_weight=0, sdf_loss_weight=1.0)
+        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=0, sdf_loss_weight=1.0)
     elif args.loss_mode == "naive":
-        loss_computer = CrossEntrAndOneSide(seg_loss_weight=20.0, sdf_loss_weight=1.0)
+        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=20.0, sdf_loss_weight=1.0)
     elif args.loss_mode == "fullSDF":
-        loss_computer = OneSideOnly(seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(seg_loss_weight=1.0, sdf_loss_weight=1.0)
     elif args.loss_mode == "fullCE":
-        loss_computer = CrossEntrOnly(seg_loss_weight=1.0, template_loss_weight=1.0)
+        loss_computer = SBCE_RBCE(seg_loss_weight=1.0, template_loss_weight=1.0)
     else:
         raise ValueError(f"Unknown loss mode: {args.loss_mode}")
     metric_computer = DefaultSegmentationMetricComputer(

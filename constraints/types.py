@@ -34,6 +34,7 @@ class WarpResult:
     warped_template: torch.Tensor
     transform_spec: TransformSpec
     warped_mask: torch.Tensor | None = None
+    warped_template_sdf: torch.Tensor | None = None
 
 
 @dataclass
@@ -46,6 +47,7 @@ class LossInput:
 
     segmentation_logits: torch.Tensor | None = None
     warped_template: torch.Tensor | None = None
+    warped_template_sdf: torch.Tensor | None = None
     gt_mask: torch.Tensor | None = None
     gt_mask_sdf: torch.Tensor | None = None
     transform_spec: TransformSpec | None = None
