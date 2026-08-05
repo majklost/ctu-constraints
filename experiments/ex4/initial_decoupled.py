@@ -54,11 +54,18 @@ from constraints.lightning_wrappers.callbacks import (
 from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightning
 from constraints.lightning_wrappers.sample_strategy import AlwaysGt, NoGt
 from constraints.models.affine import ProjectWithTemplateA
+from constraints.models.affine_deform import (
+    CalcAffDefRegistrationNet,
+    DeepAffDefRegistrationNet,
+    ProjectWithTemplateBCalcAff,
+    ProjectWithTemplateBDeepAff,
+)
 from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.models.segmentator import set_segmentator_encoder_weights
 from constraints.transforms.transformers import (
     DeformableTransformer,
     RigidTransformer,
+    SequentialTransformer,
     SpatialTransformer,
 )
 
@@ -83,7 +90,10 @@ MODES = [
     "OneSideSDFPlain_OneSideSDFPlain",
 ]
 
-MODALITIES = ["affine", "deformed"]
+MODALITIES = ["affine", "deformed", "both"]
+AFF_DEF_MODES = ["calc", "deep"]
+
+
 FILE_NAME = Path(__file__).stem
 
 
@@ -110,6 +120,13 @@ def handle_decoupled(
             net = ProjectWithTemplateA(max_translation=0.5)
         case "deformed":
             net = ProjectWithTemplateD()
+        case "both":
+            if args.aff_def_mode == "calc":
+                net = ProjectWithTemplateBCalcAff(max_translation=0.5)
+            elif args.aff_def_mode == "deep":
+                net = ProjectWithTemplateBDeepAff(max_translation=0.5)
+            else:
+                raise ValueError(f"Unknown aff_def_mode: {args.aff_def_mode}")
         case _:
             raise ValueError(f"Unknown modality: {args.modality}")
 
@@ -139,16 +156,7 @@ def handle_decoupled(
     optimizer_callback = lambda module: torch.optim.Adam(
         module.parameters(), lr=args.learning_rate
     )
-    # if args.coupling == "decoupled":
-    #     sample_strategy = AlwaysGt()
-    #     validation_strategy = NoGt(detach_seg=True)
-    # elif args.coupling == "full":
-    #     sample_strategy = NoGt(detach_seg=True)
-    #     validation_strategy = (
-    #         AlwaysGt()
-    #     )  # will give more information than to do this twice
-    # else:
-    #     raise ValueError(f"Unknown coupling: {args.coupling}")
+
     match args.learning_sample_strategy:
         case "always_gt":
             sample_strategy = AlwaysGt()
@@ -188,6 +196,13 @@ def main(args):
     print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
     configure_reproducibility(seed=args.seed)
     print(f"Seed: {args.seed}")
+    if args.aff_def_mode is not None and args.modality != "both":
+        raise ValueError("aff_def_mode can only be used with modality 'both'")
+    if args.modality == "both" and args.aff_def_mode is None:
+        raise ValueError(
+            "When modality is 'both', aff_def_mode must be specified (either 'calc' or 'deep')"
+        )
+
     if args.segmentator_unlearned:
         set_segmentator_encoder_weights(None)
 
@@ -199,6 +214,10 @@ def main(args):
         TRN_FOLDER = DATA / "deformed" / "trn"
         VAL_FOLDER = DATA / "deformed" / "val"
         transformer = DeformableTransformer()
+    elif args.modality == "both":
+        TRN_FOLDER = DATA / "affine_deformed" / "trn"
+        VAL_FOLDER = DATA / "affine_deformed" / "val"
+        transformer = SequentialTransformer()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
 
@@ -243,6 +262,9 @@ def main(args):
     group_name = (
         f"ex3-{FILE_NAME}-{args.mode}-{args.modality}"  # identifies the "approach"
     )
+    if args.aff_def_mode is not None:
+        # calc and deep are different approaches - they must not share a group.
+        group_name += f"-{args.aff_def_mode}"
 
     TAGS = [
         "scratch",
@@ -253,6 +275,8 @@ def main(args):
         args.modality,
         "newer",
     ]
+    if args.aff_def_mode is not None:
+        TAGS.append(args.aff_def_mode)
     if args.special_tag:
         TAGS.append(args.special_tag)
 
@@ -355,6 +379,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--special_tag", type=str, default="", help="Add a special tag to the W&B run."
+    )
+    parser.add_argument(
+        "--aff_def_mode",
+        type=str,
+        choices=AFF_DEF_MODES,
+        default=None,
+        help="Choose the affine-deformable registration mode.",
     )
     args = parser.parse_args()
 

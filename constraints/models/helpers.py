@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 
+from ..types import RigidParams, TransformSpec
+
 """
 Building blocks for architectures
 """
@@ -106,9 +108,7 @@ class MomentsAffineAlignment(nn.Module):
         centroids = torch.stack([num_x / denom, num_y / denom], dim=-1)  # (B, C, 2)
         return centroids
 
-    def forward(
-        self, source: torch.Tensor, template: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, source: torch.Tensor, template: torch.Tensor) -> TransformSpec:
         if len(template.shape) == 3:
             template = template.unsqueeze(0)
             template = template.expand(source.shape[0], -1, -1, -1)
@@ -141,4 +141,7 @@ class MomentsAffineAlignment(nn.Module):
 
         # t = mean_tmpl - R * mean_src
         t = mean_tmpl - torch.bmm(R, mean_src.unsqueeze(2)).squeeze(2)
-        return rigid_matrix_to_grid_params(R, t, source.shape[2], source.shape[3])
+        angle, dx, dy = rigid_matrix_to_grid_params(
+            R, t, source.shape[2], source.shape[3]
+        )
+        return TransformSpec(rigid=RigidParams(angle, dx, dy))

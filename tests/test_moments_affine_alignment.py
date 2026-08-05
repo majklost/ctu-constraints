@@ -88,7 +88,11 @@ def test_moments_alignment_recovers_known_rigid_transform():
     template = _delta_masks(template_points, height, width)
     source = _delta_masks(source_points, height, width)
 
-    angle, dx, dy = MomentsAffineAlignment().forward(source, template)
+    spec = MomentsAffineAlignment().forward(source, template)
+
+    assert spec.rigid is not None
+    assert spec.steps is None and spec.field is None
+    angle, dx, dy = spec.rigid.angle, spec.rigid.dx, spec.rigid.dy
 
     assert torch.allclose(angle, angle_true.reshape(1), atol=2e-2)
 

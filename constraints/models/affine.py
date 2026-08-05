@@ -11,7 +11,7 @@ from .segmentator import get_segmentator
 
 
 class TwoBranch(torch.nn.Module):
-    def __init__(self, max_translation=0.3):
+    def __init__(self, max_translation=0.5):
         super().__init__()
         raise ValueError("TwoBranch is deprecated.")
         self.unet = smp.Unet(
@@ -44,7 +44,7 @@ class TwoBranch(torch.nn.Module):
 
 
 class AffineRegistrationNet(torch.nn.Module):
-    def __init__(self, max_translation=0.3):
+    def __init__(self, max_translation=0.5):
         super().__init__()
         self.encoder = timm.create_model(
             "resnet34",
@@ -76,7 +76,7 @@ class ProjectWithTemplateA(SegmentationRegistrationModel):
     ===
     """
 
-    def __init__(self, max_translation=0.3):
+    def __init__(self, max_translation=0.5):
         segmentation_net = get_segmentator()
         super().__init__(
             segmentation_net=segmentation_net,
