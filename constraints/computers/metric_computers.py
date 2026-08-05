@@ -261,8 +261,8 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         image_tag: str = "labels_overlay",
     ) -> None:
         super().__init__()
-        if stage not in {"train", "val"}:
-            raise ValueError("stage must be 'train' or 'val'")
+        if stage not in {"train", "val", "val_extra"}:
+            raise ValueError("stage must be 'train', 'val', or 'val_extra'")
         if every_n_epochs <= 0:
             raise ValueError("every_n_epochs must be > 0")
         if sample_indices is not None and any(idx < 0 for idx in sample_indices):
@@ -421,6 +421,13 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
                 ConstraintViolationMetricComputer(stage="val_extra"),
                 SegmentationOverlayMetricComputer(
                     stage=overlay_val_stage,
+                    every_n_epochs=overlay_every_n_epochs,
+                    sample_indices=overlay_val_sample_indices,
+                    num_classes=num_classes,
+                    image_tag=overlay_image_tag,
+                ),
+                SegmentationOverlayMetricComputer(
+                    stage="val_extra",
                     every_n_epochs=overlay_every_n_epochs,
                     sample_indices=overlay_val_sample_indices,
                     num_classes=num_classes,

@@ -4,12 +4,8 @@ seed=42
 # seed=1234
 # seed=219
 MODES=(
-    "UNET"
     "BCE_OneSideSDFSquared"
     "BCE_OneSideSDFPlain"
-    "BCE_BCE"
-    "BCE_CentroidLoss"
-    "BCE_BlurredLoss"
     "BCE_DSDF_MSE"
     "BCE_SDFTEMPLATE_MSE"
     "BCE_SDFTEMPLATE_OneSideSDFSQUARE"
@@ -52,7 +48,8 @@ for modality in "${MODALITIES[@]}"; do
         ./remote_submit.sh "${SCRIPT}" \
             --modality "${modality}" \
             --mode "${mode}" \
-            --seed "${seed}"
+            --seed "${seed}" \
+            --sdf_mode "kornia"
     done
 done
 

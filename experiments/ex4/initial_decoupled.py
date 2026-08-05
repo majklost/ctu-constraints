@@ -55,6 +55,7 @@ from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightni
 from constraints.lightning_wrappers.sample_strategy import AlwaysGt, NoGt
 from constraints.models.affine import ProjectWithTemplateA
 from constraints.models.deform_only import ProjectWithTemplateD
+from constraints.models.segmentator import set_segmentator_encoder_weights
 from constraints.transforms.transformers import (
     DeformableTransformer,
     RigidTransformer,
@@ -65,7 +66,9 @@ FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
 WANDB_PROJECT = "Constraints"
 WANDB_ENTITY = "ksicht"
-COUPLING_OPTIONS = ["full", "decoupled"]
+# COUPLING_OPTIONS = ["full", "decoupled"]
+SAMPLE_STRATEGY_OPTIONS = ["always_gt", "no_gt"]
+SAMPLE_STRATEGY_EXTRA = SAMPLE_STRATEGY_OPTIONS + ["none"]
 MODES = [
     "UNET",
     "BCE_OneSideSDFSquared",
@@ -136,16 +139,38 @@ def handle_decoupled(
     optimizer_callback = lambda module: torch.optim.Adam(
         module.parameters(), lr=args.learning_rate
     )
-    if args.coupling == "decoupled":
-        sample_strategy = AlwaysGt()
-        validation_strategy = NoGt(detach_seg=True)
-    elif args.coupling == "full":
-        sample_strategy = NoGt(detach_seg=True)
-        validation_strategy = (
-            AlwaysGt()
-        )  # will give more information than to do this twice
-    else:
-        raise ValueError(f"Unknown coupling: {args.coupling}")
+    # if args.coupling == "decoupled":
+    #     sample_strategy = AlwaysGt()
+    #     validation_strategy = NoGt(detach_seg=True)
+    # elif args.coupling == "full":
+    #     sample_strategy = NoGt(detach_seg=True)
+    #     validation_strategy = (
+    #         AlwaysGt()
+    #     )  # will give more information than to do this twice
+    # else:
+    #     raise ValueError(f"Unknown coupling: {args.coupling}")
+    match args.learning_sample_strategy:
+        case "always_gt":
+            sample_strategy = AlwaysGt()
+        case "no_gt":
+            sample_strategy = NoGt(detach_seg=True)
+        case _:
+            raise ValueError(
+                f"Unknown learning_sample_strategy: {args.learning_sample_strategy}"
+            )
+
+    match args.validation_sample_strategy:
+        case "always_gt":
+            validation_strategy = AlwaysGt()
+        case "no_gt":
+            validation_strategy = NoGt(detach_seg=True)
+        case "none":
+            validation_strategy = None
+        case _:
+            raise ValueError(
+                f"Unknown validation_sample_strategy: {args.validation_sample_strategy}"
+            )
+
     module = ProjectLightning(
         model=net,
         spatial_transform=transformer,
@@ -163,6 +188,8 @@ def main(args):
     print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
     configure_reproducibility(seed=args.seed)
     print(f"Seed: {args.seed}")
+    if args.segmentator_unlearned:
+        set_segmentator_encoder_weights(None)
 
     if args.modality == "affine":
         TRN_FOLDER = DATA / "affine" / "trn"
@@ -223,7 +250,15 @@ def main(args):
         name=f"{group_name}-seed{args.seed}",  # unique per run, human-readable
         group=group_name,  # ties all seeds of this approach together
         job_type="train",  # distinguishes from later "aggregate" runs
-        tags=["scratch", "overlay", "ex3", FILE_NAME, args.mode, args.modality],
+        tags=[
+            "scratch",
+            "overlay",
+            "ex3",
+            FILE_NAME,
+            args.mode,
+            args.modality,
+            "newer",
+        ],
         settings=wandb.Settings(console="wrap"),
     )
 
@@ -291,11 +326,28 @@ if __name__ == "__main__":
         help="Minimum validation registration-IoU increase required to reset patience.",
     )
     parser.add_argument("--smoke_test", action="store_true")
+    # parser.add_argument(
+    #     "--coupling", type=str, choices=COUPLING_OPTIONS, default="decoupled"
+    # )
     parser.add_argument(
-        "--coupling", type=str, choices=COUPLING_OPTIONS, default="decoupled"
+        "--learning_sample_strategy",
+        type=str,
+        choices=SAMPLE_STRATEGY_OPTIONS,
+        default="always_gt",
+    )
+    parser.add_argument(
+        "--validation_sample_strategy",
+        type=str,
+        choices=SAMPLE_STRATEGY_EXTRA,
+        default="no_gt",
     )
     parser.add_argument(
         "--sdf_mode", type=str, choices=["scipy", "kornia"], default="scipy"
+    )
+    parser.add_argument(
+        "--segmentator_unlearned",
+        action="store_true",
+        help="Use an unlearned segmentator.",
     )
     args = parser.parse_args()
 

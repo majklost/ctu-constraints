@@ -21,6 +21,12 @@ SCRIPT="experiments/ex4/initial_decoupled.py"
 
 FAILED=()
 
+USE_UNLEARNED_SEGMENTATOR=true
+SEGMENTATOR_ARGS=()
+if [[ "${USE_UNLEARNED_SEGMENTATOR}" == "true" ]]; then
+    SEGMENTATOR_ARGS+=("--segmentator_unlearned")
+fi
+
 echo "=== SMOKE TEST: all mode x modality combinations ==="
 for modality in "${MODALITIES[@]}"; do
     for mode in "${MODES[@]}"; do
@@ -31,7 +37,8 @@ for modality in "${MODALITIES[@]}"; do
             --batch_size 4 \
             --num_workers 0 \
             --seed "${seed}" \
-            --smoke_test; then
+            --smoke_test \
+            "${SEGMENTATOR_ARGS[@]}"; then
             echo "!!! SMOKE TEST FAILED: modality=${modality} mode=${mode}"
             FAILED+=("${modality}/${mode}")
         fi
@@ -52,7 +59,11 @@ for modality in "${MODALITIES[@]}"; do
         ./remote_submit.sh "${SCRIPT}" \
             --modality "${modality}" \
             --mode "${mode}" \
-            --seed "${seed}"
+            --seed "${seed}" \
+            --learning_sample_strategy "no_gt" \
+            --validation_sample_strategy "always_gt" \
+            "${SEGMENTATOR_ARGS[@]}"
+
     done
 done
 
