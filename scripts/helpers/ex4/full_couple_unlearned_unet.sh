@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail  # Keep testing combinations and report every failure.
+USE_UNLEARNED_SEGMENTATOR=false
+# USE_UNLEARNED_SEGMENTATOR=true
 seed=42
 # seed=1234
 # seed=219
@@ -18,13 +20,12 @@ MODES=(
 )
 MODALITIES=("affine" "deformed")
 SCRIPT="experiments/ex4/initial_decoupled.py"
-
+SPECIAL_TAG="learned_segmentator_coupled"
 FAILED=()
-
-USE_UNLEARNED_SEGMENTATOR=true
 SEGMENTATOR_ARGS=()
 if [[ "${USE_UNLEARNED_SEGMENTATOR}" == "true" ]]; then
     SEGMENTATOR_ARGS+=("--segmentator_unlearned")
+    SPECIAL_TAG="unlearned_segmentator_coupled"
 fi
 
 echo "=== SMOKE TEST: all mode x modality combinations ==="
@@ -62,6 +63,7 @@ for modality in "${MODALITIES[@]}"; do
             --seed "${seed}" \
             --learning_sample_strategy "no_gt" \
             --validation_sample_strategy "always_gt" \
+            --special_tag "${SPECIAL_TAG}" \
             "${SEGMENTATOR_ARGS[@]}"
 
     done

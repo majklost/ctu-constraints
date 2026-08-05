@@ -244,21 +244,25 @@ def main(args):
         f"ex3-{FILE_NAME}-{args.mode}-{args.modality}"  # identifies the "approach"
     )
 
+    TAGS = [
+        "scratch",
+        "overlay",
+        "ex3",
+        FILE_NAME,
+        args.mode,
+        args.modality,
+        "newer",
+    ]
+    if args.special_tag:
+        TAGS.append(args.special_tag)
+
     wandb_logger = WandbLogger(
         project=WANDB_PROJECT,
         entity=WANDB_ENTITY,
         name=f"{group_name}-seed{args.seed}",  # unique per run, human-readable
         group=group_name,  # ties all seeds of this approach together
         job_type="train",  # distinguishes from later "aggregate" runs
-        tags=[
-            "scratch",
-            "overlay",
-            "ex3",
-            FILE_NAME,
-            args.mode,
-            args.modality,
-            "newer",
-        ],
+        tags=TAGS,
         settings=wandb.Settings(console="wrap"),
     )
 
@@ -348,6 +352,9 @@ if __name__ == "__main__":
         "--segmentator_unlearned",
         action="store_true",
         help="Use an unlearned segmentator.",
+    )
+    parser.add_argument(
+        "--special_tag", type=str, default="", help="Add a special tag to the W&B run."
     )
     args = parser.parse_args()
 

@@ -49,7 +49,8 @@ for modality in "${MODALITIES[@]}"; do
             --modality "${modality}" \
             --mode "${mode}" \
             --seed "${seed}" \
-            --sdf_mode "kornia"
+            --sdf_mode "kornia" \
+            --special_tag "kornia_vs_scipy"
     done
 done
 
