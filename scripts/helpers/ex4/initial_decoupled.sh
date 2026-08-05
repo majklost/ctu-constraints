@@ -52,7 +52,8 @@ for modality in "${MODALITIES[@]}"; do
         ./remote_submit.sh "${SCRIPT}" \
             --modality "${modality}" \
             --mode "${mode}" \
-            --seed "${seed}"
+            --seed "${seed}" \
+            --special_tag "newer_decoupled_standard"
     done
 done
 

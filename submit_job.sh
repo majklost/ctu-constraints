@@ -3,7 +3,7 @@
 #SBATCH --partition=amdgpufast,gpufast,h200fast
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --mem=16G
 #SBATCH --time=04:00:00
 #SBATCH --output=slurm/slurm-%j.out
 #SBATCH --error=slurm/slurm-%j.err
