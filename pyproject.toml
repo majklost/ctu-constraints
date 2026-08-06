@@ -20,6 +20,7 @@ dependencies = [
     "setuptools<82", # FIX: Restores pkg_resources required by TensorBoard 2.20+
     "kornia>=0.8.3",
     "torch-tb-profiler>=0.4.3",
+    "jupyter-cache>=1.0.1",
 ]
 
 [build-system]
