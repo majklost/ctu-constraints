@@ -12,7 +12,7 @@ sync:
         - "data/"
         - "datasources/"
         - ".mypy_cache/"
-        - "*/__pycache__/"
+        - "__pycache__/"
         - "wandb/"
         - "weights/"
         - "predictions/"
@@ -28,14 +28,16 @@ sync:
         # Build artifacts
         - "dist/"
         - "*.egg-info/"
-        # Quarto reports
-        - "reports/.quarto/"
-        - "reports/output/"
-        - "reports/*_files/"
-        - "reports/*_cache/"
-        - "reports/*.quarto_ipynb"
-        - "reports/*.quarto_ipynb_*"
-        - "reports/*.typ"
+        # Quarto build metadata (never sync between machines — always regenerable)
+        - ".quarto/"
+        - "_freeze/"
+        - "_output/"
+        - "output/"
+        - "*_files/"
+        - "*_cache/"
+        - "*.quarto_ipynb"
+        - "*.quarto_ipynb_*"
+        - "*.typ"
 
         # OS/IDE
         - ".DS_Store"

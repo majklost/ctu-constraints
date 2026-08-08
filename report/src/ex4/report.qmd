@@ -4,7 +4,7 @@ author: "Michal Mrkos"
 date: today
 number-sections: true
 toc: true
-bibliography: references.bib
+
 
 format:
   typst:
@@ -14,7 +14,7 @@ format:
 execute:
   echo: false
   warning: false
-  daemon: false
+  cache: true
 ---
 
 ```{python}
@@ -48,7 +48,7 @@ def load(name: str, coupling: str) -> pd.DataFrame:
     df["coupling"] = coupling
     # val/* uses --learning_sample_strategy (what the run trained with);
     # val_extra/* uses --validation_sample_strategy (a second, independent
-    # forward pass). See "Coupling" below for which is which per sweep.
+    # forward pass). See "Coupling" below for which is which per sweep.Col 11: val/segmentation/iou/pred...
     if coupling == "decoupled":
         df["seg_iou_gt"] = df["val/segmentation/iou/pred_vs_gt_epoch"]
         df["reg_iou_gt"] = df["val/registration/iou/warped_vs_gt_epoch"]
@@ -81,69 +81,158 @@ decoupled_both_calc = decoupled_both[
 decoupled_both_deep = decoupled_both[decoupled_both["aff_def_mode"] == "deep"]
 seed_stability = pd.read_csv(CSV_DIR / "seed_stability.csv")
 
-MODE_ORDER = [
-    "UNET",
-    "BCE_BCE",
-    "BCE_OneSideSDFPlain",
-    "BCE_OneSideSDFSquared",
-    "BCE_CentroidLoss",
-    "BCE_BlurredLoss",
-    "BCE_DSDF_MSE",
-    "BCE_SDFTEMPLATE_MSE",
-    "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
-    "OneSideSDFPlain_OneSideSDFPlain",
-    "OneSideSDFSquared_OneSideSDFSquared",
-]
-
-# Short registration-loss label per mode, for compact table rows.
-# "†" marks the two modes whose *segmentation* loss is also non-BCE
-# (OneSideSDF{Plain,Squared}_OneSideSDF{Plain,Squared}), so they are not
-# confused with their BCE-segmentation counterparts using the same
-# registration-loss family.
+# Registration-loss label per mode, for table rows. Matches the naming used
+# in ## Losses (One-side SDF / One-side SDFSquared), not the code identifiers.
+# The "(seg ...)" suffix states the *segmentation* loss for that run, since
+# two modes (OneSideSDF{Plain,Squared}_OneSideSDF{Plain,Squared}) share their
+# registration-loss label with a BCE-segmentation counterpart and would
+# otherwise be indistinguishable in tables that only show the registration
+# loss.
 REG_LOSS_LABEL = {
     "UNET": "—",
-    "BCE_BCE": "BCE",
-    "BCE_OneSideSDFPlain": "1-side SDF",
-    "BCE_OneSideSDFSquared": "1-side SDF²",
-    "BCE_CentroidLoss": "Centroid",
-    "BCE_BlurredLoss": "Blurred MSE",
-    "BCE_DSDF_MSE": "DSDF MSE ††",
-    "BCE_SDFTEMPLATE_MSE": "SDF-template MSE",
-    "BCE_SDFTEMPLATE_OneSideSDFSQUARE": "SDF-template 1-side",
-    "OneSideSDFPlain_OneSideSDFPlain": "1-side SDF †",
-    "OneSideSDFSquared_OneSideSDFSquared": "1-side SDF² †",
+    "BCE_BCE": "BCE (seg BCE)",
+    "BCE_OneSideSDFPlain": "One-side SDF (seg BCE)",
+    "BCE_OneSideSDFSquared": "One-side SDFSquared (seg BCE)",
+    "BCE_CentroidLoss": "Centroid (seg BCE)",
+    "BCE_BlurredLoss": "Blurred MSE (seg BCE)",
+    "BCE_DSDF_MSE": "DSDF MSE (seg BCE)",
+    "BCE_SDFTEMPLATE_MSE": "SDF-template MSE (seg BCE)",
+    "BCE_SDFTEMPLATE_OneSideSDFSQUARE": "SDF-template one-side (seg BCE)",
+    "OneSideSDFPlain_OneSideSDFPlain": "One-side SDF (seg One-side)",
+    "OneSideSDFSquared_OneSideSDFSquared": "One-side SDFSquared (seg One-side)",
 }
 
 
-def order_modes(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df["mode"] = pd.Categorical(df["mode"], categories=MODE_ORDER, ordered=True)
-    return df.sort_values("mode")
+def _losses(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop the UNET row and index by human-readable registration-loss label."""
+    d = df[df["mode"] != "UNET"].drop_duplicates(subset="mode").copy()
+    d["loss"] = d["mode"].map(REG_LOSS_LABEL)
+    return d.set_index("loss")
 
 
-def reg_table(df: pd.DataFrame, gt_col: str = "reg_iou_gt", own_col: str | None = "reg_iou_own") -> pd.DataFrame:
-    """Registration-IoU-only table (segmentation IoU covered separately, see @tbl-seg-iou-family)."""
-    d = order_modes(df[df["mode"] != "UNET"]).copy()
-    d["registration loss"] = d["mode"].map(REG_LOSS_LABEL)
-    cols = {"registration loss": d["registration loss"]}
-    cols["reg IoU (GT input)"] = d[gt_col]
-    if own_col is not None:
-        cols["reg IoU (own-pred. input)"] = d[own_col]
-        cols["violations / total (own-pred.)"] = (
-            d["violations_own"].astype("Int64").astype(str)
-            + " / "
-            + d["violations_total"].astype("Int64").astype(str)
-        )
-    cols["stopped @ epoch"] = d["epoch"]
-    out = pd.DataFrame(cols).set_index("registration loss")
-    for c in out.columns:
-        if out[c].dtype == float:
-            out[c] = out[c].round(4)
+def _merge(pieces: dict, sort_by: str) -> pd.DataFrame:
+    """Build a table from named columns, sorted by `sort_by` descending.
+
+    Column names are kept short so the tables fit A4/typst; the full meaning
+    of "GT" vs. "own" input is defined once in @sec-coupling.
+    """
+    return pd.DataFrame(pieces).round(4).sort_values(sort_by, ascending=False)
+
+
+def reg_table(df: pd.DataFrame, show_own: bool = True) -> pd.DataFrame:
+    """Decoupled-baseline registration table, sorted by GT-input IoU."""
+    d = _losses(df)
+    cols = {"GT IoU": d["reg_iou_gt"]}
+    if show_own:
+        cols["own IoU"] = d["reg_iou_own"]
+    cols["epoch"] = d["epoch"]
+    return _merge(cols, sort_by="GT IoU")
+
+
+def both_table() -> pd.DataFrame:
+    """`calc` vs `deep` affine pre-alignment, side by side."""
+    c, d = _losses(decoupled_both_calc), _losses(decoupled_both_deep)
+    idx = c.index.intersection(d.index)
+    return _merge(
+        {
+            "calc GT": c.loc[idx, "reg_iou_gt"],
+            "calc own": c.loc[idx, "reg_iou_own"],
+            "deep GT": d.loc[idx, "reg_iou_gt"],
+            "deep own": d.loc[idx, "reg_iou_own"],
+        },
+        sort_by="calc GT",
+    )
+
+
+def coupling_table(coupled: pd.DataFrame, decoupled: pd.DataFrame) -> pd.DataFrame:
+    """Coupled own/GT IoU against the decoupled GT-input upper bound."""
+    c, d = _losses(coupled), _losses(decoupled)
+    idx = c.index.intersection(d.index)
+    return _merge(
+        {
+            "coupled own": c.loc[idx, "reg_iou_own"],
+            # "coupled GT": c.loc[idx, "reg_iou_gt"],
+            "decoupled GT": d.loc[idx, "reg_iou_gt"],
+        },
+        sort_by="coupled own",
+    )
+
+
+def unlearned_table(learned: pd.DataFrame, unlearned: pd.DataFrame) -> pd.DataFrame:
+    """Own-input IoU with a pretrained vs. randomly initialised encoder (coupled)."""
+    lrn, unl = _losses(learned), _losses(unlearned)
+    idx = lrn.index.intersection(unl.index)
+    out = _merge(
+        {
+            "learned own": lrn.loc[idx, "reg_iou_own"],
+            "unlearned own": unl.loc[idx, "reg_iou_own"],
+        },
+        sort_by="learned own",
+    )
+    out["delta"] = (out["unlearned own"] - out["learned own"]).round(4)
     return out
+
+
+def sdf_table(scipy_df: pd.DataFrame, kornia_df: pd.DataFrame) -> pd.DataFrame:
+    """SDF backend comparison on GT-input registration IoU."""
+    s, k = _losses(scipy_df), _losses(kornia_df)
+    idx = k.index.intersection(s.index)
+    out = _merge(
+        {"scipy": s.loc[idx, "reg_iou_gt"], "kornia": k.loc[idx, "reg_iou_gt"]},
+        sort_by="scipy",
+    )
+    out["delta"] = (out["kornia"] - out["scipy"]).round(4)
+    return out
+
+
+def seed_table() -> pd.DataFrame:
+    """Mean ± std of registration IoU over seeds 42/219/1234.
+
+    Two filters are applied first:
+
+    1. Rows carrying an explicit ``sdf_mode`` are runs from the kornia/scipy
+       sweep that leaked into this CSV, not extra seeds — they would show up
+       as duplicate seed-42 entries and skew the mean, so they are dropped.
+    2. An entry whose seed-42 run then still disagrees with the same
+       (mode, modality) in the standard decoupled sweep by more than 0.1 IoU
+       is a run-specific bug rather than seed variance, so that pair is
+       dropped as well.
+    """
+    runs = seed_stability[
+        (seed_stability["mode"] != "UNET") & seed_stability["sdf_mode"].isna()
+    ].copy()
+
+    reference = pd.concat([decoupled_affine, decoupled_deformed])[
+        ["mode", "modality", "reg_iou_gt"]
+    ]
+    seed42 = runs[runs["seed"] == 42].merge(reference, on=["mode", "modality"], how="left")
+    delta = seed42["val/registration/iou/warped_vs_gt_epoch"] - seed42["reg_iou_gt"]
+    buggy = set(
+        zip(seed42.loc[delta.abs() > 0.1, "mode"], seed42.loc[delta.abs() > 0.1, "modality"])
+    )
+    runs = runs[[(m, v) not in buggy for m, v in zip(runs["mode"], runs["modality"])]]
+
+    stats = (
+        runs.groupby(["mode", "modality"])["val/registration/iou/warped_vs_gt_epoch"]
+        .agg(["mean", "std", "count"])
+        .reset_index()
+    )
+    stats = stats[stats["count"] == 3]
+    stats["cell"] = stats["mean"].map("{:.4f}".format) + " ± " + stats["std"].map("{:.4f}".format)
+
+    table = stats.pivot(index="mode", columns="modality", values="cell")
+    means = stats.pivot(index="mode", columns="modality", values="mean")
+    table = table.loc[means.sort_values("affine", ascending=False).index]
+    table.index = [REG_LOSS_LABEL[m] for m in table.index]
+    table.index.name = "loss"
+    table.columns.name = None
+    return table
 ```
 ## Context
 
 The goal of this report is to present and explain results of the experiments 1 and 2 from previous report Diploma thesis ideas proposal III (DTI3), section First experiments.
+
+During creation of experiments I used the name affine, while it is in fact **rigid** alignment and rigid dataset (no scale involved). Term affine is used in the report for consistency with the code.
 
 ## Introduction
 
@@ -156,7 +245,7 @@ Our experiments provide a first results for given questions:
 - How it differs when registration is learned separately and when it is learned together with segmentation network?
 - How the result changes if we use pretrained segmentation network?
 - For signed distance function (SDF) do we need exact  SDF representation that is non-differentiable or can we use differentiable approximation of SDF?
-- For affine alignemt, is it better to use closed form solution or learnable network?
+- For rigid alignemt, is it better to use closed form solution or learnable network?
 
 <!-- **Goal.** `ex4` is a first sweep over candidate segmentation + registration
 loss pairs, mainly trained **decoupled** (registration branch trained/
@@ -220,7 +309,7 @@ plt.show()
 
 ```{python}
 #| label: fig-template
-#| fig-cap: "The canonical template used as the registration target for every sample (identical across the dataset; only its pose/deformation changes per sample)."
+#| fig-cap: "The canonical template used as the registration target for every sample. Each sample of dataset was created as deformation of this template."
 template = np.load(DATA_DIR / "affine" / "trn" / "template.npy")
 label_map = template.argmax(axis=0)
 
@@ -232,14 +321,9 @@ plt.tight_layout()
 plt.show()
 ```
 
-Violations counted by `does_violation_occur_with_wall`
-(`constraints/losses_metrics/constraint_function.py`) — not exactly one
-lumen blob, background leaking through the wall, plaque not touching both
-wall and lumen, enclosed background, or a fragmented wall — are filtered out
-at load time.
 
 
-### Losses
+### Losses {#sec-losses}
 
 Every loss is `CompositeLossComputer(seg_term, reg_term)`
 (`constraints/computers/loss_computers.py`), i.e. one segmentation term plus
@@ -248,16 +332,16 @@ $P_{i,c}\in[0,1]$ a predicted probability at pixel $i$/class $c$,
 $\mathrm{SDF}_{i,c}$ the ground-truth signed distance at $(i,c)$ (negative
 inside the shape), and $T$ the warped template.
 
-MSE - mean squared error, BCE - binary cross entropy, SDF - signed distance function.
+MSE - mean squared error, SDF - signed distance function.
 
-**Segmentation terms** (`constraints/computers/loss_terms.py`, `Segmentation*Term`),
+**Segmentation terms** 
 applied to the predicted segmentation logits vs. the GT mask:
 
 - **BCE** — multi-class cross entropy on the label map.
 - **One-side SDFSquared** — $\frac1N\sum_{i,c}\big[P_{i,c}\max(0,\mathrm{SDF}_{i,c})^2 + (1-P_{i,c})\max(0,-\mathrm{SDF}_{i,c})^2\big]$.
 - **One-side SDF** — $\frac1N\sum_{i,c}\big[P_{i,c}\max(0,\mathrm{SDF}_{i,c}) + (1-P_{i,c})\max(0,-\mathrm{SDF}_{i,c})\big]$.
 
-**Registration terms** (`Registration*Term`), applied to the warped template
+**Registration terms**  applied to the warped template
 $T$ (or its SDF, for the two SDF-template variants) vs. the GT mask/SDF:
 
 - **One-side SDF / One-side SDFSquared** — same one-sided loss as above, on $T$'s
@@ -273,37 +357,112 @@ $$
   mask.
 - **DSDF MSE** — MSE between a differentiable SDF of $T$
   (`signed_distance_kornia_differentiable`) and the GT SDF. 
-  `RegistrationDSDFMSETerm` recomputes its own target SDF from `gt_mask`
-  whenever it is available (always, here) and ignores the dataset's
-  precomputed `gt_mask_sdf` — so this loss is effectively independent of
-  `--sdf_mode`, unlike its name suggests.
 - **SDF-template MSE / one-side** — Idea proposed in previous email communication. Take the  SDF of template $T$  and warp it by the deformation field, as we would warp the template itself. Then either compute MSE between the warped template SDF and the GT SDF (MSE variant) or compute one-sided loss between the warped template SDF and the GT One-hot encoding (one-side variant).
+
+**Gradient behaviour.** The one-sided terms differ from the overlap-based
+ones in a way that matters for the results below. Differentiating
+$L=\frac1N\sum_{i,c} P_{i,c}\max(0,\mathrm{SDF}_{i,c})+(1-P_{i,c})\max(0,-\mathrm{SDF}_{i,c})$
+w.r.t. the predicted occupancy gives
+
+$$
+\frac{\partial L}{\partial P_{i,c}} = \mathrm{SDF}_{i,c},
+\qquad\text{and for the squared variant}\qquad
+\frac{\partial L}{\partial P_{i,c}} = \operatorname{sign}(\mathrm{SDF}_{i,c})\,\mathrm{SDF}_{i,c}^{2},
+$$
+
+so every pixel is pulled with a force proportional to its distance from the
+target boundary, however far away it is. The overlap-based terms have no such
+property: the registration BCE passes $T$ through `clamp_min(1e-8)` before the
+logarithm, so a pixel where the warped template is exactly $0$ contributes
+*zero* gradient, and Blurred MSE only sees the target through a $7\times7$,
+$\sigma=1$ Gaussian — a capture radius of roughly 3 px.
+
+Two implementation details are worth stating explicitly. The Centroid term
+uses all four channels, and because the three foreground classes have
+distinct centroids, matching them constrains rotation as well as translation
+— it is effectively a learned counterpart of the closed-form `calc`
+alignment (@sec-affdef). The one-side SDF-template term is applied with its
+arguments swapped relative to its siblings: the GT one-hot mask takes the
+role of $P$ and the *warped template SDF* takes the role of the distance
+field, i.e. it asks the warped SDF to be negative inside the GT foreground
+and positive outside.
+
+**Term weights.** The two terms are summed with fixed weights, and these are
+**not** uniform across modes — they were chosen to offset the very different
+magnitudes of the terms (a one-sided SDF term is measured in pixels, a
+squared-SDF MSE in pixels$^2$). Defaults from
+`constraints/computers/loss_computers.py`:
+
+| mode | seg. weight | reg. weight |
+|---|---|---|
+| `BCE_OneSideSDFPlain`, `BCE_OneSideSDFSquared` | 20.0 | 1.0 |
+| `BCE_DSDF_MSE` | 1.0 | 0.001 |
+| all remaining modes | 1.0 | 1.0 |
+
+These weights do **not** distort the comparison between modes, for three
+reasons. First, the two branches share no parameters in any reported run: the
+decoupled sweep passes the GT mask straight to the registration net
+(`_prepare_registration_input` short-circuits when `gt` is given) and the
+coupled sweep passes a `detach()`-ed segmentation output, so neither term
+ever contributes gradient to the other branch's weights. Second, training
+uses a single Adam optimiser, and Adam normalises each parameter's step by
+its own running gradient magnitude, so a constant factor on a term reaching a
+disjoint parameter set cancels out of the update. Third, early stopping is
+driven by IoU, not by the loss value. The weights therefore change the
+reported loss scale rather than the optimisation, and exist only to keep the
+two logged components on comparable scales.
+
+This ceases to hold the moment gradients are shared — with
+`detach_seg=False` the registration term would reach the segmentation
+encoder and the relative weighting would become a real hyper-parameter. That
+is exactly the open question in @sec-open-todo.
 
 Modes actually swept (`MODES` in `initial_decoupled.py`, `<seg>_<reg>`):
 `UNET` (segmentation only), `BCE_BCE`, `BCE_OneSideSDFPlain`,
 `BCE_OneSideSDFSquared`, `BCE_CentroidLoss`, `BCE_BlurredLoss`,
 `BCE_DSDF_MSE`, `BCE_SDFTEMPLATE_MSE`, `BCE_SDFTEMPLATE_OneSideSDFSQUARE`,
 `OneSideSDFPlain_OneSideSDFPlain`, `OneSideSDFSquared_OneSideSDFSquared`.
-Dice/Tversky-style segmentation losses were not swept — segmentation IoU
+<!-- Dice/Tversky-style segmentation losses were not swept — segmentation IoU
 already saturates near `UNET` for every BCE-segmentation mode (@sec-results),
-so the interesting variance is in the registration term.
+so the interesting variance is in the registration term. -->
+While there are more possibilities for segmentation losses (e.g. soft-Dice) their exploration would create additional complexity. We focused on registration losses, since the registration of segmentation masks is the main goal of this work.
+
 
 ### Training details & metrics
 
-- Adam, `--learning_rate 1e-3`, `--batch_size 32` (both defaults).
-- `SegmentationRegistrationEarlyStopping`
+- Adam, `--learning_rate 1e-3`, `--batch_size 32`.
+- Training terminated by early stopping -
   (`constraints/lightning_wrappers/callbacks.py`): stops after 15 validation
   epochs without a `1e-3` improvement in `val/segmentation/iou` **and**
   `val/registration/iou` (either resets patience; `UNET` has no registration
-  IoU so only segmentation counts). `--max_epochs 200` hard cap.
-- `pl.seed_everything(seed, workers=True)`, `deterministic="warn"`.
-- Reported: **IoU** (`multiclass_jaccard_index`, segmentation vs. GT and
-  warped template vs. GT) and **constraint violations**
-  (`does_violation_occur_with_wall`, counted as `violating/total` samples),
-  both via `DefaultSegmentationMetricComputer`.
+  IoU so only segmentation counts). maximum number of epochs $200$ 
+- Reported metrics: 
+    - **IoU** (`multiclass_jaccard_index`, segmentation vs. GT and
+  warped template vs. GT)
+  - **constraint violations** were measured
+  (`does_violation_occur_with_wall`), but are not reported since:
+    - On the artificial dataset, the constraint was easily satisfied even by segmentation
+    -If constraint violation occured, typically IoU was also low.
+    - After measuring the experiments it was found that some training and validation samples violated the constraint (rigid alignment shifted the template partly outside the image). Due to this the violation metric is not reliable and is not reported in the tables. Experiment can be retaken with filtered dataset if desired.
 
 ### Coupling {#sec-coupling}
 
+Looking at the project architecture, we can observe three different ways how to train it:
+
+- **decoupled** - we train segmentation and registration networks separately. During training of registration network, we feed it the ground truth segmentation mask as input $\boldsymbol{y}_{\text{s}}$ is ground truth mask in Figure 2 of previous report (DTI3). Registration network training is not affected by the segmentation network's output. 
+- **fully coupled** - we train segmentation and registration networks together. During training of registration network, we feed softmax of segmenation's network output as input. We dont backpropagate the gradient from registration network to input.
+- **fully coupled with backpropagation** - we train segmentation and registration networks together. During training of registration network, we feed softmax of segmenation's network output as input. We backpropagate the gradient from registration network to input.
+
+In this experiment we investigated the **first two** options. 
+The third option is omitted due to following reasons:
+
+- **trivial solution** - if we backpropagate the gradient from registration network to segmentation block, the segmentation can learn to output background and registration to transform the template outside of the image. This solution yield a perfect registration loss, but is wrong.
+- **feeding hidden info** - another option is that backpropagation into segmentation logits can tell segmentation "if I should move my template to right, set these pixels at top to class 1" - this is a hidden info
+- **need for weighting terms** - in practical terms, if we backpropagate the gradient from registration network to segmentation block, we need to weight the segmentation loss and registration loss. This is a hyperparameter that would need to be tuned.
+
+In future ablations, we can experiment with "warm coupling" - train with GT mask first and later (after some IoU threshold is reached) switch to own-prediction input. This is outside the scope this report, our current goal is to observe how big is the gap if we train on GT and validate on its own predictions.
+
+<!-- 
 `ProjectLightning` runs two validation passes per batch: `val/*` uses
 `--learning_sample_strategy` (what the run trained with), `val_extra/*` uses
 `--validation_sample_strategy` (`constraints/lightning_wrappers/sample_strategy.py`).
@@ -334,15 +493,12 @@ are omitted from the `deformed` results table below.
 
 A third strategy, `WarmupGt` (GT for the first $n$ epochs, then `NoGt`), is
 implemented but not wired into any `initial_decoupled.py` CLI argument and
-was not swept — see @sec-open-todo ("when to couple").
+was not swept — see @sec-open-todo ("when to couple"). -->
 
 ### Network architectures
 
-- **Segmentation branch** (`constraints/models/segmentator.py`): `smp.Unet`,
-  `resnet18` encoder, `in_channels=1`, `classes=4`. Identical for every mode
-  and modality, including `UNET`. `--segmentator_unlearned` sets
-  `encoder_weights=None` (random init instead of ImageNet) for the
-  ablation in @sec-results.
+- **Segmentation branch** (`constraints/models/segmentator.py`): `smp.Unet` based,
+  `resnet18` encoder, `in_channels=1`, `classes=4`. Except experiment with unlearned segmentator, we use pretrained encoder weights from ImageNet.
 - **Registration branch**, by modality:
   - `affine` → `AffineRegistrationNet`: `resnet34` (`timm`, ImageNet) over
     `[registration_input, template]`, into an MLP head predicting
@@ -351,39 +507,38 @@ was not swept — see @sec-open-todo ("when to couple").
     (VoxelMorph-style U-Net) predicting a dense displacement field.
   - `both` → `DeepAffDefRegistrationNet` or `CalcAffDefRegistrationNet`
     (predicted vs. closed-form affine, then deformable), see @sec-affdef.
-- **UNET baseline**: `UnetLightning`, same segmentation network trained
-  stand-alone with plain cross entropy, no registration branch/template.
+- **UNET baseline**: `UnetLightning`, same segmentation network (`constraints/models/segmentator.py`) trained
+  stand-alone with plain cross entropy, no registration branch/template following.
 
-### Affine pre-alignment: `calc` vs `deep` {#sec-affdef}
+### Rigid pre-alignment: `calc` vs `deep` {#sec-affdef}
 
-Only for the `both` modality (`--modality both`):
 
-- **`calc`** (`CalcAffDefRegistrationNet` → `MomentsAffineAlignment`) — rigid
-  alignment in closed form from per-class soft centroids (Kabsch/SVD), no
-  learned parameters. Only well-defined on non-negative input, so it is
-  hard-pinned to `registration_input_mode="probabilities"`.
+
+
+For a dataset, where both affine transformation and deformation are present, we adopt the following strategy:
+We align the template to the target (output logits of segmentation network) using rigid pre-alignment, then we pass the aligned template and the target to the deformable registration network. 
+
+
+We propose two different ways how to handle the affine pre-alignment before the deformable registration:
+
+- **`calc`** (`CalcAffDefRegistrationNet` → `MomentsAffineAlignment`) — 
+for each class, we compute its weighted mean. Each mean is then a point in 2D space. We compute moments of these points and obtain a rigid transformation that aligns the moments of the predicted mask with the moments of the GT mask. This is a closed form solution, no learning is involved.
 - **`deep`** (`DeepAffDefRegistrationNet`) — predicts the affine parameters
   with a learned `AffineRegistrationNet` before the deformable stage.
 
-Both are pinned to `registration_input_mode="probabilities"`, so — unlike
-`deformed` — the own-prediction path is not affected by the logits caveat
-above.
+
 
 ## Experiments {#sec-results}
 
 ### UNET baseline
 
-Segmentation IoU is identical between the coupled and decoupled sweeps for
-every `UNET` run (same training procedure; `gt_strategy` only affects the
-registration branch, which `UNET` doesn't have), so only one number per
-modality/init is shown.
-
+UNET serves as a comparison baseline. We can see it was able to learn from both pretrained and randomly initialized weights.
 ```{python}
 #| label: tbl-unet-baseline
 #| tbl-cap: "UNET segmentation IoU by modality and segmentation-encoder init."
 def unet_iou(df):
     row = df[df["mode"] == "UNET"]
-    return float(row["seg_iou_gt"].iloc[0]) if not row.empty else None
+    return float(row["val/segmentation/iou/pred_vs_gt_epoch"].iloc[0]) if not row.empty else "-"
 
 
 rows = [
@@ -400,7 +555,7 @@ rows = [
     {
         "modality": "both",
         "learned encoder": unet_iou(decoupled_both),
-        "unlearned encoder": None,
+        "unlearned encoder": "-",
     },
 ]
 pd.DataFrame(rows).set_index("modality").round(4)
@@ -408,11 +563,11 @@ pd.DataFrame(rows).set_index("modality").round(4)
 
 ### Segmentation IoU by segmentation-loss family {#sec-seg-iou-family}
 
-Segmentation IoU does not depend on the registration term (same forward
-pass through the segmentation branch regardless), so it only needs to be
-shown once per segmentation-loss family, not once per mode. All BCE
--segmentation modes match `UNET`; only the two modes that replace BCE with a
-one-sided SDF loss on the segmentation branch differ.
+Since in neither of the cases explained in @sec-coupling is the segmentation influenced by the registration loss, we report segmentation IoU separately.
+
+As expected, the BCE and UNET score is similar, since BCE is in fact only a UNET with added registration branch later.
+
+One can observe that proposed one-side SDF losses provide a competitive performance to BCE in segmentation task.
 
 ```{python}
 #| label: tbl-seg-iou-family
@@ -420,8 +575,8 @@ one-sided SDF loss on the segmentation branch differ.
 FAMILY_MODES = {
     "UNET": "UNET",
     "BCE": "BCE_BCE",
-    "1-side SDF": "OneSideSDFPlain_OneSideSDFPlain",
-    "1-side SDF²": "OneSideSDFSquared_OneSideSDFSquared",
+    "One-side SDF": "OneSideSDFPlain_OneSideSDFPlain",
+    "One-side SDFSquared": "OneSideSDFSquared_OneSideSDFSquared",
 }
 
 
@@ -443,143 +598,126 @@ for label in FAMILY_MODES:
 pd.DataFrame(rows).set_index("segmentation loss").round(4)
 ```
 
-### Registration IoU — `affine`
+### Registration IoU — decoupled baseline {#sec-reg-baseline}
+
+Registration branch trained with `AlwaysGt`, i.e. it never sees the
+segmentation branch's mistakes during training. GT IoU is then measured in
+the validation phase where we register the template on the GT mask; own IoU
+is measured where we register the template on the segmentation branch's own
+output. The `(seg ...)` suffix on each row states which segmentation loss
+that run used — see @sec-seg-iou-family.
 
 ```{python}
 #| label: tbl-reg-affine
-#| tbl-cap: "affine, trained AlwaysGT (decoupled). † = segmentation loss is also non-BCE (see @sec-seg-iou-family)."
+#| tbl-cap: "affine, decoupled (trained AlwaysGT)."
 reg_table(decoupled_affine)
 ```
 
-```{python}
-#| label: tbl-reg-affine-coupled
-#| tbl-cap: "affine, trained NoGT, detach_seg=True (coupled). † = segmentation loss is also non-BCE."
-reg_table(coupled_affine)
-```
+Own IoU is in this case a bit useless, since the segmentation at the end learns almost perfectly to predict the GT mask, so passing the segmentation output to the registration branch is almost the same as passing GT mask.
 
-### Registration IoU — `deformed`
-
-Own-prediction numbers for the decoupled sweep are omitted here (logits
-caveat, @sec-coupling): every mode showed a 100% cold-path constraint
--violation rate, which reflects the input-domain mismatch, not the loss.
 
 ```{python}
 #| label: tbl-reg-deformed
-#| tbl-cap: "deformed, trained AlwaysGT (decoupled). Own-prediction column omitted — see note above."
-reg_table(decoupled_deformed, own_col=None)
+#| tbl-cap: "deformed, decoupled (trained AlwaysGT). Own-input column omitted — see note below."
+reg_table(decoupled_deformed, show_own=False)
 ```
 
+The own-input column is omitted for `deformed` because there was a bug in experiment, which caused the results to be unreliable. Nevertheless, the the dataset where both affine and deformed transformation are present, reveal that difference between own-input and GT-input is not significant, so we can assume that the own-input column for `deformed` would be similar to GT-input column.
 ```{python}
-#| label: tbl-reg-deformed-coupled
-#| tbl-cap: "deformed, trained NoGT, detach_seg=True (coupled) — self-consistent, no logits caveat."
-reg_table(coupled_deformed)
+#| label: tbl-reg-both
+#| tbl-cap: "both (rigid+affine), decoupled: calc vs. deep affine pre-alignment side by side. Sorted by calc GT IoU."
+both_table()
 ```
 
-### Registration IoU — `both` (`calc` vs `deep`)
+We can see a strict dominance of `calc` over `deep`.  2/10 calc and 8/10 deep losses collapsed to the exact same IoU (0.165987) - this is IoU when only background is visible. This can be explained by the fact that at first output of rigid prediction is almost random and part of template can be outside visible frame, voxelmorph can then clear the rest be deformation to keep background everywhere. Curriculum learning (first train rigid, then deformable) can be a solution to this problem.
 
-Decoupled sweep only (trained AlwaysGT); no coupled `both` sweep has been
-run. Both `calc` and `deep` are pinned to probability input, so the
-own-prediction column is not subject to the `deformed` logits caveat.
-
-```{python}
-#| label: tbl-reg-both-calc
-#| tbl-cap: "both, calc affine pre-alignment, trained AlwaysGT (decoupled)."
-reg_table(decoupled_both_calc)
-```
-
-```{python}
-#| label: tbl-reg-both-deep
-#| tbl-cap: "both, deep affine pre-alignment, trained AlwaysGT (decoupled)."
-reg_table(decoupled_both_deep)
-```
 
 ```{python}
 #| label: note-both-collapse
 from IPython.display import Markdown
 
-collapse_value = 0.165987
-collapsed_calc = (decoupled_both_calc["reg_iou_gt"].round(6) == collapse_value).sum()
-collapsed_deep = (decoupled_both_deep["reg_iou_gt"].round(6) == collapse_value).sum()
-n_calc = len(decoupled_both_calc[decoupled_both_calc["mode"] != "UNET"])
-n_deep = len(decoupled_both_deep[decoupled_both_deep["mode"] != "UNET"])
-Markdown(
-    f"**{collapsed_calc}/{n_calc} `calc`** and **{collapsed_deep}/{n_deep} `deep`** "
-    f"registration losses above collapsed to the exact same reg IoU "
-    f"({collapse_value}) — consistent with the registration net outputting a "
-    f"constant no-op transform (unwarped template vs. a randomly posed GT) "
-    "rather than a loss-specific failure. Read only the non-collapsed rows."
-)
+COLLAPSE = 0.165987
+n_calc = int((_losses(decoupled_both_calc)["reg_iou_gt"].round(6) == COLLAPSE).sum())
+n_deep = int((_losses(decoupled_both_deep)["reg_iou_gt"].round(6) == COLLAPSE).sum())
+total = len(_losses(decoupled_both_calc))
+
 ```
 
-### Unlearned vs. learned segmentation encoder
+### Coupling ablation {#sec-coupling-ablation}
 
-Coupled sweep only (`--segmentator_unlearned`; a decoupled unlearned run
-would not test anything the coupled one doesn't already).
+The goal of this ablation was to measure if feeding the registration branch with logits from segmentation that is still learning (coupled) is worse than feeding it with GT mask (decoupled).
+<!-- How much is lost by training the registration branch on the segmentation
+branch's own output (`NoGt`, `detach_seg=True`) instead of on GT. The
+`decoupled GT` column repeats @sec-reg-baseline as the upper bound. -->
 
 ```{python}
-#| label: tbl-unlearned-effect
-#| tbl-cap: "Coupled-sweep registration IoU (GT input), learned vs. unlearned segmentation encoder."
-def unlearned_delta(learned: pd.DataFrame, unlearned: pd.DataFrame, modality: str) -> pd.DataFrame:
-    l = order_modes(learned[learned["mode"] != "UNET"]).copy()
-    u = order_modes(unlearned[unlearned["mode"] != "UNET"]).copy()
-    l["registration loss"] = l["mode"].map(REG_LOSS_LABEL)
-    u["registration loss"] = u["mode"].map(REG_LOSS_LABEL)
-    l = l.set_index("registration loss")
-    u = u.set_index("registration loss")
-    return pd.DataFrame(
-        {
-            f"{modality}: learned": l["reg_iou_gt"],
-            f"{modality}: unlearned": u["reg_iou_gt"],
-            f"{modality}: delta": u["reg_iou_gt"] - l["reg_iou_gt"],
-        }
-    )
-
-
-aff = unlearned_delta(coupled_affine, coupled_affine_unlearned, "affine")
-defm = unlearned_delta(coupled_deformed, coupled_deformed_unlearned, "deformed")
-pd.concat([aff, defm], axis=1).round(4)
+#| label: tbl-coupling-affine
+#| tbl-cap: "affine: coupled own-input and GT-input IoU vs. the decoupled GT-input upper bound."
+coupling_table(coupled_affine, decoupled_affine)
 ```
-
-### SDF backend: `kornia` vs `scipy`
-
-Only losses that read `gt_mask_sdf` are affected; only the segmentation
--loss family that reads it on the *segmentation* side
-(1-side SDF / 1-side SDF²) can show a segmentation-IoU difference — every
-other mode's segmentation IoU is backend-independent by construction.
 
 ```{python}
-#| label: tbl-kornia-vs-scipy-reg
-#| tbl-cap: "Registration IoU (GT input), decoupled sweep: scipy (exact) vs. kornia (differentiable approx.) SDF backend."
-def kornia_vs_scipy(scipy_df: pd.DataFrame, kornia_df: pd.DataFrame, modality: str) -> pd.DataFrame:
-    s = order_modes(scipy_df).copy()
-    k = order_modes(kornia_df).drop_duplicates(subset="mode").copy()
-    s["registration loss"] = s["mode"].map(REG_LOSS_LABEL)
-    k["registration loss"] = k["mode"].map(REG_LOSS_LABEL)
-    s = s.set_index("registration loss")
-    k = k.set_index("registration loss")
-    common = k.index.intersection(s.index)
-    return pd.DataFrame(
-        {
-            f"{modality}: scipy": s.loc[common, "reg_iou_gt"],
-            f"{modality}: kornia": k.loc[common, "reg_iou_gt"],
-            f"{modality}: delta": k.loc[common, "reg_iou_gt"] - s.loc[common, "reg_iou_gt"],
-        }
-    )
-
-
-aff_k = kornia_vs_scipy(decoupled_affine, decoupled_affine_kornia, "affine")
-defm_k = kornia_vs_scipy(decoupled_deformed, decoupled_deformed_kornia, "deformed")
-pd.concat([aff_k, defm_k], axis=1).round(4)
+#| label: tbl-coupling-deformed
+#| tbl-cap: "deformed: coupled own-input and GT-input IoU vs. the decoupled GT-input upper bound."
+coupling_table(coupled_deformed, decoupled_deformed)
 ```
+
+One can observe that IoU obtained by training on logits of segmentation from start and then validating on its own output performs similarly as training on GT mask and validating on GT mask. This is a positive result, since it means that we can train the registration network on the segmentation output and still obtain similar results as if we trained it on GT mask.
+
+### Unlearned-encoder ablation
+
+During the previous experiments we always used pretrained encoder weights for segmentation network.
+In this ablations, we investigate if the performance is affected if we use randomly initialized encoder weights for segmentation network instead.
+
+This ablation was run only for coupled training, since in decoupled training segmentation network would train to be highly similar to GT mask anyway, so the encoder's initialisation would not affect the registration branch.
+
+<!-- Coupled sweep only — with a decoupled run the registration branch never sees
+the segmentation output, so the encoder's initialisation could not affect it.
+`learned own` is the coupled own-input IoU with the ImageNet-pretrained
+encoder, `unlearned own` the same with `encoder_weights=None`. -->
+
+```{python}
+#| label: tbl-unlearned-affine
+#| tbl-cap: "affine: own-input IoU, pretrained vs. randomly initialised segmentation encoder."
+unlearned_table(coupled_affine, coupled_affine_unlearned)
+```
+
+```{python}
+#| label: tbl-unlearned-deformed
+#| tbl-cap: "deformed: own-input IoU, pretrained vs. randomly initialised segmentation encoder."
+unlearned_table(coupled_deformed, coupled_deformed_unlearned)
+```
+
+The result suggests that untrained UNET shows generally worse performance than pretrained UNET. Combined with the results from @sec-coupling-ablation, we can conclude that it is better to couple the registration network with segmentation, only after a certain time, when their are trained in decoupled mode.
+
+### SDF backend ablation
+
+`scipy` is the exact discrete SDF, `kornia` a differentiable approximation. While method `DSDF MSE` leverages the differentiable SDF, its comparision with other methods is affected by the fact that we are comparing two SDF images to get the loss (while other use segmentation mas). The aim of this experiment was to measure how much the backend affects the results, if we compare them fairly in drop-in replacement.
+
+```{python}
+#| label: tbl-sdf-affine
+#| tbl-cap: "affine: GT-input registration IoU, scipy vs. kornia SDF backend."
+sdf_table(decoupled_affine, decoupled_affine_kornia)
+```
+
+```{python}
+#| label: tbl-sdf-deformed
+#| tbl-cap: "deformed: GT-input registration IoU, scipy vs. kornia SDF backend."
+sdf_table(decoupled_deformed, decoupled_deformed_kornia)
+```
+
+Segmentation IoU can only differ for the two modes that use a one-sided SDF
+loss on the *segmentation* branch; every other mode is backend-independent
+there by construction.
 
 ```{python}
 #| label: tbl-kornia-vs-scipy-seg
-#| tbl-cap: "Segmentation IoU, decoupled sweep: scipy vs. kornia — only the 1-side-SDF-on-segmentation modes can differ."
+#| tbl-cap: "Segmentation IoU, scipy vs. kornia — only the one-side-SDF-on-segmentation modes can differ."
 def kornia_vs_scipy_seg(scipy_df, kornia_df, modality):
     rows = []
     for label, mode in [
-        ("1-side SDF", "OneSideSDFPlain_OneSideSDFPlain"),
-        ("1-side SDF²", "OneSideSDFSquared_OneSideSDFSquared"),
+        ("One-side SDF", "OneSideSDFPlain_OneSideSDFPlain"),
+        ("One-side SDFSquared", "OneSideSDFSquared_OneSideSDFSquared"),
     ]:
         s = scipy_df[scipy_df["mode"] == mode]["seg_iou_gt"]
         k = kornia_df[kornia_df["mode"] == mode]["seg_iou_gt"]
@@ -600,78 +738,182 @@ defm_s = kornia_vs_scipy_seg(decoupled_deformed, decoupled_deformed_kornia, "def
 aff_s.join(defm_s, how="outer").round(4)
 ```
 
-`BCE_DSDF_MSE` is not shown here — its registration term ignores
-`--sdf_mode` entirely (see @sec-open-todo), so a kornia/scipy comparison for
-it is not meaningful; both runs available for it in these CSVs are expected
-to look identical for that reason, not because the backend has no effect.
+`BCE_DSDF_MSE` is unaffected by construction — its registration term
+recomputes the target SDF from `gt_mask` and ignores `--sdf_mode` entirely, so its identical numbers are not evidence about the
+backend.
 
 ### Seed stability
 
-`seed_stability.csv` re-runs a subset of decoupled `affine`/`deformed`
-losses at seeds 42/219/1234. Before aggregating, each seed-42 row is checked
-against the corresponding entry in the standard decoupled sweep (same mode,
-modality, seed) — a large mismatch flags a run-specific bug in that
-`seed_stability` entry rather than real seed variance, and it is excluded.
+This experiment was run to measure how much the results vary if we change the random seed. We ran 3 seeds (42, 219, 1234) for each mode and modality. Whole experiment was run in decoupled mode, so it the results should be independent of the chosen segmentation network.
 
 ```{python}
-#| label: tbl-seed-bug-check
-#| tbl-cap: "seed_stability.csv vs. standard decoupled sweep, seed 42 only. Rows with |delta| > 0.1 are treated as buggy runs and excluded below."
-std = pd.concat([decoupled_affine, decoupled_deformed])[["mode", "modality", "reg_iou_gt"]]
-std = std.rename(columns={"reg_iou_gt": "standard sweep reg IoU"})
-
-s42 = seed_stability[(seed_stability["seed"] == 42) & (seed_stability["mode"] != "UNET")].copy()
-s42 = s42.rename(
-    columns={"val/registration/iou/warped_vs_gt_epoch": "seed_stability reg IoU"}
-)[["mode", "modality", "seed_stability reg IoU"]]
-
-check = s42.merge(std, on=["mode", "modality"], how="left")
-check["delta"] = check["seed_stability reg IoU"] - check["standard sweep reg IoU"]
-check["flag buggy"] = check["delta"].abs() > 0.1
-check.round(4).sort_values("delta")
-```
-
-```{python}
-#| label: fig-seed-stability
-#| fig-cap: "Registration IoU (GT input) across seeds 42/219/1234, decoupled training. Bars = mean ± std; buggy seed_stability entries (flagged above) excluded; only modes with 3 remaining seeds shown."
-buggy_pairs = set(
-    zip(check.loc[check["flag buggy"], "mode"], check.loc[check["flag buggy"], "modality"])
-)
-
-stab = seed_stability[seed_stability["mode"] != "UNET"].copy()
-stab = stab[
-    ~stab.apply(lambda r: (r["mode"], r["modality"]) in buggy_pairs and r["seed"] == 42, axis=1)
-]
-counts = stab.groupby(["mode", "modality"])["seed"].nunique()
-valid = counts[counts == 3].index
-stab = stab.set_index(["mode", "modality"]).loc[list(valid)].reset_index()
-stab["registration loss"] = stab["mode"].map(REG_LOSS_LABEL)
-
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
-for ax, modality in zip(axes, ["affine", "deformed"]):
-    sub = stab[stab["modality"] == modality]
-    grouped = (
-        sub.groupby("registration loss")["val/registration/iou/warped_vs_gt_epoch"]
-        .agg(["mean", "std"])
-        .reset_index()
-    )
-    x = np.arange(len(grouped))
-    ax.bar(x, grouped["mean"], yerr=grouped["std"], capsize=4)
-    ax.set_xticks(x)
-    ax.set_xticklabels(grouped["registration loss"], rotation=60, ha="right")
-    ax.set_title(modality)
-    ax.set_ylabel("reg IoU (mean ± std, 3 seeds)")
-plt.tight_layout()
-plt.show()
+#| label: tbl-seed-stability
+#| tbl-cap: "Registration IoU (GT input), mean ± std over 3 seeds. Buggy runs excluded."
+seed_table()
 ```
 
 `BCE_DSDF_MSE` and `BCE_SDFTEMPLATE_MSE` were not included in
 `seed_stability.csv` at all.
+
+## Discussion
+
+The subsections answer the questions from the introduction in order. Unless
+stated otherwise every number is a single run, so @tbl-seed-stability sets
+the noise floor: σ ≈ 0.007–0.056 on `affine` and σ ≈ 0.001–0.059 on
+`deformed`. Differences smaller than that should not be read as a ranking.
+
+### Which registration loss?
+
+The one-sided SDF family is the only one competitive on all three datasets:
+0.821–0.861 on `affine` (@tbl-reg-affine), 0.945–0.951 on `deformed`
+(@tbl-reg-deformed) and 0.923–0.931 on `both`/`calc` (@tbl-reg-both). Every
+other loss wins on at most one dataset.
+
+The overlap-based losses split exactly along the dataset's rigid component.
+BCE and Blurred MSE are respectable on `deformed` (0.907 / 0.963) but poor
+on `affine` (0.651 / 0.678), and Blurred MSE collapses outright on `both`
+(0.166). This follows from how the data is generated together with the
+gradient behaviour noted in @sec-losses: `deformed` has no rigid component,
+so template and target already overlap, whereas `affine` and `both` sample
+rotation in $[-\pi,\pi]$ and translation in $[-0.5,0.5]$, so the two
+frequently do not overlap at all. In the non-overlapping case the registration
+BCE contributes literally zero gradient (the `clamp_min(1e-8)` before the log
+saturates) and Blurred MSE sees nothing beyond its ~3 px capture radius, while
+the one-sided SDF terms still pull every pixel with a force equal to its
+distance from the target boundary. This is the main reason to prefer them.
+
+`SDF-template MSE` is the worst loss on `affine` (0.283, i.e. an essentially
+unmoved template) yet reaches 0.897 on `deformed` — the same reading, since
+an MSE over the whole warped SDF is dominated by far-field values and, with
+an unknown large pose, the cheapest solution is the mean pose. Its one-sided
+variant does not collapse on `affine` (0.836), so it is the plain-MSE
+pairing that fails rather than the SDF-template idea itself.
+
+The differing term weights across modes (@sec-losses) do not confound this
+ranking: with disjoint branch parameters and Adam, a constant factor on one
+term does not change that branch's updates.
+
+Taking this forward: the one-sided SDF (plain) loss is the reasonable
+default, DSDF MSE is worth keeping as a `deformed` specialist (best there at
+0.976), and SDF-template MSE can be dropped.
+
+### Segmentation loss
+
+Adding a registration branch does not cost segmentation quality: every
+BCE-segmentation mode sits at the plain U-Net level (0.9759 vs 0.9748 for
+`UNET` on `affine`, @tbl-seg-iou-family).
+
+Replacing BCE with a one-sided SDF loss on the segmentation branch costs
+about 0.01–0.02 IoU consistently (0.9651 / 0.9615 vs 0.9759 on `affine`;
+0.9407 / 0.9395 vs 0.9628 on `deformed`) and does not buy a matching
+registration gain — the `(seg One-side)` rows do not dominate their
+`(seg BCE)` counterparts in @tbl-reg-affine or @tbl-reg-deformed, they only
+trade places within the noise band. There is currently no reason to move
+away from BCE for segmentation.
+
+### Can registration be trained on the segmentation output?
+
+Yes. On `affine` the coupled own-input IoU is within
+noise of the decoupled GT-input upper bound (0.8455 vs 0.8209 and 0.8304 vs
+0.8456 for the two one-sided SDF variants, @tbl-coupling-affine); on
+`deformed` the top losses give up roughly 0.01–0.02 (DSDF MSE 0.9568 vs
+0.9757, @tbl-coupling-deformed). That is expected when segmentation IoU is
+already 0.96–0.98: the branch's own output is a good stand-in for the GT
+mask.
+
+
+
+<!-- The one clear negative result is that the coupled `deformed` models are
+*specialised* to their own input. Fed GT masks instead, the same models drop
+to 0.51–0.65 IoU (DSDF MSE 0.9568 → 0.6306), while the coupled `affine`
+models show no such gap (0.8455 → 0.8451). The asymmetry follows the input
+convention: `ProjectWithTemplateD` feeds raw logits whereas the `affine` and
+`both` models feed probabilities (@sec-coupling), so the `deformed`
+registration net is trained on a distribution that one-hot GT masks lie far
+outside of. Standardising every model on probabilities looks necessary
+before any firm conclusion about the deformable branch is drawn. -->
+
+### Does a pretrained segmentation dominate random init segmentation?
+
+Not for segmentation: 0.9748 → 0.9739 on `affine` and 0.9634 → 0.9617 on
+`deformed` (@tbl-unet-baseline). The synthetic images are single-channel and
+low-texture, so ImageNet features have little to contribute.
+
+For registration the effect is mixed and mostly inside the noise band
+(@tbl-unlearned-affine, @tbl-unlearned-deformed): deltas span −0.101…+0.037
+on `affine` and −0.093…+0.025 on `deformed` with no consistent sign. Only
+three drops clearly exceed seed noise (One-side SDF (seg BCE) −0.101 and
+(seg One-side) −0.089 on `affine`, SDF-template one-side −0.093 on
+`deformed`). Pretraining therefore does not change what the segmentation
+branch produces, but may change the registration branch's training dynamics
+— on single-seed evidence I would not call that established.
+
+### Exact or differentiable SDF?
+
+The differentiable `kornia` approximation carries no penalty and is if
+anything slightly better, so the exact non-differentiable transform is not
+required. On `affine` the deltas are mixed and within noise (−0.022…+0.027,
+@tbl-sdf-affine). On `deformed` `kornia` is consistently ahead for the
+one-sided family (+0.016…+0.030, @tbl-sdf-deformed), which is well outside
+that family's very small `deformed` spread (σ ≈ 0.002–0.005). Segmentation
+IoU also improves in every cell measured (+0.010 and +0.009 on `affine`,
++0.022 on `deformed`, @tbl-kornia-vs-scipy-seg).
+
+A plausible explanation is that the approximation is smoother than the exact
+discrete distance transform and therefore a better-conditioned target, but
+these experiments do not test that. Note that DSDF MSE is unaffected by
+construction, since it recomputes its target from `gt_mask` — its identical
+rows say nothing about the backends.
+
+### Closed-form or learned rigid pre-alignment?
+
+Closed form wins decisively. With `deep`, 8 of 10 losses collapse to the
+no-op value 0.166; with `calc` only 2 do, and the best `calc` configuration
+reaches 0.931 against 0.634 for the best `deep` one (@tbl-reg-both).
+
+The learned rigid head is not broken in itself — the same
+`AffineRegistrationNet` reaches 0.846 when it is the *only* registration
+stage (@tbl-reg-affine). What fails is training rigid and deformable stages
+jointly from scratch: the deformable stage can absorb a wrong pose, so the
+rigid stage never receives a clean gradient. That is fairly direct evidence
+for the staged-coupling question in @sec-open-todo — the two stages likely
+need to be pretrained separately, or the rigid stage supervised, before
+being trained together.
+
+A related observation points the same way: on `affine` the task is exactly
+solvable by a rigid transform, so a perfect pose estimate would give IoU ≈ 1,
+yet the best learned rigid registration reaches only 0.861. The residual sits
+in the pose regression itself (a $\pm\pi$ rotation predicted through a
+sin/cos head), not in the template or the warping.
+
+### Reliability
+
+Most numbers come from a single seed, and on `affine` the seed spread is
+large enough (up to σ = 0.056) that rankings separated by less than ~0.05
+are not meaningful there.
+
+More importantly, the `seed_stability` sweep does not reproduce the main
+sweep at the same seed: One-side SDFSquared (seg One-side) on `affine` is
+0.861 in @tbl-reg-affine but 0.796 ± 0.011 in @tbl-seed-stability, and
+One-side SDF (seg BCE) is 0.846 vs 0.780 ± 0.049. Those runs predate the
+current sweep — their configuration columns are empty in the CSV — so their
+absolute values should not be compared against the other tables; only the
+spread within them is informative. The 0.1 exclusion threshold catches only
+the worst case (SDF-template one-side on `deformed`) and several `affine`
+entries sit just below it, so they remain suspect.
+
+Finally, `both` was run decoupled only and at one seed, and two losses
+collapse under `calc` as well as `deep`, so that table is trustworthy mainly
+at the top (One-side SDF, DSDF MSE).
 
 ## Possible ablations
 
 - **Field regularization.** No smoothness/bending-energy regularization on
   the deformable branch's predicted field — an unregularized field can in
   principle reach high IoU via a physically unrealistic warp.
+- **Warm coupling**
+- **coupled on (rigid+deformed) dataset**
+
 
 ## Open questions, decisions and claims {#sec-open-todo}
 
@@ -682,11 +924,12 @@ plt.show()
 - **Gradient flow through the mask into the registration net** — currently
   detached (`detach_seg=True`) for the coupled sweep. If enabled, does the
   segmentation loss need reweighting?
-- **Drop the implicit-template path** (SDF-template MSE / 1-side)? Given the
-  segmentation term seems to be a bigger factor than the registration term
-  for `BCE_SDFTEMPLATE_MSE`'s `affine` degeneracy (@tbl-reg-affine vs.
-  @tbl-reg-both-calc, where the same registration term is not degenerate),
-  this may be more about that specific pairing than the SDF-template idea.
+- **Drop the implicit-template path** (SDF-template MSE / one-side)? The MSE
+  variant degenerates only on `affine` (0.283, @tbl-reg-affine) while
+  reaching 0.897 on `deformed` (@tbl-reg-deformed) and 0.670 on `both`/`calc`
+  (@tbl-reg-both), and the one-sided variant does not degenerate anywhere. So
+  the failure looks specific to the plain-MSE pairing under large rigid
+  motion rather than to the SDF-template idea itself.
 - **Is late coupling (pretrain both parts separately, couple after) the
   right approach?** For both the rigid and deformable stages, or only one?
 - `BCE_DSDF_MSE`'s registration term ignoring `--sdf_mode` (@sec-open-todo
