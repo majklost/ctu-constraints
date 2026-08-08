@@ -4,7 +4,7 @@ author: "Michal Mrkos"
 date: today
 number-sections: true
 toc: true
-
+bibliography: references.bib
 
 format:
   typst:
@@ -232,7 +232,7 @@ def seed_table() -> pd.DataFrame:
 
 The goal of this report is to present and explain results of the experiments 1 and 2 from previous report Diploma thesis ideas proposal III (DTI3), section First experiments.
 
-During creation of experiments I used the name affine, while it is in fact **rigid** alignment and rigid dataset (no scale involved). Term affine is used in the report for consistency with the code.
+During creation of experiments we used the name affine, while it is in fact **rigid** alignment and rigid dataset (no scale involved). Term affine is used in the report for consistency with the code.
 
 ## Introduction
 
@@ -245,7 +245,7 @@ Our experiments provide a first results for given questions:
 - How it differs when registration is learned separately and when it is learned together with segmentation network?
 - How the result changes if we use pretrained segmentation network?
 - For signed distance function (SDF) do we need exact  SDF representation that is non-differentiable or can we use differentiable approximation of SDF?
-- For rigid alignemt, is it better to use closed form solution or learnable network?
+- For rigid pre-alignemt, is it better to use closed form solution or learnable network?
 
 <!-- **Goal.** `ex4` is a first sweep over candidate segmentation + registration
 loss pairs, mainly trained **decoupled** (registration branch trained/
@@ -387,35 +387,6 @@ role of $P$ and the *warped template SDF* takes the role of the distance
 field, i.e. it asks the warped SDF to be negative inside the GT foreground
 and positive outside.
 
-**Term weights.** The two terms are summed with fixed weights, and these are
-**not** uniform across modes — they were chosen to offset the very different
-magnitudes of the terms (a one-sided SDF term is measured in pixels, a
-squared-SDF MSE in pixels$^2$). Defaults from
-`constraints/computers/loss_computers.py`:
-
-| mode | seg. weight | reg. weight |
-|---|---|---|
-| `BCE_OneSideSDFPlain`, `BCE_OneSideSDFSquared` | 20.0 | 1.0 |
-| `BCE_DSDF_MSE` | 1.0 | 0.001 |
-| all remaining modes | 1.0 | 1.0 |
-
-These weights do **not** distort the comparison between modes, for three
-reasons. First, the two branches share no parameters in any reported run: the
-decoupled sweep passes the GT mask straight to the registration net
-(`_prepare_registration_input` short-circuits when `gt` is given) and the
-coupled sweep passes a `detach()`-ed segmentation output, so neither term
-ever contributes gradient to the other branch's weights. Second, training
-uses a single Adam optimiser, and Adam normalises each parameter's step by
-its own running gradient magnitude, so a constant factor on a term reaching a
-disjoint parameter set cancels out of the update. Third, early stopping is
-driven by IoU, not by the loss value. The weights therefore change the
-reported loss scale rather than the optimisation, and exist only to keep the
-two logged components on comparable scales.
-
-This ceases to hold the moment gradients are shared — with
-`detach_seg=False` the registration term would reach the segmentation
-encoder and the relative weighting would become a real hyper-parameter. That
-is exactly the open question in @sec-open-todo.
 
 Modes actually swept (`MODES` in `initial_decoupled.py`, `<seg>_<reg>`):
 `UNET` (segmentation only), `BCE_BCE`, `BCE_OneSideSDFPlain`,
@@ -438,16 +409,16 @@ While there are more possibilities for segmentation losses (e.g. soft-Dice) thei
   IoU so only segmentation counts). maximum number of epochs $200$ 
 - Reported metrics: 
     - **IoU** (`multiclass_jaccard_index`, segmentation vs. GT and
-  warped template vs. GT)
+  warped template vs. GT), measured in last epoch
   - **constraint violations** were measured
   (`does_violation_occur_with_wall`), but are not reported since:
     - On the artificial dataset, the constraint was easily satisfied even by segmentation
     -If constraint violation occured, typically IoU was also low.
-    - After measuring the experiments it was found that some training and validation samples violated the constraint (rigid alignment shifted the template partly outside the image). Due to this the violation metric is not reliable and is not reported in the tables. Experiment can be retaken with filtered dataset if desired.
+    - After measuring the experiments it was found that some training and validation samples violated the constraint (rigid alignment shifted the template partly outside the image). Due to this the violation metric is not reliable to evaluate if method is violation-free and is not reported in the tables. Experiment can be retaken with filtered dataset if desired.
 
 ### Coupling {#sec-coupling}
 
-Looking at the project architecture, we can observe three different ways how to train it:
+Looking at the project architecture, we can observe at least three different ways how to train it:
 
 - **decoupled** - we train segmentation and registration networks separately. During training of registration network, we feed it the ground truth segmentation mask as input $\boldsymbol{y}_{\text{s}}$ is ground truth mask in Figure 2 of previous report (DTI3). Registration network training is not affected by the segmentation network's output. 
 - **fully coupled** - we train segmentation and registration networks together. During training of registration network, we feed softmax of segmenation's network output as input. We dont backpropagate the gradient from registration network to input.
@@ -456,11 +427,11 @@ Looking at the project architecture, we can observe three different ways how to 
 In this experiment we investigated the **first two** options. 
 The third option is omitted due to following reasons:
 
-- **trivial solution** - if we backpropagate the gradient from registration network to segmentation block, the segmentation can learn to output background and registration to transform the template outside of the image. This solution yield a perfect registration loss, but is wrong.
+- **trivial solution** - if we backpropagate the gradient from registration network to segmentation block, the segmentation can learn to output background only and registration to transform the template outside of the image (obtaining also backgroud-only image). This solution yield a perfect registration loss, but is totally wrong.
 - **feeding hidden info** - another option is that backpropagation into segmentation logits can tell segmentation "if I should move my template to right, set these pixels at top to class 1" - this is a hidden info
 - **need for weighting terms** - in practical terms, if we backpropagate the gradient from registration network to segmentation block, we need to weight the segmentation loss and registration loss. This is a hyperparameter that would need to be tuned.
 
-In future ablations, we can experiment with "warm coupling" - train with GT mask first and later (after some IoU threshold is reached) switch to own-prediction input. This is outside the scope this report, our current goal is to observe how big is the gap if we train on GT and validate on its own predictions.
+In future ablations, we can experiment with "warm coupling" - train with GT mask first and later (after some IoU threshold is reached) switch to own-prediction input. This is outside the scope this report, our current goal is to observe how big is the gap if we train on GT, validate on its own predictions and observe if imperfect logits from segmentation can spoil the learning of registration part.
 
 <!-- 
 `ProjectLightning` runs two validation passes per batch: `val/*` uses
@@ -602,9 +573,9 @@ pd.DataFrame(rows).set_index("segmentation loss").round(4)
 
 Registration branch trained with `AlwaysGt`, i.e. it never sees the
 segmentation branch's mistakes during training. GT IoU is then measured in
-the validation phase where we register the template on the GT mask; own IoU
+the validation phase where we register the template on the GT mask (Always GT). Own IoU
 is measured where we register the template on the segmentation branch's own
-output. The `(seg ...)` suffix on each row states which segmentation loss
+output (No GT, performance that would be achieve during real inference). The `(seg ...)` suffix on each row states which segmentation loss
 that run used — see @sec-seg-iou-family.
 
 ```{python}
@@ -622,14 +593,14 @@ Own IoU is in this case a bit useless, since the segmentation at the end learns 
 reg_table(decoupled_deformed, show_own=False)
 ```
 
-The own-input column is omitted for `deformed` because there was a bug in experiment, which caused the results to be unreliable. Nevertheless, the the dataset where both affine and deformed transformation are present, reveal that difference between own-input and GT-input is not significant, so we can assume that the own-input column for `deformed` would be similar to GT-input column.
+The own-input column is omitted for `deformed` because there was a bug in experiment, which caused the results to be unreliable. Nevertheless, the dataset where both affine and deformed transformation are present, reveal that difference between own-input and GT-input is not significant, so we can assume that the own-input column for `deformed` would be similar to GT-input column.
 ```{python}
 #| label: tbl-reg-both
 #| tbl-cap: "both (rigid+affine), decoupled: calc vs. deep affine pre-alignment side by side. Sorted by calc GT IoU."
 both_table()
 ```
 
-We can see a strict dominance of `calc` over `deep`.  2/10 calc and 8/10 deep losses collapsed to the exact same IoU (0.165987) - this is IoU when only background is visible. This can be explained by the fact that at first output of rigid prediction is almost random and part of template can be outside visible frame, voxelmorph can then clear the rest be deformation to keep background everywhere. Curriculum learning (first train rigid, then deformable) can be a solution to this problem.
+We can see a strict dominance of `calc` over `deep`.  2/10 calc and 8/10 deep losses collapsed to the exact same IoU (0.165987) - this is IoU when only background is visible. This can be explained by the fact that at first output of rigid prediction is almost random and part of template can be outside visible frame, voxelmorph can then clear the rest be deformation to keep background everywhere. Curriculum learning (first train rigid, then deformable) might be a solution to this problem.
 
 
 ```{python}
@@ -645,7 +616,7 @@ total = len(_losses(decoupled_both_calc))
 
 ### Coupling ablation {#sec-coupling-ablation}
 
-The goal of this ablation was to measure if feeding the registration branch with logits from segmentation that is still learning (coupled) is worse than feeding it with GT mask (decoupled).
+The goal of this ablation was to measure if feeding the registration branch with logits from segmentation that is still learning (coupled) is worse than feeding it with GT mask (decoupled). Alternatively phrased, we are asking if we can connect networks from the beginning of training.
 <!-- How much is lost by training the registration branch on the segmentation
 branch's own output (`NoGt`, `detach_seg=True`) instead of on GT. The
 `decoupled GT` column repeats @sec-reg-baseline as the upper bound. -->
@@ -669,7 +640,7 @@ One can observe that IoU obtained by training on logits of segmentation from sta
 During the previous experiments we always used pretrained encoder weights for segmentation network.
 In this ablations, we investigate if the performance is affected if we use randomly initialized encoder weights for segmentation network instead.
 
-This ablation was run only for coupled training, since in decoupled training segmentation network would train to be highly similar to GT mask anyway, so the encoder's initialisation would not affect the registration branch.
+This ablation was run only for **coupled training**, since for decoupled training, segmentation network would train to be highly similar to GT mask anyway, so the encoder's initialisation would not affect the registration branch.
 
 <!-- Coupled sweep only — with a decoupled run the registration branch never sees
 the segmentation output, so the encoder's initialisation could not affect it.
@@ -678,13 +649,13 @@ encoder, `unlearned own` the same with `encoder_weights=None`. -->
 
 ```{python}
 #| label: tbl-unlearned-affine
-#| tbl-cap: "affine: own-input IoU, pretrained vs. randomly initialised segmentation encoder."
+#| tbl-cap: "affine: coupled, own-input IoU, pretrained vs. randomly initialised segmentation encoder."
 unlearned_table(coupled_affine, coupled_affine_unlearned)
 ```
 
 ```{python}
 #| label: tbl-unlearned-deformed
-#| tbl-cap: "deformed: own-input IoU, pretrained vs. randomly initialised segmentation encoder."
+#| tbl-cap: "deformed: coupled, own-input IoU, pretrained vs. randomly initialised segmentation encoder."
 unlearned_table(coupled_deformed, coupled_deformed_unlearned)
 ```
 
@@ -757,19 +728,18 @@ seed_table()
 
 ## Discussion
 
-The subsections answer the questions from the introduction in order. Unless
+The following subsections try to answer qustions from introduction. Unless
 stated otherwise every number is a single run, so @tbl-seed-stability sets
 the noise floor: σ ≈ 0.007–0.056 on `affine` and σ ≈ 0.001–0.059 on
-`deformed`. Differences smaller than that should not be read as a ranking.
+`deformed`. Differences smaller than that should not be considered as important.
 
 ### Which registration loss?
 
-The one-sided SDF family is the only one competitive on all three datasets:
+The one-sided SDF family shows competitive performance on all three datasets:
 0.821–0.861 on `affine` (@tbl-reg-affine), 0.945–0.951 on `deformed`
-(@tbl-reg-deformed) and 0.923–0.931 on `both`/`calc` (@tbl-reg-both). Every
-other loss wins on at most one dataset.
+(@tbl-reg-deformed) and 0.923–0.931 on `both`/`calc` (@tbl-reg-both).
 
-The overlap-based losses split exactly along the dataset's rigid component.
+<!-- The overlap-based losses split exactly along the dataset's rigid component.
 BCE and Blurred MSE are respectable on `deformed` (0.907 / 0.963) but poor
 on `affine` (0.651 / 0.678), and Blurred MSE collapses outright on `both`
 (0.166). This follows from how the data is generated together with the
@@ -780,46 +750,50 @@ frequently do not overlap at all. In the non-overlapping case the registration
 BCE contributes literally zero gradient (the `clamp_min(1e-8)` before the log
 saturates) and Blurred MSE sees nothing beyond its ~3 px capture radius, while
 the one-sided SDF terms still pull every pixel with a force equal to its
-distance from the target boundary. This is the main reason to prefer them.
+distance from the target boundary. This is the main reason to prefer them. -->
 
-`SDF-template MSE` is the worst loss on `affine` (0.283, i.e. an essentially
-unmoved template) yet reaches 0.897 on `deformed` — the same reading, since
+The losses based on overlap (BCE, Blurred MSE) are useful on deformed (0.907, 0.963), but perform poorly on `affine` (0.65,0.67). This can be explained by the fact that `deformed has no rigid component, so a significant overlap is already present, while `affine` and `both` might not initially overlap at all. At non-overlapping case, BCE has zero gradient and Blurred MSE sees nothing beyond its 3 pixel radius.
+
+
+`SDF-template MSE` is the worst loss on `affine` (0.283, an essentially
+unmoved template) yet reaches 0.897 on `deformed`, possible explanation can be that training collapsed to the pose of the mean pose, not respecting rotation. Validation examples show a strict difference, some are matched perfectly, while other got stuck in local minima (incorrectly rotated and without shift).
+<!-- — the same reading, since
 an MSE over the whole warped SDF is dominated by far-field values and, with
 an unknown large pose, the cheapest solution is the mean pose. Its one-sided
 variant does not collapse on `affine` (0.836), so it is the plain-MSE
-pairing that fails rather than the SDF-template idea itself.
-
-The differing term weights across modes (@sec-losses) do not confound this
-ranking: with disjoint branch parameters and Adam, a constant factor on one
-term does not change that branch's updates.
-
-Taking this forward: the one-sided SDF (plain) loss is the reasonable
-default, DSDF MSE is worth keeping as a `deformed` specialist (best there at
-0.976), and SDF-template MSE can be dropped.
+pairing that fails rather than the SDF-template idea itself. -->
 
 ### Segmentation loss
 
-Adding a registration branch does not cost segmentation quality: every
+Registrastion branch does not influence segmentation quality, every segmentation mode based on BCE provides same performance as baseline U-Net.
+<!-- Adding a registration branch does not cost segmentation quality: every
 BCE-segmentation mode sits at the plain U-Net level (0.9759 vs 0.9748 for
-`UNET` on `affine`, @tbl-seg-iou-family).
+`UNET` on `affine`, @tbl-seg-iou-family). -->
 
-Replacing BCE with a one-sided SDF loss on the segmentation branch costs
+We can observe that one-sided SDF loss performs consistently 0.01-0.02 IoU less than BCE and currently does not provide an advantage for registration. Choice of one-sided SDF as segmentation loss would be suitable, only if registration signal and segmentation signal interfere during weight learning. At that point, same loss might offer similar scaling of gradients, balancing the objectives.
+
+<!-- Replacing BCE with a one-sided SDF loss on the segmentation branch costs
 about 0.01–0.02 IoU consistently (0.9651 / 0.9615 vs 0.9759 on `affine`;
 0.9407 / 0.9395 vs 0.9628 on `deformed`) and does not buy a matching
 registration gain — the `(seg One-side)` rows do not dominate their
 `(seg BCE)` counterparts in @tbl-reg-affine or @tbl-reg-deformed, they only
 trade places within the noise band. There is currently no reason to move
-away from BCE for segmentation.
+away from BCE for segmentation. -->
 
 ### Can registration be trained on the segmentation output?
 
-Yes. On `affine` the coupled own-input IoU is within
+<!-- Yes. On `affine` the coupled own-input IoU is within
 noise of the decoupled GT-input upper bound (0.8455 vs 0.8209 and 0.8304 vs
 0.8456 for the two one-sided SDF variants, @tbl-coupling-affine); on
 `deformed` the top losses give up roughly 0.01–0.02 (DSDF MSE 0.9568 vs
 0.9757, @tbl-coupling-deformed). That is expected when segmentation IoU is
 already 0.96–0.98: the branch's own output is a good stand-in for the GT
-mask.
+mask. -->
+
+The coupling experiment demonstrated that the coupled IoU is withing noise of the decoupled GT-input, which should serve as upper bound. On `deformed` the top losses give up about 0.01–0.02 (DSDF MSE 0.9568 vs
+0.9757, @tbl-coupling-deformed). That is expected when segmentation IoU is
+already 0.96–0.98: the branch's own output is already similar to the GT
+mask. 
 
 
 
@@ -833,26 +807,25 @@ registration net is trained on a distribution that one-hot GT masks lie far
 outside of. Standardising every model on probabilities looks necessary
 before any firm conclusion about the deformable branch is drawn. -->
 
-### Does a pretrained segmentation dominate random init segmentation?
+### Does untrained encoder spoils performance?
 
-Not for segmentation: 0.9748 → 0.9739 on `affine` and 0.9634 → 0.9617 on
+Not for segmentation: 0.9748 vs  0.9739 on `affine` and 0.9634 vs 0.9617 on
 `deformed` (@tbl-unet-baseline). The synthetic images are single-channel and
-low-texture, so ImageNet features have little to contribute.
+low-texture, so ImageNet features have little contribution.
 
 For registration the effect is mixed and mostly inside the noise band
 (@tbl-unlearned-affine, @tbl-unlearned-deformed): deltas span −0.101…+0.037
 on `affine` and −0.093…+0.025 on `deformed` with no consistent sign. Only
-three drops clearly exceed seed noise (One-side SDF (seg BCE) −0.101 and
+three drops clearly exceed noise (One-side SDF (seg BCE) −0.101 and
 (seg One-side) −0.089 on `affine`, SDF-template one-side −0.093 on
 `deformed`). Pretraining therefore does not change what the segmentation
-branch produces, but may change the registration branch's training dynamics
-— on single-seed evidence I would not call that established.
+branch produces, but may change the registration branch's training dynamics.
 
 ### Exact or differentiable SDF?
 
-The differentiable `kornia` approximation carries no penalty and is if
-anything slightly better, so the exact non-differentiable transform is not
-required. On `affine` the deltas are mixed and within noise (−0.022…+0.027,
+The differentiable `kornia` approximation carries no penalty and might be
+even slightly better, so **the exact non-differentiable transform is not
+required**. On `affine` the results are withing noise within noise (−0.022…+0.027,
 @tbl-sdf-affine). On `deformed` `kornia` is consistently ahead for the
 one-sided family (+0.016…+0.030, @tbl-sdf-deformed), which is well outside
 that family's very small `deformed` spread (σ ≈ 0.002–0.005). Segmentation
@@ -861,14 +834,14 @@ IoU also improves in every cell measured (+0.010 and +0.009 on `affine`,
 
 A plausible explanation is that the approximation is smoother than the exact
 discrete distance transform and therefore a better-conditioned target, but
-these experiments do not test that. Note that DSDF MSE is unaffected by
+these experiments do not test that. Note that DSDF MSE is not affected by
 construction, since it recomputes its target from `gt_mask` — its identical
 rows say nothing about the backends.
 
 ### Closed-form or learned rigid pre-alignment?
 
 Closed form wins decisively. With `deep`, 8 of 10 losses collapse to the
-no-op value 0.166; with `calc` only 2 do, and the best `calc` configuration
+ value 0.166 (Background only). With `calc` only 2 do, and the best `calc` configuration
 reaches 0.931 against 0.634 for the best `deep` one (@tbl-reg-both).
 
 The learned rigid head is not broken in itself — the same
@@ -888,19 +861,20 @@ sin/cos head), not in the template or the warping.
 
 ### Reliability
 
-Most numbers come from a single seed, and on `affine` the seed spread is
+Most results were from a single seed, and on `affine` the seed spread is
 large enough (up to σ = 0.056) that rankings separated by less than ~0.05
 are not meaningful there.
 
 More importantly, the `seed_stability` sweep does not reproduce the main
 sweep at the same seed: One-side SDFSquared (seg One-side) on `affine` is
 0.861 in @tbl-reg-affine but 0.796 ± 0.011 in @tbl-seed-stability, and
-One-side SDF (seg BCE) is 0.846 vs 0.780 ± 0.049. Those runs predate the
+One-side SDF (seg BCE) is 0.846 vs 0.780 ± 0.049. This result suggest that the results might be more unstable than STD suggests.
+<!-- Those runs predate the
 current sweep — their configuration columns are empty in the CSV — so their
 absolute values should not be compared against the other tables; only the
 spread within them is informative. The 0.1 exclusion threshold catches only
 the worst case (SDF-template one-side on `deformed`) and several `affine`
-entries sit just below it, so they remain suspect.
+entries sit just below it, so they remain suspect. -->
 
 Finally, `both` was run decoupled only and at one seed, and two losses
 collapse under `calc` as well as `deep`, so that table is trustworthy mainly
@@ -908,16 +882,29 @@ at the top (One-side SDF, DSDF MSE).
 
 ## Possible ablations
 
-- **Field regularization.** No smoothness/bending-energy regularization on
+<!-- - **Field regularization.** No smoothness/bending-energy regularization on
   the deformable branch's predicted field — an unregularized field can in
   principle reach high IoU via a physically unrealistic warp.
 - **Warm coupling**
-- **coupled on (rigid+deformed) dataset**
+- **coupled on (rigid+deformed) dataset** -->
+- **Field regularization** Currently, no penalty on jacobian of deformation field was applied. The main goal was to estimate if losses can converge, regularization would be another orthogonal parameter. Samples from artificial dataset were not topology-violating so the losses had no need to violate field properties. For real-world datasets, regularization is needed.
+- **Warm coupling** - Given experiments investigated two edge cases of coupling - fully coupled from beginning or no coupling at all. Theoretically, the best option would be to pretrain the networks decoupled - stabilize logit predictions so we do not force the projector to deform GT mask on wrong unstable predictions (both affine and deformed).
+- **Coupling on rigid+deformed dataset** - the experiments on `affine` and `deformed` showed that early coupling did not spoil the training. To be sure, we should verify this hypothesis even on combined `rigid+deformed` dataset. 
+
+## Open questions {#sec-open-todo}
+
+- **When to couple, when to apply Teaching the old dog the new things?[@olddog]** - no  `WarmupGT` style coupling has been run yet. What is the correct metric that should decided decoupled pretraining end? We propose this to be determined by IoU. When segmentation IoU exceeds a certain threshold (or stops improving), we can assume that logits already converge to prediction at which point registration part can start registering template on the segmented logits. Nevertheless, this would deny the goal of the paper [@olddog], where we suppose that learned registration pipeline will serve as a frozen projector.
+One possible solution is: 
+1. learn segmentation network, couple, learn registration network (projector)
+2. randomly reinitialize segmentation network, freeze registration network, learn the reinitialize segmentation network by schedule proposed by [@olddog]
+
+- **Drop the implicit-template path?** While the previous document (DTI3) proposed experiment, where template is not passed into the network and registration network implicitly learns in its weights that we deform the template, we decided not to test this idea. Main arguments against this idea are:
+
+- when template is implicit, learning of affine+def pipeline would be difficult - the deformation part would not know how affine (e.g. `calc` method) moved the template and would need to guess how to predict deformation field
+- for future experiments, where we plan to predict plaque into tempalte dynamically, we would need a way to pass the information about plaque into the network separately
 
 
-## Open questions, decisions and claims {#sec-open-todo}
-
-- **Role of the projector** in relation to "teaching the old dog new
+<!-- - **Role of the projector** in relation to "teaching the old dog new
   things"-style continual/transfer learning going forward.
 - **When to couple** — no `WarmupGt`-style staged coupling has been run yet
   (@sec-coupling); only the two extremes have data.
@@ -938,12 +925,28 @@ at the top (One-side SDF, DSDF MSE).
   `--sdf_mode` argument's effect on it from the report's framing.
 - State the branch-architecture design goal (simultaneous registration +
   segmentation) somewhere more permanent than this report once the coupling
-  questions above are settled.
+  questions above are settled. -->
 
 ## Further steps
 
-- **Branch architecture.** Formalize the segmentation + registration branch
+- **Implementation of real world datasets** - the given experiments demonstrated that idea of deforming a template to a segmentation might be a viable option. We plan to evaluate on the following datasets:
+
+1. ACDC dataset [^acdc] - segmentation of myocardium, slice by slice
+2. CCA dataset [^cca] - segmentation of artery in transversal ultrasound image
+3. ANTIQUE dataset - segmentation of artery with fixed number of plaques (baseline before dynamic plaque prediction)
+
+On all datasets we will construct a reasonable assumption on topology and measure number of topology violations.
+
+- **Implementation of anatomically constraint  neural networks** - [@ANN] - while multiple methods were proposed for comparision at (DTI3), method of [@ANN] is a well-known standard and easy to implement.
+
+
+- **Branch architecture** Implement branch architecture  described in (DTI3), perform similar initial experiments as were conducted for PROJECT architecture. While (DTI3) presented branch as separate architecture, we can formaly merge them into one group of architectures, since PROJECT architecture predicts deformation parameters from predicted segmentation, while BRANCH architecture predicts the deformation parameters directly from latent space (labeled $\bm{z}$ in (DTI3)).
+
+<!-- - **Branch architecture.** Formalize the segmentation + registration branch
   split (`SegmentationRegistrationModel`) as an explicit architecture note.
 - Fix `RegistrationDSDFMSETerm` and re-run `BCE_DSDF_MSE`.
 - Run a coupled `both` sweep (currently decoupled-only).
-- Decide on and run a `WarmupGt`-style staged-coupling sweep.
+- Decide on and run a `WarmupGt`-style staged-coupling sweep. -->
+
+[^acdc]: https://www.kaggle.com/datasets/anhoangvo/acdc-dataset
+[^cca]: https://data.mendeley.com/datasets/d4xt63mgjm/1
