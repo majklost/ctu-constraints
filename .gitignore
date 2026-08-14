@@ -239,3 +239,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# W&B overlay export (report/export_run_images.py)
+report/.wandb_media_cache/
+report/images/

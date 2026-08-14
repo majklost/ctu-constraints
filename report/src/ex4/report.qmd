@@ -234,18 +234,34 @@ The goal of this report is to present and explain results of the experiments 1 a
 
 During creation of experiments we used the name affine, while it is in fact **rigid** alignment and rigid dataset (no scale involved). Term affine is used in the report for consistency with the code.
 
+> ### Key Concepts from *Proposal III* (AI generated context)
+>
+> This report evaluates the preliminary experiments outlined in *Diploma Thesis Ideas Proposal III*. 
+> 
+> * **Objective:** Improve segmentation robustness and guarantee topological correctness by deforming a prior shape template $T$ onto target predictions.
+> * **Architectures:** 
+>   * **PROJECT:** Sequential pipeline ($X \to y_s \to \text{Registration} \to y_r$).
+>   * **BRANCH:** Parallel heads from a shared latent space $z$ ($z \to y_s$ and $z \to \varphi \to y_r$).
+> * **Phase 1 Goals (Evaluated in this Report):**
+>   * Determine optimal registration loss pairs ($\mathcal{L}_1 / \mathcal{L}_2$) comparing Cross-Entropy, Centroid Loss, Blurred MSE, and Level-Set Chamfer/SDF losses ($L_{\text{pull}}$).
+>   * Compare closed-form rigid pre-alignment vs. learned neural rigid regression.
+>   * Evaluate exact (non-differentiable) vs. differentiable SDF backends.
+>   * Measure performance gap between decoupled (ground-truth fed) and coupled (logits fed) training.
+> * **Downstream Roadmap (Phase 2):** Benchmark best configurations against ACNNs on real clinical datasets (ACDC, CCA, ANTIQUE).
+
+
 ## Introduction
 
-We present $10$ different pairs of losses for segmentation and registration in a PROJECT architecture (introduced at DTI3).
+We present $10$ different pairs of losses for segmentation and registration in the PROJECT architecture (introduced in DTI3).
 
-Our experiments provide a first results for given questions:
+Our experiments provide initial answers to the following questions:
 
 - Which loss to optimize if we are registering segmentation masks on each other?
 - Can we train registration network on top of segmentation outcome?
-- How it differs when registration is learned separately and when it is learned together with segmentation network?
+- How does the result differ when registration is learned separately and when it is learned together with the segmentation network?
 - How the result changes if we use pretrained segmentation network?
-- For signed distance function (SDF) do we need exact  SDF representation that is non-differentiable or can we use differentiable approximation of SDF?
-- For rigid pre-alignemt, is it better to use closed form solution or learnable network?
+- For a signed distance function (SDF), do we need an exact, non-differentiable SDF representation, or can we use a differentiable approximation?
+- For rigid pre-alignment, is it better to use a closed-form solution or a learnable network?
 
 <!-- **Goal.** `ex4` is a first sweep over candidate segmentation + registration
 loss pairs, mainly trained **decoupled** (registration branch trained/
@@ -332,7 +348,7 @@ $P_{i,c}\in[0,1]$ a predicted probability at pixel $i$/class $c$,
 $\mathrm{SDF}_{i,c}$ the ground-truth signed distance at $(i,c)$ (negative
 inside the shape), and $T$ the warped template.
 
-MSE - mean squared error, SDF - signed distance function.
+MSE means mean squared error, and SDF means signed distance function.
 
 **Segmentation terms** 
 applied to the predicted segmentation logits vs. the GT mask:
@@ -396,13 +412,13 @@ Modes actually swept (`MODES` in `initial_decoupled.py`, `<seg>_<reg>`):
 <!-- Dice/Tversky-style segmentation losses were not swept — segmentation IoU
 already saturates near `UNET` for every BCE-segmentation mode (@sec-results),
 so the interesting variance is in the registration term. -->
-While there are more possibilities for segmentation losses (e.g. soft-Dice) their exploration would create additional complexity. We focused on registration losses, since the registration of segmentation masks is the main goal of this work.
+While there are other possibilities for segmentation losses (e.g. soft Dice), exploring them would add complexity. We focused on registration losses because registering segmentation masks is the main goal of this work.
 
 
 ### Training details & metrics
 
 - Adam, `--learning_rate 1e-3`, `--batch_size 32`.
-- Training terminated by early stopping -
+- Training terminated by early stopping
   (`constraints/lightning_wrappers/callbacks.py`): stops after 15 validation
   epochs without a `1e-3` improvement in `val/segmentation/iou` **and**
   `val/registration/iou` (either resets patience; `UNET` has no registration
@@ -413,25 +429,25 @@ While there are more possibilities for segmentation losses (e.g. soft-Dice) thei
   - **constraint violations** were measured
   (`does_violation_occur_with_wall`), but are not reported since:
     - On the artificial dataset, the constraint was easily satisfied even by segmentation
-    -If constraint violation occured, typically IoU was also low.
-    - After measuring the experiments it was found that some training and validation samples violated the constraint (rigid alignment shifted the template partly outside the image). Due to this the violation metric is not reliable to evaluate if method is violation-free and is not reported in the tables. Experiment can be retaken with filtered dataset if desired.
+    - If a constraint violation occurred, IoU was typically also low.
+    - After the experiments, we found that some training and validation samples violated the constraint because rigid alignment shifted the template partly outside the image. Consequently, the violation metric is not reliable for evaluating whether the method is violation-free and is not reported in the tables. The experiment could be repeated with a filtered dataset if needed.
 
 ### Coupling {#sec-coupling}
 
 Looking at the project architecture, we can observe at least three different ways how to train it:
 
 - **decoupled** - we train segmentation and registration networks separately. During training of registration network, we feed it the ground truth segmentation mask as input $\boldsymbol{y}_{\text{s}}$ is ground truth mask in Figure 2 of previous report (DTI3). Registration network training is not affected by the segmentation network's output. 
-- **fully coupled** - we train segmentation and registration networks together. During training of registration network, we feed softmax of segmenation's network output as input. We dont backpropagate the gradient from registration network to input.
+- **fully coupled** - we train segmentation and registration networks together. During training of registration network, we feed softmax of segmenation's network output as input. We do not backpropagate the gradient from registration network to input.
 - **fully coupled with backpropagation** - we train segmentation and registration networks together. During training of registration network, we feed softmax of segmenation's network output as input. We backpropagate the gradient from registration network to input.
 
 In this experiment we investigated the **first two** options. 
 The third option is omitted due to following reasons:
 
-- **trivial solution** - if we backpropagate the gradient from registration network to segmentation block, the segmentation can learn to output background only and registration to transform the template outside of the image (obtaining also backgroud-only image). This solution yield a perfect registration loss, but is totally wrong.
+- **trivial solution** — if we backpropagate the gradient from the registration network to the segmentation block, the segmentation network can learn to output only background, while registration transforms the template outside the image (also producing an all-background image). This solution yields a perfect registration loss but is completely wrong.
 - **feeding hidden info** - another option is that backpropagation into segmentation logits can tell segmentation "if I should move my template to right, set these pixels at top to class 1" - this is a hidden info
 - **need for weighting terms** - in practical terms, if we backpropagate the gradient from registration network to segmentation block, we need to weight the segmentation loss and registration loss. This is a hyperparameter that would need to be tuned.
 
-In future ablations, we can experiment with "warm coupling" - train with GT mask first and later (after some IoU threshold is reached) switch to own-prediction input. This is outside the scope this report, our current goal is to observe how big is the gap if we train on GT, validate on its own predictions and observe if imperfect logits from segmentation can spoil the learning of registration part.
+In future ablations, we can experiment with “warm coupling”: training with the GT mask first and later, after reaching a specified IoU threshold, switching to the network's own prediction. This is outside the scope of this report. Our current goal is to measure the gap between training on GT masks and validating on the network's own predictions, and to observe whether imperfect segmentation logits can spoil registration training.
 
 <!-- 
 `ProjectLightning` runs two validation passes per batch: `val/*` uses
@@ -490,7 +506,7 @@ For a dataset, where both affine transformation and deformation are present, we 
 We align the template to the target (output logits of segmentation network) using rigid pre-alignment, then we pass the aligned template and the target to the deformable registration network. 
 
 
-We propose two different ways how to handle the affine pre-alignment before the deformable registration:
+We propose two different ways to handle affine pre-alignment before deformable registration:
 
 - **`calc`** (`CalcAffDefRegistrationNet` → `MomentsAffineAlignment`) — 
 for each class, we compute its weighted mean. Each mean is then a point in 2D space. We compute moments of these points and obtain a rigid transformation that aligns the moments of the predicted mask with the moments of the GT mask. This is a closed form solution, no learning is involved.
@@ -584,7 +600,7 @@ that run used — see @sec-seg-iou-family.
 reg_table(decoupled_affine)
 ```
 
-Own IoU is in this case a bit useless, since the segmentation at the end learns almost perfectly to predict the GT mask, so passing the segmentation output to the registration branch is almost the same as passing GT mask.
+Own IoU is in this case is not very informative, since the segmentation at the end learns almost perfectly to predict the GT mask, so passing the segmentation output to the registration branch is almost the same as passing GT mask.
 
 
 ```{python}
@@ -659,7 +675,7 @@ unlearned_table(coupled_affine, coupled_affine_unlearned)
 unlearned_table(coupled_deformed, coupled_deformed_unlearned)
 ```
 
-The result suggests that untrained UNET shows generally worse performance than pretrained UNET. Combined with the results from @sec-coupling-ablation, we can conclude that it is better to couple the registration network with segmentation, only after a certain time, when their are trained in decoupled mode.
+The result suggests that an untrained U-Net generally performs worse than a pretrained U-Net. Combined with the results from @sec-coupling-ablation, this suggests that it may be better to couple the registration network with the segmentation network only after they have first been trained in decoupled mode.
 
 ### SDF backend ablation
 
@@ -728,7 +744,7 @@ seed_table()
 
 ## Discussion
 
-The following subsections try to answer qustions from introduction. Unless
+The following subsections try to answer the questions from the introduction. Unless
 stated otherwise every number is a single run, so @tbl-seed-stability sets
 the noise floor: σ ≈ 0.007–0.056 on `affine` and σ ≈ 0.001–0.059 on
 `deformed`. Differences smaller than that should not be considered as important.
@@ -752,7 +768,7 @@ saturates) and Blurred MSE sees nothing beyond its ~3 px capture radius, while
 the one-sided SDF terms still pull every pixel with a force equal to its
 distance from the target boundary. This is the main reason to prefer them. -->
 
-The losses based on overlap (BCE, Blurred MSE) are useful on deformed (0.907, 0.963), but perform poorly on `affine` (0.65,0.67). This can be explained by the fact that `deformed has no rigid component, so a significant overlap is already present, while `affine` and `both` might not initially overlap at all. At non-overlapping case, BCE has zero gradient and Blurred MSE sees nothing beyond its 3 pixel radius.
+The losses based on overlap (BCE, Blurred MSE) are useful on deformed (0.907, 0.963), but perform poorly on `affine` (0.65,0.67). This can be explained by the fact that `deformed` has no rigid component, so a significant overlap is already present, while `affine` and `both` might not initially overlap at all. At non-overlapping case, BCE has zero gradient and Blurred MSE sees nothing beyond its 3 pixel radius.
 
 
 `SDF-template MSE` is the worst loss on `affine` (0.283, an essentially
@@ -765,7 +781,7 @@ pairing that fails rather than the SDF-template idea itself. -->
 
 ### Segmentation loss
 
-Registrastion branch does not influence segmentation quality, every segmentation mode based on BCE provides same performance as baseline U-Net.
+The registration branch does not influence segmentation quality: every segmentation mode based on BCE provides the same performance as the baseline U-Net.
 <!-- Adding a registration branch does not cost segmentation quality: every
 BCE-segmentation mode sits at the plain U-Net level (0.9759 vs 0.9748 for
 `UNET` on `affine`, @tbl-seg-iou-family). -->
@@ -807,7 +823,7 @@ registration net is trained on a distribution that one-hot GT masks lie far
 outside of. Standardising every model on probabilities looks necessary
 before any firm conclusion about the deformable branch is drawn. -->
 
-### Does untrained encoder spoils performance?
+### Does an untrained encoder spoil performance?
 
 Not for segmentation: 0.9748 vs  0.9739 on `affine` and 0.9634 vs 0.9617 on
 `deformed` (@tbl-unet-baseline). The synthetic images are single-channel and
@@ -825,7 +841,7 @@ branch produces, but may change the registration branch's training dynamics.
 
 The differentiable `kornia` approximation carries no penalty and might be
 even slightly better, so **the exact non-differentiable transform is not
-required**. On `affine` the results are withing noise within noise (−0.022…+0.027,
+required**. On `affine` the results are within the noise level (−0.022…+0.027,
 @tbl-sdf-affine). On `deformed` `kornia` is consistently ahead for the
 one-sided family (+0.016…+0.030, @tbl-sdf-deformed), which is well outside
 that family's very small `deformed` spread (σ ≈ 0.002–0.005). Segmentation
@@ -929,7 +945,7 @@ One possible solution is:
 
 ## Further steps
 
-- **Implementation of real world datasets** - the given experiments demonstrated that idea of deforming a template to a segmentation might be a viable option. We plan to evaluate on the following datasets:
+- **Implementation on real-world datasets** — the experiments demonstrated that deforming a template to match a segmentation might be a viable approach. We plan to evaluate it on the following datasets:
 
 1. ACDC dataset [^acdc] - segmentation of myocardium, slice by slice
 2. CCA dataset [^cca] - segmentation of artery in transversal ultrasound image
@@ -937,10 +953,10 @@ One possible solution is:
 
 On all datasets we will construct a reasonable assumption on topology and measure number of topology violations.
 
-- **Implementation of anatomically constraint  neural networks** - [@ANN] - while multiple methods were proposed for comparision at (DTI3), method of [@ANN] is a well-known standard and easy to implement.
+- **Implementation of anatomically constrained neural networks** — [@ANN]. While multiple methods were proposed for comparison in DTI3, the method from [@ANN] is a well-known standard and easy to implement.
 
 
-- **Branch architecture** Implement branch architecture  described in (DTI3), perform similar initial experiments as were conducted for PROJECT architecture. While (DTI3) presented branch as separate architecture, we can formaly merge them into one group of architectures, since PROJECT architecture predicts deformation parameters from predicted segmentation, while BRANCH architecture predicts the deformation parameters directly from latent space (labeled $\bm{z}$ in (DTI3)).
+- **Branch architecture** — implement the branch architecture described in DTI3 and perform experiments similar to those conducted for the PROJECT architecture. Although DTI3 presented them as separate architectures, we can formally group them together because the PROJECT architecture predicts deformation parameters from the predicted segmentation, whereas the BRANCH architecture predicts them directly from the latent space (labelled $\bm{z}$ in DTI3).
 
 <!-- - **Branch architecture.** Formalize the segmentation + registration branch
   split (`SegmentationRegistrationModel`) as an explicit architecture note.
