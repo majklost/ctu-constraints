@@ -13,8 +13,6 @@ from scipy import ndimage
 from .types import RigidParams
 
 
-
-
 def get_repo_root() -> Path:
     """Traverse upwards to find the repository root marker."""
     current = Path.cwd().resolve()
@@ -31,15 +29,16 @@ LOGS_DIR = REPO_ROOT / "logs"
 
 def get_experiment_folder(experiment_name: str | Path) -> Path:
     """Returns the path to the experiment folder within the repository."""
-    folder = REPO_ROOT / "outputs" / "notebooks" / experiment_name
+    folder = REPO_ROOT / "synced" / "outputs" / "notebooks" / experiment_name
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 
 
-def get_data_folder()->Path:
+def get_data_folder() -> Path:
     folder = REPO_ROOT / "data"
     assert folder.exists(), f"Data folder does not exist: {folder}"
     return folder
+
 
 def rad2deg(rad):
     return rad * 180 / np.pi
@@ -256,11 +255,11 @@ def mat2inv(mat: torch.Tensor) -> torch.Tensor:
     if squeeze:
         mat = mat.unsqueeze(0)
 
-    A = mat[:, :, :2]          # (N, 2, 2)
-    t = mat[:, :, 2:3]         # (N, 2, 1)
+    A = mat[:, :, :2]  # (N, 2, 2)
+    t = mat[:, :, 2:3]  # (N, 2, 1)
 
-    A_inv = torch.linalg.inv(A)          # (N, 2, 2)
-    t_inv = -A_inv @ t                    # (N, 2, 1)
+    A_inv = torch.linalg.inv(A)  # (N, 2, 2)
+    t_inv = -A_inv @ t  # (N, 2, 1)
 
     inv_mat = torch.cat([A_inv, t_inv], dim=2)  # (N, 2, 3)
 

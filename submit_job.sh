@@ -5,8 +5,8 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
 #SBATCH --time=04:00:00
-#SBATCH --output=slurm/slurm-%j.out
-#SBATCH --error=slurm/slurm-%j.err
+#SBATCH --output=synced/slurm/slurm-%j.out
+#SBATCH --error=synced/slurm/slurm-%j.err
 
 # ---- Configuration ----
 PROJECT_DIR="/mnt/personal/mrkosmic/synced/constraints"
