@@ -5,9 +5,11 @@ from typing import Literal
 import numpy as np
 import torch
 
+from constraints.datatools.datasets.types import TemplateAssets
+
 from ...utils import signed_distance_kornia, signed_distance_scipy
 from ..label_schema import LabelSchema
-from .base_dataset import BaseDataset
+from .base_dataset import PerSampleDataset
 from .types import Sample
 
 SDFMode = Literal["kornia", "scipy"]
@@ -50,7 +52,7 @@ def _load_valid_indices(
     return np.flatnonzero(valid_mask)
 
 
-class CachedArtificialDataset(BaseDataset):
+class CachedArtificialDataset(PerSampleDataset):
     """Base class for artificial datasets.
 
     This class provides a common interface for artificial datasets, which are
@@ -130,3 +132,7 @@ class CachedArtificialDataset(BaseDataset):
     @property
     def label_schema(self) -> LabelSchema:
         return self._label_schema
+
+    @property
+    def template_assets(self) -> TemplateAssets:
+        return super().template_assets

@@ -1,0 +1,38 @@
+from abc import ABC, abstractmethod
+
+import torch
+from datasets.types import Sample, TemplateAssets, TemplateBatch
+from torch import nn
+
+
+class TemplateSource(nn.Module, ABC):
+    """
+    Provides the template from dataset
+    """
+
+    def __init__(self, template_assets: TemplateAssets) -> None:
+        super().__init__()
+
+    @abstractmethod
+    def forward(self, sample: Sample) -> TemplateBatch:
+        pass
+
+
+class PerSampleTemplateSource(TemplateSource):
+    def forward(self, sample: Sample) -> TemplateBatch:
+        assert "template" in sample, (
+            "PerSampleTemplateSource received a sample withou template"
+        )
+
+        tb = TemplateBatch(masks=sample["template"], sdfs=sample.get("template_sdf"))
+        return tb
+
+
+class BankTemplateSource(TemplateSource):
+    def __init__(self, template_assets: TemplateAssets) -> None:
+        super().__init__(template_assets)
+        self._validate()
+        # TODO register buffer
+
+    def _validate(self) -> bool:
+        return True

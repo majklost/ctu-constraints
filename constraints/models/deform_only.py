@@ -196,7 +196,7 @@ class ProjectWithTemplateD(SegmentationRegistrationModel):
         super().__init__(
             segmentation_net=segmentation_net,
             registration_net=DeformableRegistrationNet(),
-            registration_input_mode="logits",
+            registration_input_mode="probabilities",
         )
 
     @property

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import torch
 
 from ..label_schema import LabelSchema
-from .types import Sample
+from .types import Sample, TemplateAssets
 
 
 class BaseDataset(torch.utils.data.Dataset, ABC):
@@ -29,3 +29,17 @@ class BaseDataset(torch.utils.data.Dataset, ABC):
     def label_schema(self) -> LabelSchema:
         """Return the label schema for the dataset."""
         pass
+
+    @property
+    @abstractmethod
+    def template_assets(self) -> TemplateAssets:
+        """
+        Information for TemplateSource where to find templates
+        """
+        pass
+
+
+class PerSampleDataset(BaseDataset):
+    @property
+    def template_assets(self) -> TemplateAssets:
+        return TemplateAssets(None)
