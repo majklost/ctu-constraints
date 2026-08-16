@@ -2,7 +2,7 @@ sync:
   constraints:
     alpha: "."
     beta: "mrkosmic@rci:/mnt/personal/mrkosmic/synced/constraints"
-    mode: "two-way-safe"
+    mode: "one-way-replica"
     ignore:
       vcs: true
       paths:
@@ -16,6 +16,7 @@ sync:
         - "wandb/"
         - "weights/"
         - "predictions/"
+        - "synced/"
         # Dataset / large binary files
         - "*.npz"
         - "*.zip"
@@ -43,3 +44,8 @@ sync:
         - ".DS_Store"
         - ".vscode/"
         - ".venv/"
+
+  synced_content:
+    alpha: "synced/"
+    beta: "mrkosmic@rci:/mnt/personal/mrkosmic/synced/constraints/synced"
+    mode: "two-way-resolved"
