@@ -45,7 +45,7 @@ sync:
         - ".vscode/"
         - ".venv/"
 
-  synced_content:
+  syncedcontent:
     alpha: "synced/"
     beta: "mrkosmic@rci:/mnt/personal/mrkosmic/synced/constraints/synced"
     mode: "two-way-resolved"
