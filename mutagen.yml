@@ -2,7 +2,7 @@ sync:
   constraints:
     alpha: "."
     beta: "mrkosmic@rci:/mnt/personal/mrkosmic/synced/constraints"
-    mode: "one-way-replica"
+    mode: "one-way-safe"
     ignore:
       vcs: true
       paths:
