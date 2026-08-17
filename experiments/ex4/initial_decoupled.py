@@ -48,6 +48,11 @@ from constraints.computers.loss_computers import (
 )
 from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
 from constraints.datatools.datasets import CachedArtificialDataset
+from constraints.datatools.label_schema import LabelSchema
+from constraints.datatools.template_sources import (
+    PerSampleTemplateSource,
+    TemplateSource,
+)
 from constraints.lightning_wrappers.callbacks import (
     SegmentationRegistrationEarlyStopping,
 )
@@ -67,12 +72,6 @@ from constraints.transforms.transformers import (
     RigidTransformer,
     SequentialTransformer,
     SpatialTransformer,
-)
-
-from ...constraints.datatools.label_schema import LabelSchema
-from ...constraints.datatools.template_sources import (
-    PerSampleTemplateSource,
-    TemplateSource,
 )
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
