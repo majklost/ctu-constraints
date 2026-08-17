@@ -15,6 +15,19 @@ class Sample(TypedDict):
     template_indexes: NotRequired[list[int]]  # which template from bank are relevant
 
 
+class Batch(TypedDict):
+    image: torch.Tensor  # [B, C, H, W]
+    target_labels: torch.Tensor  # [B, H, W], torch.long
+    sample_id: list[str]  # List of length B
+    sdf: NotRequired[torch.Tensor]  # [B, N, H, W]
+    transform: NotRequired[torch.Tensor]  # [B, 3, 3] or [B, *dims]
+    template: NotRequired[torch.Tensor]  # [B, H, W]
+    template_sdf: NotRequired[torch.Tensor]  # [B, N, H, W]
+    template_indexes: NotRequired[
+        list[torch.Tensor]
+    ]  # Length K, each tensor is shape [B]
+
+
 @dataclass
 class TemplateBank:
     templates: torch.Tensor

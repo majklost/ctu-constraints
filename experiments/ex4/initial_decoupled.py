@@ -47,7 +47,7 @@ from constraints.computers.loss_computers import (
     SOneSideSDFSquared_ROneSideSDFSquared,
 )
 from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
-from constraints.datatools.datasets import CachedArtificalDataset
+from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.lightning_wrappers.callbacks import (
     SegmentationRegistrationEarlyStopping,
 )
@@ -67,6 +67,12 @@ from constraints.transforms.transformers import (
     RigidTransformer,
     SequentialTransformer,
     SpatialTransformer,
+)
+
+from ...constraints.datatools.label_schema import LabelSchema
+from ...constraints.datatools.template_sources import (
+    PerSampleTemplateSource,
+    TemplateSource,
 )
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
@@ -103,10 +109,12 @@ def configure_reproducibility(seed: int) -> None:
 
 
 def handle_unet(
-    args, metric_computer: DefaultSegmentationMetricComputer
+    args, metric_computer: DefaultSegmentationMetricComputer, ls: LabelSchema
 ) -> pl.LightningModule:
     return UnetLightning(
-        learning_rate=args.learning_rate, metric_computer=metric_computer
+        learning_rate=args.learning_rate,
+        metric_computer=metric_computer,
+        label_schema=ls,
     )
 
 
@@ -114,12 +122,14 @@ def handle_decoupled(
     args,
     transformer: SpatialTransformer,
     metric_computer: DefaultSegmentationMetricComputer,
+    label_schema: LabelSchema,
+    template_source: TemplateSource,
 ) -> pl.LightningModule:
     match args.modality:
         case "affine":
-            net = ProjectWithTemplateA(max_translation=0.5)
+            net = ProjectWithTemplateA(max_translation=0.5, ls=label_schema)
         case "deformed":
-            net = ProjectWithTemplateD()
+            net = ProjectWithTemplateD(ls=label_schema)
         case "both":
             if args.aff_def_mode == "calc":
                 net = ProjectWithTemplateBCalcAff(max_translation=0.5)
@@ -159,7 +169,7 @@ def handle_decoupled(
 
     match args.learning_sample_strategy:
         case "always_gt":
-            sample_strategy = AlwaysGt()
+            sample_strategy = AlwaysGt(label_schema=label_schema)
         case "no_gt":
             sample_strategy = NoGt(detach_seg=True)
         case _:
@@ -169,7 +179,7 @@ def handle_decoupled(
 
     match args.validation_sample_strategy:
         case "always_gt":
-            validation_strategy = AlwaysGt()
+            validation_strategy = AlwaysGt(label_schema=label_schema)
         case "no_gt":
             validation_strategy = NoGt(detach_seg=True)
         case "none":
@@ -187,6 +197,8 @@ def handle_decoupled(
         optimizer_callback=optimizer_callback,
         gt_strategy=sample_strategy,
         validation_strategy=validation_strategy,
+        label_schema=label_schema,
+        template_source=template_source,
     )
     return module
 
@@ -220,24 +232,30 @@ def main(args):
         transformer = SequentialTransformer()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
-
-    metric_computer = DefaultSegmentationMetricComputer()
-
-    if args.mode == "UNET":
-        module = handle_unet(args, metric_computer)
-    else:
-        module = handle_decoupled(args, transformer, metric_computer)
-
     return_template_sdf = args.mode in [
         "BCE_SDFTEMPLATE_MSE",
         "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
     ]
-    trn_dataset = CachedArtificalDataset(
+    trn_dataset = CachedArtificialDataset(
         TRN_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
     )
-    val_dataset = CachedArtificalDataset(
+    val_dataset = CachedArtificialDataset(
         VAL_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
     )
+    template_source = PerSampleTemplateSource(trn_dataset.template_assets)
+
+    metric_computer = DefaultSegmentationMetricComputer()
+
+    if args.mode == "UNET":
+        module = handle_unet(args, metric_computer, ls=trn_dataset.label_schema)
+    else:
+        module = handle_decoupled(
+            args,
+            transformer,
+            metric_computer,
+            label_schema=trn_dataset.label_schema,
+            template_source=template_source,
+        )
 
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers

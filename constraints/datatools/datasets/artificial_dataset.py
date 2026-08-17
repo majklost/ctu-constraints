@@ -132,7 +132,3 @@ class CachedArtificialDataset(PerSampleDataset):
     @property
     def label_schema(self) -> LabelSchema:
         return self._label_schema
-
-    @property
-    def template_assets(self) -> TemplateAssets:
-        return super().template_assets

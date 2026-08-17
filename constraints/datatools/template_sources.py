@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 
-from .datasets.types import Sample, TemplateAssets, TemplateBatch
+from .datasets.types import Batch, TemplateAssets, TemplateBatch
 
 
 class TemplateSource(nn.Module, ABC):
@@ -15,12 +15,12 @@ class TemplateSource(nn.Module, ABC):
         super().__init__()
 
     @abstractmethod
-    def forward(self, sample: Sample) -> TemplateBatch:
-        pass
+    def forward(self, sample: Batch) -> TemplateBatch:
+        raise NotImplementedError("Abstract stub")
 
 
 class PerSampleTemplateSource(TemplateSource):
-    def forward(self, sample: Sample) -> TemplateBatch:
+    def forward(self, sample: Batch) -> TemplateBatch:
         assert "template" in sample, (
             "PerSampleTemplateSource received a sample withou template"
         )

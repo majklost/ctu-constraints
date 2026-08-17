@@ -16,11 +16,10 @@ from ..computers.metric_computers import (
     NoOpMetricComputer,
     ProjectMetricComputer,
 )
-from ..datatools.datasets import (
-    ARTIFICIAL_MASK_NUM_CLASSES,
-    Sample,
-    artificial_mask_to_label_map,
-)
+from ..datatools.datasets.types import Batch, TemplateBatch
+from ..datatools.label_schema import LabelSchema
+from ..datatools.template_refiners import IdentityTemplateRefiner, TemplateRefiner
+from ..datatools.template_sources import TemplateSource
 from ..models.segmentator import get_segmentator
 from ..transforms.transformers import SpatialTransformer
 from ..types import LossInput, MetricInput, WandbOverlay, WarpResult
@@ -29,7 +28,8 @@ from .sample_strategy import GtStrategy, NoGt
 OptimizerFactory = Callable[[nn.Module], OptimizerLRScheduler]
 
 
-# TODO: Handling template better save memory, template is same for all samples in the batch
+_identity_refiner = IdentityTemplateRefiner()
+_no_gt = NoGt()
 
 
 class MetricLoggingMixin(pl.LightningModule):
@@ -124,24 +124,30 @@ class ProjectLightning(MetricLoggingMixin):
         model: nn.Module,
         spatial_transform: SpatialTransformer,
         loss_computer: ProjectLossComputer,
+        template_source: TemplateSource,
+        label_schema: LabelSchema,
+        template_refiner: TemplateRefiner = _identity_refiner,
         metric_computer: ProjectMetricComputer | None = None,
         optimizer_callback: OptimizerFactory = lambda module: torch.optim.Adam(
             module.parameters(), lr=1e-3
         ),
-        gt_strategy: GtStrategy = NoGt(),
+        gt_strategy: GtStrategy = _no_gt,
         validation_strategy: GtStrategy | None = None,
     ):
 
         super().__init__()
-        self.model = model
-        self.spatial_transform = spatial_transform
-        self.loss_computer = loss_computer
-        self.metric_computer = (
+        self._model = model
+        self._spatial_transform = spatial_transform
+        self._loss_computer = loss_computer
+        self._metric_computer = (
             metric_computer if metric_computer is not None else NoOpMetricComputer()
         )
-        self.optimizer_callback = optimizer_callback
-        self.gt_strategy = gt_strategy
-        self.validation_strategy = validation_strategy
+        self._optimizer_callback = optimizer_callback
+        self._template_source = template_source
+        self._template_refiner = template_refiner
+        self._gt_strategy = gt_strategy
+        self._validation_strategy = validation_strategy
+        self._label_schema = label_schema
 
     def forward(
         self,
@@ -151,13 +157,13 @@ class ProjectLightning(MetricLoggingMixin):
         gt: torch.Tensor | None = None,
         detach_seg: bool = False,
     ):
-        segmentation_logits, transform_spec = self.model(
+        segmentation_logits, transform_spec = self._model(
             img, template, gt=gt, detach_seg=detach_seg
         )
-        mask_warp_result = self.spatial_transform(template, transform_spec)
+        mask_warp_result = self._spatial_transform(template, transform_spec)
         warped_template_sdf = None
         if template_sdf is not None:
-            warped_template_sdf = self.spatial_transform(
+            warped_template_sdf = self._spatial_transform(
                 template_sdf, transform_spec
             ).warped_template
         warp_result = WarpResult(
@@ -170,35 +176,36 @@ class ProjectLightning(MetricLoggingMixin):
 
     def _shared_step(
         self,
-        batch: Sample,
+        batch: Batch,
         batch_idx,
         stage: str,
         strategy: GtStrategy,
     ):
-        template = batch[
-            "template"
-        ]  # template is same for all samples in the batch, so we can take the first one
         img = batch["image"]
-        template_sdf = batch["template_sdf"] if "template_sdf" in batch else None
+        # template = batch[
+        #     "template"
+        # ]  # template is same for all samples in the batch, so we can take the first one
+        # template_sdf = batch["template_sdf"] if "template_sdf" in batch else None
+        template_batch = self._template_source.forward(batch)
 
         decision = strategy.decide(batch, stage, int(self.current_epoch))
         segmentation_logits, warp_result = self.forward(
             img,
-            template,
+            template_batch.masks,
             gt=decision.gt,
             detach_seg=decision.detach_seg,
-            template_sdf=template_sdf,
+            template_sdf=template_batch.sdfs,
         )
         # Plug into loss computer
         loss_input = LossInput(
             segmentation_logits=segmentation_logits,
             warped_template=warp_result.warped_template,
             warped_template_sdf=warp_result.warped_template_sdf,
-            gt_mask=batch["mask"],
-            gt_mask_sdf=batch["sdf"],
+            gt_mask=self._label_schema.label_map_to_one_hot(batch["target_labels"]),
+            gt_mask_sdf=batch.get("sdf"),
             transform_spec=warp_result.transform_spec,
         )
-        loss_output = self.loss_computer.compute(loss_input)
+        loss_output = self._loss_computer.compute(loss_input)
 
         # Logging
         self.log(
@@ -232,61 +239,63 @@ class ProjectLightning(MetricLoggingMixin):
             image=img,
             segmentation_logits=segmentation_logits,
             warped_template=warp_result.warped_template,
-            gt_mask=batch["mask"],
-            gt_mask_sdf=batch["sdf"],
+            gt_mask=self._label_schema.label_map_to_one_hot(batch["target_labels"]),
+            gt_mask_sdf=batch.get("sdf"),
             transform_spec=warp_result.transform_spec,
         )
-        metric_output = self.metric_computer.compute(metric_input)
+        metric_output = self._metric_computer.compute(metric_input)
         self._log_metric_output(stage=stage, image=img, metric_output=metric_output)
 
         return loss_output.total
 
-    def training_step(self, batch: Sample, batch_idx):
+    def training_step(self, batch: Batch, batch_idx):
         return self._shared_step(
-            batch, batch_idx, stage="train", strategy=self.gt_strategy
+            batch, batch_idx, stage="train", strategy=self._gt_strategy
         )
 
-    def validation_step(self, batch: Sample, batch_idx):
+    def validation_step(self, batch: Batch, batch_idx):
         loss = self._shared_step(
-            batch, batch_idx, stage="val", strategy=self.gt_strategy
+            batch, batch_idx, stage="val", strategy=self._gt_strategy
         )
-        if self.validation_strategy is not None:
+        if self._validation_strategy is not None:
             self._shared_step(
                 batch,
                 batch_idx,
                 stage="val_extra",
-                strategy=self.validation_strategy,
+                strategy=self._validation_strategy,
             )
         return loss
 
     def configure_optimizers(self):
-        return self.optimizer_callback(self)
+        return self._optimizer_callback(self)
 
 
 class UnetLightning(MetricLoggingMixin):
     def __init__(
         self,
+        label_schema: LabelSchema,
         learning_rate: float = 1e-3,
-        num_classes: int = ARTIFICIAL_MASK_NUM_CLASSES,
         metric_computer: ProjectMetricComputer | None = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["metric_computer"])
-        self.learning_rate = learning_rate
-        self.num_classes = num_classes
-        self.unet = get_segmentator()
-        self.metric_computer = (
+        self._learning_rate = learning_rate
+        self._label_schema = label_schema
+        self._unet = get_segmentator(self._label_schema.num_classes)
+        self._metric_computer = (
             metric_computer
             if metric_computer is not None
-            else DefaultSegmentationMetricComputer(num_classes=num_classes)
+            else DefaultSegmentationMetricComputer(
+                num_classes=self._label_schema.num_classes
+            )
         )
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
-        return self.unet(image.float())
+        return self._unet(image.float())
 
-    def _shared_step(self, batch, batch_idx, stage: str):
+    def _shared_step(self, batch: Batch, batch_idx: int, stage: str):
         image = batch["image"]
-        target_labels = artificial_mask_to_label_map(batch["mask"])
+        target_labels = batch["target_labels"]
         logits = self.forward(image)
         loss = F.cross_entropy(logits, target_labels)
 
@@ -298,7 +307,7 @@ class UnetLightning(MetricLoggingMixin):
             prog_bar=(stage == "train"),
         )
 
-        metric_output = self.metric_computer.compute(
+        metric_output = self._metric_computer.compute(
             MetricInput(
                 stage=stage,
                 batch_idx=batch_idx,
@@ -306,7 +315,7 @@ class UnetLightning(MetricLoggingMixin):
                 global_step=int(self.global_step),
                 image=image,
                 segmentation_logits=logits,
-                gt_mask=batch["mask"],
+                gt_mask=self._label_schema.label_map_to_one_hot(batch["target_labels"]),
             )
         )
         self._log_metric_output(
@@ -324,4 +333,4 @@ class UnetLightning(MetricLoggingMixin):
         return self._shared_step(batch, batch_idx, stage="val")
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        return torch.optim.Adam(self.parameters(), lr=self._learning_rate)
