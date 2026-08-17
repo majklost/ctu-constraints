@@ -6,11 +6,7 @@ import torch
 from torch import nn
 from torchmetrics.functional.classification import multiclass_jaccard_index
 
-from ..datatools.datasets import (
-    ARTIFICIAL_MASK_CLASS_LABELS,
-    ARTIFICIAL_MASK_NUM_CLASSES,
-    artificial_mask_to_label_map,
-)
+from ..datatools.label_schema import LabelSchema
 from ..losses_metrics.constraint_function import does_violation_occur_with_wall
 from ..types import MetricInput, MetricResult, WandbOverlay
 from ..visu.helpers import to_label_map
@@ -23,7 +19,9 @@ class LabelTriplet:
     ground_truth: torch.Tensor
 
 
-def _label_triplet(metric_input: MetricInput) -> LabelTriplet | None:
+def _label_triplet(
+    metric_input: MetricInput, label_schema: LabelSchema
+) -> LabelTriplet | None:
     pred_mask_logits = metric_input.segmentation_logits
     warped_template = metric_input.warped_template
     gt_mask = metric_input.gt_mask
@@ -34,11 +32,11 @@ def _label_triplet(metric_input: MetricInput) -> LabelTriplet | None:
     return LabelTriplet(
         segmentation=to_label_map(pred_mask_logits),
         registration=(
-            artificial_mask_to_label_map(warped_template)
+            label_schema.one_hot_to_label_map(warped_template)
             if warped_template is not None
             else None
         ),
-        ground_truth=artificial_mask_to_label_map(gt_mask),
+        ground_truth=label_schema.one_hot_to_label_map(gt_mask),
     )
 
 
@@ -124,28 +122,26 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
 
     def __init__(
         self,
-        num_classes: int = ARTIFICIAL_MASK_NUM_CLASSES,
+        label_schema: LabelSchema,
     ) -> None:
         super().__init__()
-        if num_classes <= 0:
-            raise ValueError("num_classes must be > 0")
-        self.num_classes = int(num_classes)
+        self.label_schema = label_schema
 
     def compute(self, metric_input: MetricInput) -> MetricResult:
-        labels = _label_triplet(metric_input)
+        labels = _label_triplet(metric_input, self.label_schema)
         if labels is None:
             return MetricResult()
 
         iou_pred_vs_gt = multiclass_jaccard_index(
             preds=labels.segmentation,
             target=labels.ground_truth,
-            num_classes=self.num_classes,
+            num_classes=self.label_schema.num_classes,
             average="macro",
         )
         per_class_iou = multiclass_jaccard_index(
             preds=labels.segmentation,
             target=labels.ground_truth,
-            num_classes=self.num_classes,
+            num_classes=self.label_schema.num_classes,
             average="none",
         )
 
@@ -153,7 +149,7 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
             "segmentation/iou/pred_vs_gt": iou_pred_vs_gt,
         }
         for class_index, class_iou in enumerate(per_class_iou):
-            class_name = ARTIFICIAL_MASK_CLASS_LABELS.get(
+            class_name = self.label_schema.names.get(
                 class_index, f"class_{class_index}"
             )
             logs[f"segmentation/iou/{class_name}_vs_gt"] = class_iou
@@ -162,17 +158,17 @@ class SegmentationIoUMetricComputer(ProjectMetricComputer):
             logs["registration/iou/warped_vs_gt"] = multiclass_jaccard_index(
                 preds=labels.registration,
                 target=labels.ground_truth,
-                num_classes=self.num_classes,
+                num_classes=self.label_schema.num_classes,
                 average="macro",
             )
             registration_per_class_iou = multiclass_jaccard_index(
                 preds=labels.registration,
                 target=labels.ground_truth,
-                num_classes=self.num_classes,
+                num_classes=self.label_schema.num_classes,
                 average="none",
             )
             for class_index, class_iou in enumerate(registration_per_class_iou):
-                class_name = ARTIFICIAL_MASK_CLASS_LABELS.get(
+                class_name = self.label_schema.names.get(
                     class_index, f"class_{class_index}"
                 )
                 logs[f"registration/iou/{class_name}_vs_gt"] = class_iou
@@ -185,6 +181,7 @@ class ConstraintViolationMetricComputer(ProjectMetricComputer):
 
     def __init__(
         self,
+        label_schema: LabelSchema,
         stage: str = "val",
         blob_threshold: int = 50,
         check_wall_integrity: bool = True,
@@ -193,6 +190,7 @@ class ConstraintViolationMetricComputer(ProjectMetricComputer):
         if blob_threshold <= 0:
             raise ValueError("blob_threshold must be > 0")
 
+        self.label_schema = label_schema
         self.stage = stage
         self.blob_threshold = blob_threshold
         self.check_wall_integrity = check_wall_integrity
@@ -201,7 +199,7 @@ class ConstraintViolationMetricComputer(ProjectMetricComputer):
         if metric_input.stage != self.stage:
             return MetricResult()
 
-        labels = _label_triplet(metric_input)
+        labels = _label_triplet(metric_input, self.label_schema)
         if labels is None:
             return MetricResult()
 
@@ -237,6 +235,7 @@ class ConstraintViolationMetricComputer(ProjectMetricComputer):
         violating_samples = sum(
             does_violation_occur_with_wall(
                 prediction,
+                label_schema=self.label_schema,
                 blob_threshold=self.blob_threshold,
                 check_wall_integrity=self.check_wall_integrity,
             )[0]
@@ -254,10 +253,10 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
 
     def __init__(
         self,
+        label_schema: LabelSchema,
         stage: str = "val",
         every_n_epochs: int = 1,
         sample_indices: list[int] | None = None,
-        num_classes: int | None = None,
         image_tag: str = "labels_overlay",
     ) -> None:
         super().__init__()
@@ -268,10 +267,10 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         if sample_indices is not None and any(idx < 0 for idx in sample_indices):
             raise ValueError("sample_indices must contain only values >= 0")
 
+        self.label_schema = label_schema
         self.stage = stage
         self.every_n_epochs = every_n_epochs
         self.sample_indices = sample_indices
-        self.num_classes = num_classes
         self.image_tag = image_tag
 
     def _resolved_sample_indices(self) -> list[int]:
@@ -285,12 +284,9 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         return deduped_indices
 
     def _build_class_labels(self, inferred_num_classes: int) -> dict[int, str]:
-        class_count = inferred_num_classes
-        if self.num_classes is not None:
-            class_count = max(class_count, int(self.num_classes))
-        if class_count == ARTIFICIAL_MASK_NUM_CLASSES:
-            return ARTIFICIAL_MASK_CLASS_LABELS
-        return {idx: f"class_{idx}" for idx in range(max(class_count, 1))}
+        if inferred_num_classes > self.label_schema.num_classes:
+            raise ValueError("Overlay labels contain a class outside the label schema.")
+        return dict(self.label_schema.names)
 
     def _prepare_background_image(
         self,
@@ -338,7 +334,7 @@ class SegmentationOverlayMetricComputer(ProjectMetricComputer):
         if not self.should_compute(metric_input):
             return MetricResult()
 
-        labels = _label_triplet(metric_input)
+        labels = _label_triplet(metric_input, self.label_schema)
         if labels is None:
             return MetricResult()
 
@@ -401,7 +397,7 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
 
     def __init__(
         self,
-        num_classes: int = ARTIFICIAL_MASK_NUM_CLASSES,
+        label_schema: LabelSchema,
         overlay_val_stage: str = "val",
         overlay_train_stage: str = "train",
         overlay_every_n_epochs: int = 1,
@@ -416,28 +412,32 @@ class DefaultSegmentationMetricComputer(CompositeMetricComputer):
 
         super().__init__(
             metric_computers=[
-                SegmentationIoUMetricComputer(num_classes=num_classes),
-                ConstraintViolationMetricComputer(stage=overlay_val_stage),
-                ConstraintViolationMetricComputer(stage="val_extra"),
+                SegmentationIoUMetricComputer(label_schema=label_schema),
+                ConstraintViolationMetricComputer(
+                    label_schema=label_schema, stage=overlay_val_stage
+                ),
+                ConstraintViolationMetricComputer(
+                    label_schema=label_schema, stage="val_extra"
+                ),
                 SegmentationOverlayMetricComputer(
+                    label_schema=label_schema,
                     stage=overlay_val_stage,
                     every_n_epochs=overlay_every_n_epochs,
                     sample_indices=overlay_val_sample_indices,
-                    num_classes=num_classes,
                     image_tag=overlay_image_tag,
                 ),
                 SegmentationOverlayMetricComputer(
+                    label_schema=label_schema,
                     stage="val_extra",
                     every_n_epochs=overlay_every_n_epochs,
                     sample_indices=overlay_val_sample_indices,
-                    num_classes=num_classes,
                     image_tag=overlay_image_tag,
                 ),
                 SegmentationOverlayMetricComputer(
+                    label_schema=label_schema,
                     stage=overlay_train_stage,
                     every_n_epochs=overlay_every_n_epochs,
                     sample_indices=overlay_train_sample_indices,
-                    num_classes=num_classes,
                     image_tag=overlay_image_tag,
                 ),
             ]

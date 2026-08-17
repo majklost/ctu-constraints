@@ -186,7 +186,7 @@ class ProjectLightning(MetricLoggingMixin):
         #     "template"
         # ]  # template is same for all samples in the batch, so we can take the first one
         # template_sdf = batch["template_sdf"] if "template_sdf" in batch else None
-        template_batch = self._template_source.forward(batch)
+        template_batch = self._template_refiner(self._template_source(batch))
 
         decision = strategy.decide(batch, stage, int(self.current_epoch))
         segmentation_logits, warp_result = self.forward(
@@ -285,9 +285,7 @@ class UnetLightning(MetricLoggingMixin):
         self._metric_computer = (
             metric_computer
             if metric_computer is not None
-            else DefaultSegmentationMetricComputer(
-                num_classes=self._label_schema.num_classes
-            )
+            else DefaultSegmentationMetricComputer(label_schema=self._label_schema)
         )
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:

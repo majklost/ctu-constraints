@@ -87,15 +87,16 @@ class CachedArtificialDataset(PerSampleDataset):
         self._return_transform = return_transform
         self._return_template_sdf = return_template_sdf
         if return_template_sdf:
-            template = torch.from_numpy(self._template)
+            template_labels = self.label_schema.foreground_one_hot_to_label_map(
+                torch.from_numpy(self._template)
+            )
+            template_foreground = self.label_schema.label_map_to_foreground_one_hot(
+                template_labels
+            ).float()
             if sdf_mode == "kornia":
-                self._template_sdf = signed_distance_kornia(
-                    self.label_schema.foreground_channels(template)
-                )
+                self._template_sdf = signed_distance_kornia(template_foreground)
             elif sdf_mode == "scipy":
-                self._template_sdf = signed_distance_scipy(
-                    self.label_schema.foreground_channels(template)
-                )
+                self._template_sdf = signed_distance_scipy(template_foreground)
 
     def __len__(self) -> int:
         return len(self._valid_indices)
@@ -121,7 +122,7 @@ class CachedArtificialDataset(PerSampleDataset):
         if self._return_transform:
             sample["transform"] = torch.from_numpy(np.array(self._transform[idx]))
         if self._return_template_sdf:
-            sample["template_sdf"] = torch.from_numpy(np.array(self._template_sdf))
+            sample["template_sdf"] = self._template_sdf.clone()
         return sample
 
     def _create_label_schema(self) -> LabelSchema:

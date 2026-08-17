@@ -2,13 +2,8 @@ import numpy as np
 import torch
 from typing import cast
 from scipy.ndimage import binary_dilation, generate_binary_structure, label
-from ..datatools.datasets import ARTIFICIAL_MASK_LABEL_IDS
+from ..datatools.label_schema import LabelSchema
 
-
-BG = ARTIFICIAL_MASK_LABEL_IDS["background"]
-WALL = ARTIFICIAL_MASK_LABEL_IDS["boundary"]
-LUMEN = ARTIFICIAL_MASK_LABEL_IDS["lumen"]
-PLAQUE = ARTIFICIAL_MASK_LABEL_IDS["plaque"]
 
 
 def _label_components(mask: np.ndarray, structure: np.ndarray) -> tuple[np.ndarray, int]:
@@ -28,7 +23,10 @@ def _as_single_label_map(prediction: torch.Tensor) -> np.ndarray:
 
 
 def does_violation_occur_with_wall(
-    prediction: torch.Tensor, blob_threshold: int = 50, check_wall_integrity: bool = True
+    prediction: torch.Tensor,
+    label_schema: LabelSchema,
+    blob_threshold: int = 50,
+    check_wall_integrity: bool = True,
 ) -> tuple[bool, list[str]]:
     """Check Violations according to the following rules for 4-class vessel segmentation:
     
@@ -70,10 +68,16 @@ def does_violation_occur_with_wall(
     # 4-connectivity for background enclosure checks to avoid diagonal leakage
     s4 = generate_binary_structure(2, 1)
 
-    bg_mask = pred_np == BG
-    lumen_mask = pred_np == LUMEN
-    plaque_mask = pred_np == PLAQUE
-    wall_mask = pred_np == WALL
+    name_to_id = {name: class_id for class_id, name in label_schema.names.items()}
+    required_names = {"background", "boundary", "lumen", "plaque"}
+    if not required_names <= name_to_id.keys():
+        raise ValueError(
+            "Vessel constraint metrics require background, boundary, lumen, and plaque labels."
+        )
+    bg_mask = pred_np == name_to_id["background"]
+    lumen_mask = pred_np == name_to_id["lumen"]
+    plaque_mask = pred_np == name_to_id["plaque"]
+    wall_mask = pred_np == name_to_id["boundary"]
 
     # ---------------------------------------------------------
     # Rule 1: Exactly one main Lumen component
@@ -271,5 +275,4 @@ def does_violation_occur_no_wall(
             )
 
     return len(violations) > 0, violations
-
 

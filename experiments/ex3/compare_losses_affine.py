@@ -7,7 +7,6 @@ import torch
 
 from constraints import get_data_folder, get_experiment_folder
 from constraints.datatools import CachedArtificialDataset
-from constraints.datatools.datasets.types import Sample
 from constraints.losses_metrics import (
     BlurredMSELoss,
     CentroidLoss,
@@ -91,15 +90,13 @@ def _maybe_add_batch_dim(x: torch.Tensor, add: bool) -> torch.Tensor:
 def loss_fn_wrapper(
     loss_name: str,
     loss_fn: torch.nn.Module,
-    needs_sdf: bool,
-    sample: Sample,
+    target: torch.Tensor,
     value: torch.Tensor,
 ):
-    key = "sdf" if needs_sdf else "mask"
     add_batch_dim = LOSS_EXPECTS_BATCH_DIM[loss_name]
     pred = _maybe_add_batch_dim(value, add_batch_dim)
-    target = _maybe_add_batch_dim(sample[key], add_batch_dim)
-    return loss_fn(pred, target)
+    batched_target = _maybe_add_batch_dim(target, add_batch_dim)
+    return loss_fn(pred, batched_target)
 
 
 def _results_to_markdown(df: pd.DataFrame) -> str:
@@ -211,18 +208,30 @@ def test_loss(
         net = DirectOptimizer()
         optimizer = torch.optim.Adam(net.parameters(), lr=lr)
         mse_calc = torch.nn.MSELoss()
+        schema = dataset.label_schema
+        target_semantic = schema.label_map_to_one_hot(
+            sample["target_labels"]
+        ).float()
+        template_semantic = schema.label_map_to_one_hot(sample["template"]).float()
+        if LOSS_NEEDS_SDF[loss_fn_name]:
+            template = schema.foreground_channels(template_semantic)
+            target = sample["sdf"]
+            mse_target = schema.foreground_channels(target_semantic)
+        else:
+            template = template_semantic
+            target = target_semantic
+            mse_target = target_semantic
 
         for _ in range(num_iterations):
             optimizer.zero_grad()
-            transformed_template = net(sample["template"])
+            transformed_template = net(template)
             loss = loss_fn_wrapper(
                 loss_name=loss_fn_name,
                 loss_fn=LOSSES[loss_fn_name],
-                needs_sdf=LOSS_NEEDS_SDF[loss_fn_name],
-                sample=sample,
+                target=target,
                 value=transformed_template,
             )
-            mse_err = mse_calc(transformed_template, sample["mask"])
+            mse_err = mse_calc(transformed_template, mse_target)
             loss.backward()
             optimizer.step()
 

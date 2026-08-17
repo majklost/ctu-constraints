@@ -2,8 +2,13 @@ import torch
 import torch.nn.functional as functional
 
 from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
-from constraints.datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
+from constraints.datatools.label_schema import LabelSchema
 from constraints.types import MetricInput
+
+LABEL_SCHEMA = LabelSchema.from_lists(
+    ["background", "boundary", "lumen", "plaque"],
+    [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1), (0.1, 0.7, 0.1), (0.1, 0.35, 0.95)],
+)
 
 
 def _valid_vessel_labels(size: int = 32) -> torch.Tensor:
@@ -14,7 +19,7 @@ def _valid_vessel_labels(size: int = 32) -> torch.Tensor:
 
 
 def _one_hot_masks(labels: torch.Tensor) -> torch.Tensor:
-    return functional.one_hot(labels, ARTIFICIAL_MASK_NUM_CLASSES).permute(0, 3, 1, 2)
+    return functional.one_hot(labels, LABEL_SCHEMA.num_classes).permute(0, 3, 1, 2)
 
 
 def test_default_metrics_log_per_class_iou_and_validation_violation_counts():
@@ -25,7 +30,7 @@ def test_default_metrics_log_per_class_iou_and_validation_violation_counts():
     logits = _one_hot_masks(predicted_labels).float()
     target_masks = _one_hot_masks(target_labels).float()
 
-    result = DefaultSegmentationMetricComputer().compute(
+    result = DefaultSegmentationMetricComputer(label_schema=LABEL_SCHEMA).compute(
         MetricInput(
             stage="val",
             batch_idx=0,
@@ -69,7 +74,7 @@ def test_default_metrics_log_the_same_outputs_for_extra_validation():
     logits = _one_hot_masks(predicted_labels).float()
     target_masks = _one_hot_masks(target_labels).float()
 
-    result = DefaultSegmentationMetricComputer().compute(
+    result = DefaultSegmentationMetricComputer(label_schema=LABEL_SCHEMA).compute(
         MetricInput(
             stage="val_extra",
             batch_idx=0,

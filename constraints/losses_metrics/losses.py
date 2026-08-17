@@ -1,7 +1,5 @@
 import torch
-import torch.nn.functional as F
 
-from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES, artificial_mask_to_label_map
 from ..visu.helpers import to_label_map
 
 
@@ -13,10 +11,7 @@ class RawMaskCrossEntropyLoss(torch.nn.Module):
         self._cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction)
 
     def forward(self, logits: torch.Tensor, raw_target: torch.Tensor) -> torch.Tensor:
-        if logits.shape[1] == ARTIFICIAL_MASK_NUM_CLASSES and raw_target.ndim == 4:
-            target = artificial_mask_to_label_map(raw_target)
-        else:
-            target = to_label_map(raw_target)
+        target = to_label_map(raw_target)
         return self._cross_entropy(logits, target)
 
 # TODO: Make _Weighted loss from it

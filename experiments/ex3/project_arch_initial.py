@@ -25,7 +25,8 @@ import pytorch_lightning as pl
 import wandb
 
 from constraints.lightning_wrappers.modules import ProjectLightning
-from constraints.datatools.datasets import CachedArtificalDataset
+from constraints.datatools.datasets import CachedArtificialDataset
+from constraints.datatools.template_sources import PerSampleTemplateSource
 from constraints import get_experiment_folder, get_data_folder, show_torch_image
 from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
 from constraints.models.affine import ProjectWithTemplateA 
@@ -64,39 +65,46 @@ def main(args):
         TRN_FOLDER = DATA / "trn" / "affine"
         VAL_FOLDER = DATA / "val" / "affine"
         transformer = RigidTransformer()
-        net = ProjectWithTemplateA(max_translation=0.5)
     elif args.modality == "deformed":
         TRN_FOLDER = DATA / "trn" / "deformed"
         VAL_FOLDER = DATA / "val" / "deformed"
         transformer = DeformableTransformer()
-        net = ProjectWithTemplateD()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
     
-    trn_dataset = CachedArtificalDataset(TRN_FOLDER, sdf_mode="scipy")
-    val_dataset = CachedArtificalDataset(VAL_FOLDER, sdf_mode="scipy")
+    trn_dataset = CachedArtificialDataset(TRN_FOLDER, sdf_mode="scipy")
+    val_dataset = CachedArtificialDataset(VAL_FOLDER, sdf_mode="scipy")
+    label_schema = trn_dataset.label_schema
+    template_source = PerSampleTemplateSource(
+        trn_dataset.template_assets, label_schema
+    )
+    if args.modality == "affine":
+        net = ProjectWithTemplateA(label_schema, max_translation=0.5)
+    else:
+        net = ProjectWithTemplateD(label_schema)
 
     if args.loss_mode == "sanityS":
-        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=20.0, sdf_loss_weight=0)
+        loss_computer = SBCE_ROneSideSDFSquared(label_schema, seg_loss_weight=20.0, sdf_loss_weight=0)
     elif args.loss_mode == "sanityD":
-        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=0, sdf_loss_weight=1.0)
+        loss_computer = SBCE_ROneSideSDFSquared(label_schema, seg_loss_weight=0, sdf_loss_weight=1.0)
     elif args.loss_mode == "naive":
-        loss_computer = SBCE_ROneSideSDFSquared(seg_loss_weight=20.0, sdf_loss_weight=1.0)
+        loss_computer = SBCE_ROneSideSDFSquared(label_schema, seg_loss_weight=20.0, sdf_loss_weight=1.0)
     elif args.loss_mode == "fullSDF":
-        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema, seg_loss_weight=1.0, sdf_loss_weight=1.0)
     elif args.loss_mode == "fullCE":
-        loss_computer = SBCE_RBCE(seg_loss_weight=1.0, template_loss_weight=1.0)
+        loss_computer = SBCE_RBCE(label_schema, seg_loss_weight=1.0, template_loss_weight=1.0)
     else:
         raise ValueError(f"Unknown loss mode: {args.loss_mode}")
-    metric_computer = DefaultSegmentationMetricComputer(
-    )
+    metric_computer = DefaultSegmentationMetricComputer(label_schema)
     LR = args.learning_rate
     optimizer_callback = lambda module: torch.optim.Adam(module.parameters(), lr=LR)
 
     module = ProjectLightning(
-    net,
-    transformer,
-    loss_computer,
+    model=net,
+    spatial_transform=transformer,
+    loss_computer=loss_computer,
+    template_source=template_source,
+    label_schema=label_schema,
     metric_computer=metric_computer,
     optimizer_callback=optimizer_callback
 )
@@ -170,7 +178,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
-
 
 
 
