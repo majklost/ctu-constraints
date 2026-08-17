@@ -278,7 +278,7 @@ class UnetLightning(MetricLoggingMixin):
         metric_computer: ProjectMetricComputer | None = None,
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=["metric_computer"])
+        self.save_hyperparameters(ignore=["metric_computer", "label_schema"])
         self._learning_rate = learning_rate
         self._label_schema = label_schema
         self._unet = get_segmentator(self._label_schema.num_classes)

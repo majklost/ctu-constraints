@@ -42,6 +42,7 @@ for modality in "${MODALITIES[@]}"; do
             "${SEGMENTATOR_ARGS[@]}"; then
             echo "!!! SMOKE TEST FAILED: modality=${modality} mode=${mode}"
             FAILED+=("${modality}/${mode}")
+            exit 1
         fi
     done
 done

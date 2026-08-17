@@ -87,9 +87,7 @@ class CachedArtificialDataset(PerSampleDataset):
         self._return_transform = return_transform
         self._return_template_sdf = return_template_sdf
         if return_template_sdf:
-            template_labels = self.label_schema.foreground_one_hot_to_label_map(
-                torch.from_numpy(self._template)
-            )
+            template_labels = self._mask_to_label_map(torch.from_numpy(self._template))
             template_foreground = self.label_schema.label_map_to_foreground_one_hot(
                 template_labels
             ).float()
@@ -114,10 +112,10 @@ class CachedArtificialDataset(PerSampleDataset):
         template = torch.from_numpy(self._template)
         sample = Sample(
             image=torch.from_numpy(np.array(self._images[idx])),
-            target_labels=self.label_schema.foreground_one_hot_to_label_map(mask),
+            target_labels=self._mask_to_label_map(mask),
             sample_id=str(idx) + "_real_" + str(index) + "_filtered",
             sdf=sdf,
-            template=self.label_schema.foreground_one_hot_to_label_map(template),
+            template=self._mask_to_label_map(template),
         )
         if self._return_transform:
             sample["transform"] = torch.from_numpy(np.array(self._transform[idx]))
@@ -128,6 +126,20 @@ class CachedArtificialDataset(PerSampleDataset):
     def _create_label_schema(self) -> LabelSchema:
         return LabelSchema.from_lists(
             names=_ArtificialMaskLabel, colors=_ArtificialMaskColor
+        )
+
+    def _mask_to_label_map(self, mask: torch.Tensor) -> torch.Tensor:
+        """Convert either full-class or foreground-only channel masks to IDs."""
+        if mask.ndim != 3:
+            raise ValueError(f"Expected mask shape [C, H, W], got {tuple(mask.shape)}")
+        if mask.shape[0] == self.label_schema.num_classes:
+            return self.label_schema.one_hot_to_label_map(mask)
+        if mask.shape[0] == len(self.label_schema.foreground_ids):
+            return self.label_schema.foreground_one_hot_to_label_map(mask)
+        raise ValueError(
+            "Expected a full-class or foreground-only mask with "
+            f"{self.label_schema.num_classes} or "
+            f"{len(self.label_schema.foreground_ids)} channels, got {mask.shape[0]}"
         )
 
     @property

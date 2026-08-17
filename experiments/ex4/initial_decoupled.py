@@ -23,10 +23,10 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-import wandb
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
+import wandb
 from constraints import (
     get_data_folder,
     get_experiment_folder,
@@ -76,8 +76,8 @@ from constraints.transforms.transformers import (
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
-WANDB_PROJECT = "Constraints"
-WANDB_ENTITY = "ksicht"
+WANDB_PROJECT = "Constraints2"
+WANDB_ENTITY = "mrkosmic-ctu"
 # COUPLING_OPTIONS = ["full", "decoupled"]
 SAMPLE_STRATEGY_OPTIONS = ["always_gt", "no_gt"]
 SAMPLE_STRATEGY_EXTRA = SAMPLE_STRATEGY_OPTIONS + ["none"]
@@ -131,9 +131,11 @@ def handle_decoupled(
             net = ProjectWithTemplateD(ls=label_schema)
         case "both":
             if args.aff_def_mode == "calc":
-                net = ProjectWithTemplateBCalcAff(max_translation=0.5)
+                net = ProjectWithTemplateBCalcAff(
+                    label_schema=label_schema, max_translation=0.5
+                )
             elif args.aff_def_mode == "deep":
-                net = ProjectWithTemplateBDeepAff(max_translation=0.5)
+                net = ProjectWithTemplateBDeepAff(ls=label_schema, max_translation=0.5)
             else:
                 raise ValueError(f"Unknown aff_def_mode: {args.aff_def_mode}")
         case _:
