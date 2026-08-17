@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 
 import torch
-from datasets.types import Sample, TemplateAssets, TemplateBatch
 from torch import nn
+
+from .datasets.types import Sample, TemplateAssets, TemplateBatch
 
 
 class TemplateSource(nn.Module, ABC):

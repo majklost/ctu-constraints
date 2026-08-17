@@ -2,8 +2,9 @@ from abc import ABC, abstractmethod
 from turtle import forward
 
 import torch
-from datasets.types import TemplateAssets, TemplateBatch
 from torch import nn
+
+from .datasets.types import TemplateAssets, TemplateBatch
 
 
 class TemplateRefiner(nn.Module, ABC):

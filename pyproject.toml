@@ -21,6 +21,7 @@ dependencies = [
     "kornia>=0.8.3",
     "torch-tb-profiler>=0.4.3",
     "jupyter-cache>=1.0.1",
+    "polars>=1.43.2",
 ]
 
 [build-system]

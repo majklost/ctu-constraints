@@ -7,6 +7,7 @@ sync:
       vcs: true
       paths:
         - "mutagen.yml.lock"
+        - mutagen.yml
         - "uv.lock"
         # Caches
         - "data/"
