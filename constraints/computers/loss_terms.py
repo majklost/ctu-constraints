@@ -97,12 +97,13 @@ class SegmentationCrossEntropyTerm(LossTerm):
 
     def forward(self, loss_input: LossInput) -> torch.Tensor:
         pred_mask_logits = loss_input.segmentation_logits
-        gt_mask = loss_input.gt_mask
+        gt = loss_input.gt
 
         assert pred_mask_logits is not None, (
             "segmentation_logits is required for loss computation"
         )
-        assert gt_mask is not None, "gt_mask is required for loss computation"
+        assert gt is not None, "gt is required for loss computation"
+        gt_mask = gt.one_hot
         _require_channels(
             pred_mask_logits, self.label_schema.num_classes, "segmentation_logits"
         )
@@ -216,12 +217,13 @@ class RegistrationCrossEntropyTerm(LossTerm):
 
     def forward(self, loss_input: LossInput) -> torch.Tensor:
         warped_template = loss_input.warped_template
-        gt_mask = loss_input.gt_mask
+        gt = loss_input.gt
 
         assert warped_template is not None, (
             "warped_template is required for loss computation"
         )
-        assert gt_mask is not None, "gt_mask is required for loss computation"
+        assert gt is not None, "gt is required for loss computation"
+        gt_mask = gt.one_hot
         _require_channels(
             warped_template, self.label_schema.num_classes, "warped_template"
         )
@@ -238,12 +240,13 @@ class RegistrationCentroidTerm(LossTerm):
 
     def forward(self, loss_input: LossInput) -> torch.Tensor:
         warped_template = loss_input.warped_template
-        gt_mask = loss_input.gt_mask
+        gt = loss_input.gt
 
         assert warped_template is not None, (
             "warped_template is required for loss computation"
         )
-        assert gt_mask is not None, "gt_mask is required for loss computation"
+        assert gt is not None, "gt is required for loss computation"
+        gt_mask = gt.one_hot
         _require_channels(
             warped_template, self.label_schema.num_classes, "warped_template"
         )
@@ -273,7 +276,7 @@ class RegistrationDSDFMSETerm(LossTerm):
     def forward(self, loss_input: LossInput) -> torch.Tensor:
         warped_template = loss_input.warped_template
         gt_sdf = loss_input.gt_mask_sdf
-        gt_mask = loss_input.gt_mask
+        gt = loss_input.gt
 
         assert warped_template is not None, (
             "warped_template is required for loss computation"
@@ -289,7 +292,8 @@ class RegistrationDSDFMSETerm(LossTerm):
             foreground * (1 - 2 * self.endpoint_epsilon) + self.endpoint_epsilon
         )
         warped_template_sdf = signed_distance_kornia_differentiable(foreground)
-        if gt_mask is not None:
+        if gt is not None:
+            gt_mask = gt.one_hot
             _require_channels(gt_mask, self.label_schema.num_classes, "gt_mask")
             with torch.no_grad():
                 target_foreground = self.label_schema.foreground_channels(gt_mask)
@@ -328,12 +332,13 @@ class RegistrationBlurredMSETerm(LossTerm):
 
     def forward(self, loss_input: LossInput) -> torch.Tensor:
         warped_template = loss_input.warped_template
-        gt_mask = loss_input.gt_mask
+        gt = loss_input.gt
 
         assert warped_template is not None, (
             "warped_template is required for loss computation"
         )
-        assert gt_mask is not None, "gt_mask is required for loss computation"
+        assert gt is not None, "gt is required for loss computation"
+        gt_mask = gt.one_hot
         _require_channels(
             warped_template, self.label_schema.num_classes, "warped_template"
         )
@@ -389,12 +394,13 @@ class RegistrationOneside_SDFTEMPLATETerm(LossTerm):
 
     def forward(self, loss_input: LossInput) -> torch.Tensor:
         warped_template_sdf = loss_input.warped_template_sdf
-        gt_mask = loss_input.gt_mask
+        gt = loss_input.gt
 
         assert warped_template_sdf is not None, (
             "warped_template_sdf is required for loss computation"
         )
-        assert gt_mask is not None, "gt_mask is required for loss computation"
+        assert gt is not None, "gt is required for loss computation"
+        gt_mask = gt.one_hot
         _require_channels(
             warped_template_sdf,
             self._num_foreground_classes,

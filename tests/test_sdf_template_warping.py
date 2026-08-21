@@ -21,6 +21,7 @@ from constraints.transforms.transformers import (
     SpatialTransformer,
 )
 from constraints.types import (
+    DiscreteSegmentation,
     FieldParams,
     LossInput,
     RigidParams,
@@ -77,6 +78,12 @@ class _SequentialModel(nn.Module):
 def _one_hot_target(batch_size: int, height: int, width: int) -> torch.Tensor:
     labels = torch.randint(0, 4, (batch_size, height, width))
     return functional.one_hot(labels, num_classes=4).permute(0, 3, 1, 2).float()
+
+
+def _discrete_target(one_hot: torch.Tensor) -> DiscreteSegmentation:
+    return DiscreteSegmentation(
+        labels=one_hot.argmax(dim=1), label_schema=LABEL_SCHEMA
+    )
 
 
 def test_project_lightning_keeps_mask_and_sdf_template_warps_separate():
@@ -154,7 +161,7 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
                 segmentation_logits=logits,
                 warped_template=warped_template,
                 warped_template_sdf=warped_template_sdf,
-                gt_mask=target,
+                gt=_discrete_target(target),
                 gt_mask_sdf=target_sdf,
             )
         ).total
@@ -177,7 +184,7 @@ def test_dsdf_mse_has_finite_gradients_for_binary_foreground_template():
     loss = RegistrationDSDFMSETerm(LABEL_SCHEMA)(
         LossInput(
             warped_template=warped_template,
-            gt_mask=target,
+            gt=_discrete_target(target),
             gt_mask_sdf=target_sdf,
         )
     )
@@ -215,7 +222,7 @@ def test_gradient_diagnostics_are_opt_in():
         warped_template_sdf=torch.randn(
             batch_size, 3, height, width, requires_grad=True
         ),
-        gt_mask=target,
+        gt=_discrete_target(target),
         gt_mask_sdf=torch.randn(batch_size, 3, height, width),
     )
 

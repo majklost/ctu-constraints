@@ -3,12 +3,13 @@ from collections.abc import Callable
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-import wandb
 from pytorch_lightning.loggers import WandbLogger
 
 # Whatever configure_optimizers() itself may legally return
 from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch import nn
+
+import wandb
 
 from ..computers.loss_computers import ProjectLossComputer
 from ..computers.metric_computers import (
@@ -22,7 +23,13 @@ from ..datatools.template_refiners import IdentityTemplateRefiner, TemplateRefin
 from ..datatools.template_sources import TemplateSource
 from ..models.segmentator import get_segmentator
 from ..transforms.transformers import SpatialTransformer
-from ..types import LossInput, MetricInput, WandbOverlay, WarpResult
+from ..types import (
+    DiscreteSegmentation,
+    LossInput,
+    MetricInput,
+    OverlayResult,
+    WarpResult,
+)
 from .sample_strategy import GtStrategy, NoGt
 
 OptimizerFactory = Callable[[nn.Module], OptimizerLRScheduler]
@@ -34,7 +41,7 @@ _no_gt = NoGt()
 
 class MetricLoggingMixin(pl.LightningModule):
     def _log_wandb_overlay(
-        self, stage: str, image_tag: str, overlay: WandbOverlay
+        self, stage: str, image_tag: str, overlay: OverlayResult
     ) -> None:
         if self.trainer is None:
             return
@@ -197,11 +204,15 @@ class ProjectLightning(MetricLoggingMixin):
             template_sdf=template_batch.sdfs,
         )
         # Plug into loss computer
+        gt = DiscreteSegmentation(
+            labels=batch["target_labels"],
+            label_schema=self._label_schema,
+        )
         loss_input = LossInput(
             segmentation_logits=segmentation_logits,
             warped_template=warp_result.warped_template,
             warped_template_sdf=warp_result.warped_template_sdf,
-            gt_mask=self._label_schema.label_map_to_one_hot(batch["target_labels"]),
+            gt=gt,
             gt_mask_sdf=batch.get("sdf"),
             transform_spec=warp_result.transform_spec,
         )
@@ -239,7 +250,7 @@ class ProjectLightning(MetricLoggingMixin):
             image=img,
             segmentation_logits=segmentation_logits,
             warped_template=warp_result.warped_template,
-            gt_mask=self._label_schema.label_map_to_one_hot(batch["target_labels"]),
+            gt=gt,
             gt_mask_sdf=batch.get("sdf"),
             transform_spec=warp_result.transform_spec,
         )
@@ -305,6 +316,10 @@ class UnetLightning(MetricLoggingMixin):
             prog_bar=(stage == "train"),
         )
 
+        gt = DiscreteSegmentation(
+            labels=target_labels,
+            label_schema=self._label_schema,
+        )
         metric_output = self._metric_computer.compute(
             MetricInput(
                 stage=stage,
@@ -313,7 +328,7 @@ class UnetLightning(MetricLoggingMixin):
                 global_step=int(self.global_step),
                 image=image,
                 segmentation_logits=logits,
-                gt_mask=self._label_schema.label_map_to_one_hot(batch["target_labels"]),
+                gt=gt,
             )
         )
         self._log_metric_output(

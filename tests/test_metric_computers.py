@@ -3,7 +3,7 @@ import torch.nn.functional as functional
 
 from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
 from constraints.datatools.label_schema import LabelSchema
-from constraints.types import MetricInput
+from constraints.types import DiscreteSegmentation, MetricInput
 
 LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen", "plaque"],
@@ -37,7 +37,7 @@ def test_default_metrics_log_per_class_iou_and_validation_violation_counts():
             current_epoch=0,
             segmentation_logits=logits,
             warped_template=target_masks,
-            gt_mask=target_masks,
+            gt=DiscreteSegmentation(target_labels, LABEL_SCHEMA),
         )
     )
 
@@ -81,7 +81,7 @@ def test_default_metrics_log_the_same_outputs_for_extra_validation():
             current_epoch=0,
             segmentation_logits=logits,
             warped_template=target_masks,
-            gt_mask=target_masks,
+            gt=DiscreteSegmentation(target_labels, LABEL_SCHEMA),
         )
     )
 
