@@ -71,8 +71,8 @@ from constraints.transforms.transformers import (
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
-WANDB_PROJECT = "Constraints"
-WANDB_ENTITY = "ksicht"
+WANDB_PROJECT = "Constraints2"
+WANDB_ENTITY = "mrkosmic-ctu"
 # COUPLING_OPTIONS = ["full", "decoupled"]
 SAMPLE_STRATEGY_OPTIONS = ["always_gt", "no_gt"]
 SAMPLE_STRATEGY_EXTRA = SAMPLE_STRATEGY_OPTIONS + ["none"]
