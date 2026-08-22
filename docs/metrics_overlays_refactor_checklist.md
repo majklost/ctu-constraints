@@ -46,28 +46,28 @@ a logging provider.
 
 ## 3. Composition and stage routing
 
-- [ ] Make `StagedMetrics` an `nn.Module` so its child torchmetrics state is
+- [x] Make `StagedMetrics` an `nn.Module` so its child torchmetrics state is
   registered, moved between devices, checkpointed, and usable in distributed
   training.
-- [ ] Rename it to `StagedMetricComputer` if naming should match the design.
-- [ ] Keep its per-stage composites in `nn.ModuleDict`.
-- [ ] Provide separate term instances for every stage; never share a train
+- [x] Rename it to `StagedMetricComputer` if naming should match the design.
+- [x] Keep its per-stage composites in `nn.ModuleDict`.
+- [x] Provide separate term instances for every stage; never share a train
   term with validation.
-- [ ] Add an explicit no-op stateful metric for intentionally empty stages.
+- [x] Add an explicit no-op stateful metric for intentionally empty stages.
 - [ ] Create the default composition/factory for train, validation, extra
   validation, and test as applicable.
 
 ## 4. Logging provider
 
-- [ ] Implement `LightningWandbLoggingProvider` using only the bound scalar
+- [x] Implement `LightningWandbLoggingProvider` using only the bound scalar
   logging function (`scalar_log=self.log`).
-- [ ] Add batch-scalar logging.
-- [ ] Add epoch-scalar logging.
-- [ ] Centralize standard names, with stage first, for example
+- [x] Add batch-scalar logging.
+- [x] Add epoch-scalar logging.
+- [x] Centralize standard names, with stage first, for example
   `val/epoch/segmentation/iou/pred_vs_gt`.
-- [ ] Look up the W&B run lazily when logging artifacts.
-- [ ] Convert `OverlayResult` to `wandb.Image` inside the provider only.
-- [ ] Safely no-op for no trainer, non-W&B loggers, and nonzero ranks.
+- [x] Look up the W&B run lazily when logging artifacts.
+- [x] Convert `OverlayResult` to `wandb.Image` inside the provider only.
+- [x] Safely no-op for no trainer, non-W&B loggers, and nonzero ranks.
 
 ## 5. Lightning wiring
 

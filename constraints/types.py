@@ -1,8 +1,11 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, Protocol, get_args
 
 import torch
+
+if TYPE_CHECKING:
+    from .datatools.label_schema import LabelSchema
 
 STAGES = Literal["train", "val", "val_extra", "test"]
 
@@ -212,3 +215,19 @@ class OverlayPolicy:
             for sample_id in self.sample_ids
             if sample_id in positions_by_id
         )
+
+
+class LoggingProvider(Protocol):
+    def log_loss(
+        self, context: StepContext, result: LossResult, *, prog_bar: bool
+    ) -> None: ...
+
+    def log_batch(self, context: StepContext, result: MetricResult) -> None:
+        pass
+
+    def log_epoch(self, context: StepContext, result: MetricResult) -> None:
+        pass
+
+    def log_overlay(
+        self, context: StepContext, name: str, result: OverlayResult
+    ) -> None: ...

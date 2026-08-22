@@ -5,6 +5,7 @@ import torch
 
 from ..datatools.datasets.types import Batch
 from ..datatools.label_schema import LabelSchema
+from ..types import StepContext
 
 
 @dataclass
@@ -15,14 +16,15 @@ class GtStrategyResult:
 
 @runtime_checkable
 class GtStrategy(Protocol):
-    def decide(self, batch: Batch, stage: str, epoch: int) -> GtStrategyResult: ...
+    def decide(self, batch: Batch, context: StepContext) -> GtStrategyResult: ...
 
 
 class NoGt:
     def __init__(self, detach_seg: bool = False) -> None:
         self.detach_seg = detach_seg
 
-    def decide(self, batch: Batch, stage: str, epoch: int) -> GtStrategyResult:
+    def decide(self, batch: Batch, context: StepContext) -> GtStrategyResult:
+        del batch, context
         return GtStrategyResult(gt=None, detach_seg=self.detach_seg)
 
 
@@ -30,7 +32,8 @@ class AlwaysGt:
     def __init__(self, label_schema: LabelSchema) -> None:
         self.label_schema = label_schema
 
-    def decide(self, batch: Batch, stage: str, epoch: int) -> GtStrategyResult:
+    def decide(self, batch: Batch, context: StepContext) -> GtStrategyResult:
+        del context
         return GtStrategyResult(
             gt=self.label_schema.label_map_to_one_hot(batch["target_labels"]),
             detach_seg=False,
@@ -47,8 +50,8 @@ class WarmupGt:
         self.detach_seg = detach_seg
         self.label_schema = label_schema
 
-    def decide(self, batch: Batch, stage: str, epoch: int) -> GtStrategyResult:
-        if stage == "train" and epoch < self.n_epochs:
+    def decide(self, batch: Batch, context: StepContext) -> GtStrategyResult:
+        if context.stage == "train" and context.current_epoch < self.n_epochs:
             return GtStrategyResult(
                 gt=self.label_schema.label_map_to_one_hot(batch["target_labels"]),
                 detach_seg=False,
