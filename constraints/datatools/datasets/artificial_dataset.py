@@ -13,6 +13,7 @@ from .base_dataset import PerSampleDataset
 from .types import Sample
 
 SDFMode = Literal["kornia", "scipy"]
+BAD_INDICES_FILENAME = "bad_indices.csv"
 _ArtificialMaskLabel = ["background", "boundary", "lumen", "plaque"]
 _ArtificialMaskColor = [
     (0.0, 0.0, 0.0),  # background
@@ -67,7 +68,7 @@ class CachedArtificialDataset(PerSampleDataset):
         sdf_mode: SDFMode = "scipy",
         return_transform: bool = False,
         return_template_sdf: bool = False,
-        bad_indices_fname: str | None = None,
+        bad_indices_fname: str | None = BAD_INDICES_FILENAME,
     ):
         self._images = np.load(f"{folder}/img.npy", mmap_mode="r")
         self._masks = np.load(f"{folder}/mask.npy", mmap_mode="r")

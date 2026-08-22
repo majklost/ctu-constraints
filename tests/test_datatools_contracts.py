@@ -49,3 +49,28 @@ def test_artificial_dataset_returns_collatable_labels_and_template_sdf(tmp_path)
     assert batch["target_labels"].dtype == torch.long
     assert batch["template"].shape == (2, height, width)
     assert batch["template_sdf"].shape == (2, 3, height, width)
+
+
+def test_artificial_dataset_filters_bad_indices_by_default(tmp_path):
+    sample_count, height, width = 3, 2, 2
+    masks = np.zeros((sample_count, 3, height, width), dtype=np.float32)
+    images = np.arange(sample_count, dtype=np.float32).reshape(sample_count, 1, 1, 1)
+    images = np.broadcast_to(images, (sample_count, 1, height, width)).copy()
+
+    np.save(tmp_path / "img.npy", images)
+    np.save(tmp_path / "mask.npy", masks)
+    np.save(tmp_path / "sdf_kornia.npy", np.zeros_like(masks))
+    np.save(tmp_path / "sdf_scipy.npy", np.zeros_like(masks))
+    np.save(tmp_path / "template.npy", masks[0])
+    np.save(tmp_path / "transform.npy", np.zeros((sample_count, 3, 3), np.float32))
+    (tmp_path / "bad_indices.csv").write_text("index,violations\n1,invalid\n")
+
+    filtered = CachedArtificialDataset(tmp_path)
+    unfiltered = CachedArtificialDataset(tmp_path, bad_indices_fname=None)
+
+    assert len(filtered) == 2
+    assert [filtered[index]["sample_id"] for index in range(len(filtered))] == [
+        "0_real_0_filtered",
+        "2_real_1_filtered",
+    ]
+    assert len(unfiltered) == sample_count
