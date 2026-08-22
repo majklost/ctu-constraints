@@ -46,13 +46,14 @@ from constraints.computers.loss_computers import (
     SOneSideSDFPlain_ROneSideSDFPlain,
     SOneSideSDFSquared_ROneSideSDFSquared,
 )
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
+from constraints.computers.metric_computers import StagedMetricComputer
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.label_schema import LabelSchema
 from constraints.datatools.template_sources import (
     PerSampleTemplateSource,
     TemplateSource,
 )
+from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.callbacks import (
     SegmentationRegistrationEarlyStopping,
 )
@@ -108,11 +109,11 @@ def configure_reproducibility(seed: int) -> None:
 
 
 def handle_unet(
-    args, metric_computer: DefaultSegmentationMetricComputer, ls: LabelSchema
+    args, staged_metric_computer: StagedMetricComputer, ls: LabelSchema
 ) -> pl.LightningModule:
     return UnetLightning(
         learning_rate=args.learning_rate,
-        metric_computer=metric_computer,
+        staged_metric_computer=staged_metric_computer,
         label_schema=ls,
     )
 
@@ -120,7 +121,7 @@ def handle_unet(
 def handle_decoupled(
     args,
     transformer: SpatialTransformer,
-    metric_computer: DefaultSegmentationMetricComputer,
+    staged_metric_computer: StagedMetricComputer,
     label_schema: LabelSchema,
     template_source: TemplateSource,
 ) -> pl.LightningModule:
@@ -194,7 +195,7 @@ def handle_decoupled(
         model=net,
         spatial_transform=transformer,
         loss_computer=loss_computer,
-        metric_computer=metric_computer,
+        staged_metric_computer=staged_metric_computer,
         optimizer_callback=optimizer_callback,
         gt_strategy=sample_strategy,
         validation_strategy=validation_strategy,
@@ -247,17 +248,15 @@ def main(args):
         trn_dataset.template_assets, trn_dataset.label_schema
     )
 
-    metric_computer = DefaultSegmentationMetricComputer(
-        label_schema=trn_dataset.label_schema
-    )
+    staged_metric_computer = create_default_staged_metrics(trn_dataset.label_schema)
 
     if args.mode == "UNET":
-        module = handle_unet(args, metric_computer, ls=trn_dataset.label_schema)
+        module = handle_unet(args, staged_metric_computer, ls=trn_dataset.label_schema)
     else:
         module = handle_decoupled(
             args,
             transformer,
-            metric_computer,
+            staged_metric_computer,
             label_schema=trn_dataset.label_schema,
             template_source=template_source,
         )

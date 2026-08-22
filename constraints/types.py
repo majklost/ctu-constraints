@@ -148,15 +148,6 @@ class StepContext:
     global_step: int
 
 
-# @dataclass
-# class MetricResult:
-#     """Structured metric output with scalars and optional W&B overlay artifacts."""
-
-#     logs: dict[str, float | torch.Tensor] | None = None
-#     sum_logs: dict[str, float | torch.Tensor] | None = None
-#     wandb_overlays: dict[str, "WandbOverlay"] | None = None
-
-
 @dataclass
 class OverlayResult:
     """Generic image payload with one or more semantic mask overlays."""

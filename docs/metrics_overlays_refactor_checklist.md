@@ -54,7 +54,7 @@ a logging provider.
 - [x] Provide separate term instances for every stage; never share a train
   term with validation.
 - [x] Add an explicit no-op stateful metric for intentionally empty stages.
-- [ ] Create the default composition/factory for train, validation, extra
+- [x] Create the default composition/factory for train, validation, extra
   validation, and test as applicable.
 
 ## 4. Logging provider
@@ -71,12 +71,13 @@ a logging provider.
 
 ## 5. Lightning wiring
 
-- [ ] Remove `MetricLoggingMixin` and all legacy `MetricResult.logs`,
+- [x] Remove `MetricLoggingMixin` and all legacy `MetricResult.logs`,
   `sum_logs`, and `wandb_overlays` handling.
-- [ ] Replace imports and constructor types for the removed metric-computer
+- [x] Replace imports and constructor types for the removed metric-computer
   classes.
-- [ ] Add one small `_step_context(stage, batch_idx)` method to each common
-  Lightning base/shared implementation, returning:
+- [x] Construct one `StepContext` explicitly at the beginning of every shared
+  step, then pass that same instance to strategy selection, staged metrics,
+  and logging:
 
   ```python
   StepContext(
@@ -87,40 +88,41 @@ a logging provider.
   )
   ```
 
-- [ ] In each shared step, build `MetricInput`, obtain the context, call
+- [x] In each shared step, build `MetricInput`, obtain the context, call
   staged-metric `update`, and delegate any batch result to the provider.
-- [ ] At each relevant epoch end, call `compute(stage)`, log the epoch result,
-  then `reset(stage)`.
-- [ ] Ensure `val_extra` has independent update, compute, and reset handling.
+- [x] At each relevant epoch end, call `compute(context)`, log the epoch result,
+  then `reset(context)`.
+- [x] Ensure `val_extra` has independent update, compute, and reset handling.
 
 ## 6. Overlay computers
 
-- [ ] Define the `OverlayComputer` abstract contract.
-- [ ] Implement `SegmentationOverlayComputer`.
-- [ ] Move all remaining overlay computation out of `metric_computers.py`.
-- [ ] Filter by stage and epoch frequency with `OverlayPolicy` and
+- [x] Define the `OverlayComputer` abstract contract.
+- [x] Implement `SegmentationOverlayComputer`.
+- [x] Move all active overlay computation out of `metric_computers.py`.
+- [x] Filter by stage and epoch frequency with `OverlayPolicy` and
   `StepContext`.
-- [ ] Resolve requested global sample IDs to samples in the current input via
+- [x] Resolve requested global sample IDs to samples in the current input via
   `OverlayPolicy.batch_positions(metric_input.sample_ids)`.
-- [ ] Produce generic `OverlayResult` payloads containing image, masks, class
+- [x] Produce generic `OverlayResult` payloads containing image, masks, class
   labels, and caption.
 
 ## 7. Callers and compatibility
 
-- [ ] Update experiments that construct `DefaultSegmentationMetricComputer`.
-- [ ] Update early-stopping callback keys if epoch metric names change.
-- [ ] Delete the commented legacy metric/overlay implementation.
-- [ ] Remove all construction of lifecycle fields inside `MetricInput`.
+- [x] Update experiments that construct `DefaultSegmentationMetricComputer`.
+- [x] Update early-stopping callback keys if epoch metric names change.
+- [x] Delete the commented legacy metric/overlay implementation.
+- [x] Remove all construction of lifecycle fields inside `MetricInput`.
 
 ## 8. Tests
 
-- [ ] Update legacy metric-computer tests to use `update -> compute -> reset`.
-- [ ] Test IoU across unequal batches to prove dataset-level accumulation.
-- [ ] Test state isolation across train, val, and val_extra.
-- [ ] Test constraint violation accumulation and reset.
-- [ ] Test composite duplicate-name errors.
-- [ ] Test overlay policy filtering and global sample-ID resolution.
-- [ ] Test `OverlayResult` contents without importing W&B.
-- [ ] Test logging-provider metric names and W&B conversion using mocks.
+- [x] Update legacy metric-computer tests to use `update -> compute -> reset`.
+- [x] Test IoU across unequal batches to prove dataset-level accumulation.
+- [x] Test state isolation across train, val, and val_extra.
+- [x] Test constraint violation accumulation and reset.
+- [x] Test composite duplicate-name errors.
+- [x] Test overlay policy filtering and global sample-ID resolution.
+- [x] Test `OverlayResult` contents without importing W&B.
+- [x] Test logging-provider metric names and W&B conversion using mocks.
 - [ ] Add Lightning integration tests for batch logging and epoch-end reset.
-- [ ] Run `.venv/bin/pytest -q`.
+- [x] Run the manual `experiments/ex5/wandb_logging_smoke.py` W&B smoke test.
+- [x] Run `.venv/bin/pytest -q`.

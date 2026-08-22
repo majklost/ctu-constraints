@@ -11,6 +11,7 @@ from torch import nn
 from ..computers.loss_computers import ProjectLossComputer
 from ..computers.metric_computers import StagedMetricComputer
 from ..computers.metric_terms import CompositeMetric
+from ..computers.overlay_computers import OverlayComputer
 from ..datatools.datasets.types import Batch, TemplateBatch
 from ..datatools.label_schema import LabelSchema
 from ..datatools.template_refiners import IdentityTemplateRefiner, TemplateRefiner
@@ -84,6 +85,7 @@ class ProjectLightning(pl.LightningModule):
         label_schema: LabelSchema,
         template_refiner: TemplateRefiner = _identity_refiner,
         staged_metric_computer: StagedMetricComputer | None = None,
+        overlay_computers: tuple[OverlayComputer, ...] = (),
         logging_provider_factory: LoggingProviderFactory = _default_logging_provider,
         optimizer_callback: OptimizerFactory = lambda module: torch.optim.Adam(
             module.parameters(), lr=1e-3
@@ -105,6 +107,7 @@ class ProjectLightning(pl.LightningModule):
             self.log,
             lambda: self._trainer is None or self._trainer.is_global_zero,
         )
+        self._overlay_computers = overlay_computers
         self._optimizer_callback = optimizer_callback
         self._template_source = template_source
         self._template_refiner = template_refiner
@@ -193,6 +196,10 @@ class ProjectLightning(pl.LightningModule):
         )
         metric_result = self._staged_metric_computer.update(context, metric_input)
         self._logging_provider.log_batch(context, metric_result)
+        for overlay_computer in self._overlay_computers:
+            overlays = overlay_computer.compute(metric_input, context)
+            for name, overlay in overlays.items():
+                self._logging_provider.log_overlay(context, name, overlay)
 
         return loss_output.total
 
@@ -215,14 +222,18 @@ class ProjectLightning(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self) -> None:
-        context = StepContext("train", 0, int(self.current_epoch), int(self.global_step))
+        context = StepContext(
+            "train", 0, int(self.current_epoch), int(self.global_step)
+        )
         result = self._staged_metric_computer.compute(context)
         self._logging_provider.log_epoch(context, result)
         self._staged_metric_computer.reset(context)
 
     def on_validation_epoch_end(self) -> None:
         for stage in ("val", "val_extra"):
-            context = StepContext(stage, 0, int(self.current_epoch), int(self.global_step))
+            context = StepContext(
+                stage, 0, int(self.current_epoch), int(self.global_step)
+            )
             result = self._staged_metric_computer.compute(context)
             self._logging_provider.log_epoch(context, result)
             self._staged_metric_computer.reset(context)
@@ -237,12 +248,14 @@ class UnetLightning(pl.LightningModule):
         label_schema: LabelSchema,
         learning_rate: float = 1e-3,
         staged_metric_computer: StagedMetricComputer | None = None,
+        overlay_computers: tuple[OverlayComputer, ...] = (),
         logging_provider_factory: LoggingProviderFactory = _default_logging_provider,
     ):
         super().__init__()
         self.save_hyperparameters(
             ignore=[
                 "staged_metric_computer",
+                "overlay_computers",
                 "logging_provider_factory",
                 "label_schema",
             ]
@@ -259,6 +272,7 @@ class UnetLightning(pl.LightningModule):
             self.log,
             lambda: self._trainer is None or self._trainer.is_global_zero,
         )
+        self._overlay_computers = overlay_computers
 
     def forward(self, image: torch.Tensor) -> torch.Tensor:
         return self._unet(image.float())
@@ -285,16 +299,21 @@ class UnetLightning(pl.LightningModule):
             labels=target_labels,
             label_schema=self._label_schema,
         )
+        metric_input = MetricInput(
+            image=image,
+            segmentation_logits=logits,
+            gt=gt,
+            sample_ids=tuple(batch.get("sample_id", ())),
+        )
         metric_result = self._staged_metric_computer.update(
             context,
-            MetricInput(
-                image=image,
-                segmentation_logits=logits,
-                gt=gt,
-                sample_ids=tuple(batch.get("sample_id", ())),
-            ),
+            metric_input,
         )
         self._logging_provider.log_batch(context, metric_result)
+        for overlay_computer in self._overlay_computers:
+            overlays = overlay_computer.compute(metric_input, context)
+            for name, overlay in overlays.items():
+                self._logging_provider.log_overlay(context, name, overlay)
 
         return loss
 
@@ -305,7 +324,9 @@ class UnetLightning(pl.LightningModule):
         return self._shared_step(batch, batch_idx, stage="val")
 
     def on_train_epoch_end(self) -> None:
-        context = StepContext("train", 0, int(self.current_epoch), int(self.global_step))
+        context = StepContext(
+            "train", 0, int(self.current_epoch), int(self.global_step)
+        )
         result = self._staged_metric_computer.compute(context)
         self._logging_provider.log_epoch(context, result)
         self._staged_metric_computer.reset(context)

@@ -1,9 +1,10 @@
 import torch
 import torch.nn.functional as functional
 
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
 from constraints.datatools.label_schema import LabelSchema
-from constraints.types import DiscreteSegmentation, MetricInput
+from constraints.factories.metrics import create_default_staged_metrics
+from constraints.types import DiscreteSegmentation, MetricInput, StepContext
+
 
 LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen", "plaque"],
@@ -18,85 +19,67 @@ def _valid_vessel_labels(size: int = 32) -> torch.Tensor:
     return labels
 
 
-def _one_hot_masks(labels: torch.Tensor) -> torch.Tensor:
-    return functional.one_hot(labels, LABEL_SCHEMA.num_classes).permute(0, 3, 1, 2)
+def _input(predicted: torch.Tensor, target: torch.Tensor) -> MetricInput:
+    return MetricInput(
+        image=torch.zeros((predicted.shape[0], 1, *predicted.shape[1:])),
+        segmentation_logits=functional.one_hot(
+            predicted, LABEL_SCHEMA.num_classes
+        ).movedim(-1, 1).float(),
+        warped_template=functional.one_hot(
+            target, LABEL_SCHEMA.num_classes
+        ).movedim(-1, 1).float(),
+        gt=DiscreteSegmentation(target, LABEL_SCHEMA),
+    )
 
 
-def test_default_metrics_log_per_class_iou_and_validation_violation_counts():
-    valid_labels = _valid_vessel_labels()
-    invalid_labels = torch.zeros_like(valid_labels)
-    predicted_labels = torch.stack([valid_labels, invalid_labels])
-    target_labels = torch.stack([valid_labels, valid_labels])
-    logits = _one_hot_masks(predicted_labels).float()
-    target_masks = _one_hot_masks(target_labels).float()
+def _context(stage: str) -> StepContext:
+    return StepContext(stage=stage, batch_idx=0, current_epoch=0, global_step=0)
 
-    result = DefaultSegmentationMetricComputer(label_schema=LABEL_SCHEMA).compute(
-        MetricInput(
-            stage="val",
-            batch_idx=0,
-            current_epoch=0,
-            segmentation_logits=logits,
-            warped_template=target_masks,
-            gt=DiscreteSegmentation(target_labels, LABEL_SCHEMA),
+
+def test_default_staged_metrics_use_independent_validation_state() -> None:
+    valid = _valid_vessel_labels()
+    invalid = torch.zeros_like(valid)
+    predicted = torch.stack((valid, invalid))
+    target = torch.stack((valid, valid))
+    metrics = create_default_staged_metrics(LABEL_SCHEMA)
+
+    metric_input = _input(predicted, target)
+    metrics.update(_context("val"), metric_input)
+    metrics.update(_context("val_extra"), metric_input)
+
+    for stage in ("val", "val_extra"):
+        result = metrics.compute(_context(stage)).scalars
+        assert "segmentation/iou/pred_vs_gt" in result
+        assert "registration/iou/warped_vs_gt" in result
+        assert torch.isclose(
+            result["segmentation/constraint/violation_rate"], torch.tensor(0.5)
         )
-    )
-
-    assert result.logs is not None
-    assert "segmentation/iou/pred_vs_gt" in result.logs
-    assert "segmentation/iou/background_vs_gt" in result.logs
-    assert "segmentation/iou/boundary_vs_gt" in result.logs
-    assert "segmentation/iou/lumen_vs_gt" in result.logs
-    assert "segmentation/iou/plaque_vs_gt" in result.logs
-    assert torch.isclose(
-        result.logs["segmentation/constraint/violation_rate"], torch.tensor(0.5)
-    )
-    assert torch.isclose(
-        result.logs["registration/constraint/violation_rate"], torch.tensor(0.0)
-    )
-
-    assert result.sum_logs is not None
-    assert result.sum_logs["segmentation/constraint/violating_samples"].item() == 1
-    assert result.sum_logs["segmentation/constraint/total_samples"].item() == 2
-    assert result.sum_logs["registration/constraint/violating_samples"].item() == 0
-    assert result.sum_logs["registration/constraint/total_samples"].item() == 2
-    assert "registration/iou/warped_vs_gt" in result.logs
-    assert "registration/iou/background_vs_gt" in result.logs
-    assert "registration/iou/boundary_vs_gt" in result.logs
-    assert "registration/iou/lumen_vs_gt" in result.logs
-    assert "registration/iou/plaque_vs_gt" in result.logs
-
-
-def test_default_metrics_log_the_same_outputs_for_extra_validation():
-    valid_labels = _valid_vessel_labels()
-    invalid_labels = torch.zeros_like(valid_labels)
-    predicted_labels = torch.stack([valid_labels, invalid_labels])
-    target_labels = torch.stack([valid_labels, valid_labels])
-    logits = _one_hot_masks(predicted_labels).float()
-    target_masks = _one_hot_masks(target_labels).float()
-
-    result = DefaultSegmentationMetricComputer(label_schema=LABEL_SCHEMA).compute(
-        MetricInput(
-            stage="val_extra",
-            batch_idx=0,
-            current_epoch=0,
-            segmentation_logits=logits,
-            warped_template=target_masks,
-            gt=DiscreteSegmentation(target_labels, LABEL_SCHEMA),
+        assert torch.isclose(
+            result["registration/constraint/violation_rate"], torch.tensor(0.0)
         )
-    )
+        metrics.reset(_context(stage))
+        assert metrics.compute(_context(stage)).scalars == {}
 
-    assert result.logs is not None
-    assert "segmentation/iou/background_vs_gt" in result.logs
-    assert "registration/iou/background_vs_gt" in result.logs
-    assert torch.isclose(
-        result.logs["segmentation/constraint/violation_rate"], torch.tensor(0.5)
-    )
-    assert torch.isclose(
-        result.logs["registration/constraint/violation_rate"], torch.tensor(0.0)
-    )
 
-    assert result.wandb_overlays is not None
-    assert set(result.wandb_overlays) == {
-        "labels_overlay_val_extra_s0",
-        "labels_overlay_val_extra_s1",
-    }
+def test_default_staged_metrics_emit_no_constraint_rate_for_train() -> None:
+    valid = _valid_vessel_labels()
+    metrics = create_default_staged_metrics(LABEL_SCHEMA)
+    context = _context("train")
+
+    metrics.update(context, _input(torch.stack((valid,)), torch.stack((valid,))))
+
+    result = metrics.compute(context).scalars
+    assert "segmentation/iou/pred_vs_gt" in result
+    assert "registration/iou/warped_vs_gt" in result
+    assert "segmentation/constraint/violation_rate" not in result
+
+
+def test_default_staged_metrics_do_not_share_state_between_validation_stages() -> None:
+    valid = _valid_vessel_labels()
+    metrics = create_default_staged_metrics(LABEL_SCHEMA)
+    metric_input = _input(torch.stack((valid,)), torch.stack((valid,)))
+
+    metrics.update(_context("val"), metric_input)
+
+    assert metrics.compute(_context("val")).scalars
+    assert metrics.compute(_context("val_extra")).scalars == {}

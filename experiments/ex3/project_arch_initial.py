@@ -32,7 +32,7 @@ from constraints.transforms.transformers import RigidTransformer,DeformableTrans
 from constraints.models.affine import ProjectWithTemplateA 
 from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.computers.loss_computers import SBCE_ROneSideSDFSquared, SBCE_RBCE,SOneSideSDFSquared_ROneSideSDFSquared
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
+from constraints.factories.metrics import create_default_staged_metrics
 from torch.utils.data import DataLoader
 from pytorch_lightning.loggers import WandbLogger
 
@@ -95,7 +95,7 @@ def main(args):
         loss_computer = SBCE_RBCE(label_schema, seg_loss_weight=1.0, template_loss_weight=1.0)
     else:
         raise ValueError(f"Unknown loss mode: {args.loss_mode}")
-    metric_computer = DefaultSegmentationMetricComputer(label_schema)
+    staged_metric_computer = create_default_staged_metrics(label_schema)
     LR = args.learning_rate
     optimizer_callback = lambda module: torch.optim.Adam(module.parameters(), lr=LR)
 
@@ -105,7 +105,7 @@ def main(args):
     loss_computer=loss_computer,
     template_source=template_source,
     label_schema=label_schema,
-    metric_computer=metric_computer,
+    staged_metric_computer=staged_metric_computer,
     optimizer_callback=optimizer_callback
 )
 
@@ -178,6 +178,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
-
 
 

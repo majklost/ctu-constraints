@@ -39,6 +39,16 @@ def _metric_input(labels: torch.Tensor) -> MetricInput:
     )
 
 
+def _segmentation_metric_input(
+    predictions: torch.Tensor, targets: torch.Tensor
+) -> MetricInput:
+    return MetricInput(
+        image=torch.zeros((targets.shape[0], 1, *targets.shape[1:])),
+        segmentation_logits=_channels(predictions),
+        gt=DiscreteSegmentation(labels=targets, label_schema=LABEL_SCHEMA),
+    )
+
+
 def test_iou_terms_report_dataset_macro_and_per_class_iou() -> None:
     labels = torch.tensor(
         [
@@ -71,6 +81,30 @@ def test_iou_terms_report_dataset_macro_and_per_class_iou() -> None:
         assert all(torch.isclose(value, torch.tensor(1.0)) for value in result.values())
 
         term.reset()
+
+
+def test_iou_accumulates_over_unequal_batches_as_one_dataset() -> None:
+    targets = torch.tensor(
+        [
+            [[0, 1], [2, 0]],
+            [[0, 1], [2, 0]],
+            [[2, 1], [0, 2]],
+        ]
+    )
+    predictions = targets.clone()
+    predictions[1:] = 0
+    accumulated = SegmentationIoUTerm(LABEL_SCHEMA)
+    combined = SegmentationIoUTerm(LABEL_SCHEMA)
+
+    accumulated.update(_segmentation_metric_input(predictions[:1], targets[:1]))
+    accumulated.update(_segmentation_metric_input(predictions[1:], targets[1:]))
+    combined.update(_segmentation_metric_input(predictions, targets))
+
+    accumulated_result = accumulated.compute().scalars
+    combined_result = combined.compute().scalars
+    assert accumulated_result.keys() == combined_result.keys()
+    for name in accumulated_result:
+        assert torch.isclose(accumulated_result[name], combined_result[name])
 
 
 class _StaticMetric(StatefulMetric):

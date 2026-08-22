@@ -131,6 +131,8 @@ class SegmentationIoUTerm(MetricTerm):
         return MetricResult(scalars={})
 
     def compute(self) -> MetricResult:
+        if not self._macro_iou.update_called:
+            return MetricResult()
         scalars: dict[str, torch.Tensor | float] = {
             "segmentation/iou/pred_vs_gt": self._macro_iou.compute()
         }
@@ -175,6 +177,8 @@ class RegistrationIoUTerm(MetricTerm):
         return MetricResult(scalars={})
 
     def compute(self) -> MetricResult:
+        if not self._macro_iou.update_called:
+            return MetricResult()
         scalars: dict[str, torch.Tensor | float] = {
             "registration/iou/warped_vs_gt": self._macro_iou.compute()
         }
@@ -240,7 +244,9 @@ class _ConstraintViolationTerm(MetricTerm, ABC):
         return MetricResult(
             constraint_violation_samples={
                 self.metric_prefix: ConstraintViolationSamples(
-                    sample_ids=tuple(inputs.sample_ids[index] for index in violating_indices),
+                    sample_ids=tuple(
+                        inputs.sample_ids[index] for index in violating_indices
+                    ),
                     details=tuple(violations[index][1] for index in violating_indices),
                 )
             }

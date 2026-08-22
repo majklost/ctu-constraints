@@ -23,7 +23,7 @@ from constraints.computers.loss_computers import (
     SBCE_ROneSideSDFSquared,
     SOneSideSDFSquared_ROneSideSDFSquared,
 )
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
+from constraints.factories.metrics import create_default_staged_metrics
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.template_sources import PerSampleTemplateSource
 from constraints.lightning_wrappers.modules import ProjectLightning
@@ -107,7 +107,7 @@ def main(args):
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 
-    metric_computer = DefaultSegmentationMetricComputer(label_schema)
+    staged_metric_computer = create_default_staged_metrics(label_schema)
 
     optimizer_callback = lambda module: torch.optim.Adam(
         module.parameters(), lr=args.learning_rate
@@ -119,7 +119,7 @@ def main(args):
         loss_computer=loss_computer,
         template_source=template_source,
         label_schema=label_schema,
-        metric_computer=metric_computer,
+        staged_metric_computer=staged_metric_computer,
         optimizer_callback=optimizer_callback,
         gt_strategy=sample_strategy,
     )
