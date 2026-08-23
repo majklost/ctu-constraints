@@ -7,6 +7,7 @@
 mutagen project start
 mutagen project resume
 mutagen sync flush constraints 
+GIT_COMMIT="$(git rev-parse HEAD)" || exit 1
 REMOTE="mrkosmic@rci"
 PROJECT_DIR="/mnt/personal/mrkosmic/synced/constraints"
 
@@ -24,5 +25,5 @@ ARGS=$(printf ' %q' "$@")
 ssh "${REMOTE}" << EOF
 ml PyTorch-Lightning/2.5.5-foss-2025a-CUDA-12.8.0
 echo "HPC modules loaded successfully."
-cd ${PROJECT_DIR} && sbatch --export=ALL submit_job.sh${ARGS}
+cd ${PROJECT_DIR} && sbatch --export=ALL,CTU_GIT_COMMIT=${GIT_COMMIT} submit_job.sh${ARGS}
 EOF

@@ -40,12 +40,11 @@ experiment matrix.
     rigid.
   - Keep generic PyTorch/API concepts such as `affine_grid` and VoxelMorph's
     affine utilities named affine.
-- [ ] Add Slurm and source metadata to W&B runs:
+- [x] Add Slurm and source metadata to W&B runs:
   - `SLURM_JOB_ID`, when available;
-  - Git commit hash and whether the worktree was dirty;
-  - experiment filename and command-line arguments.
-  - Verify which Git metadata W&B already records automatically, but store the
-    commit explicitly so it is also available to local weight metadata.
+  - Git commit hash, explicitly supplied on Slurm runs where the synced
+    worktree has no `.git` directory.
+  - Local runs retain W&B's standard Git discovery.
 
 ## 1. Model weight saving
 

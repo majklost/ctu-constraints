@@ -23,10 +23,8 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
-import wandb
 from constraints import (
     get_data_folder,
     get_experiment_folder,
@@ -48,12 +46,13 @@ from constraints.lightning_wrappers.callbacks import (
 )
 from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightning
 from constraints.lightning_wrappers.sample_strategy import AlwaysGt, NoGt
+from constraints.logging.wandb_factory import create_wandb_logger
+from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.models.rigid import ProjectWithTemplateRigid
 from constraints.models.rigid_deform import (
     ProjectWithTemplateBCalcRigid,
     ProjectWithTemplateBDeepRigid,
 )
-from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.models.segmentator import set_segmentator_encoder_weights
 from constraints.transforms.transformers import (
     DeformableTransformer,
@@ -287,18 +286,15 @@ def main(args):
     if args.special_tag:
         TAGS.append(args.special_tag)
 
-    wandb_logger = WandbLogger(
+    wandb_logger = create_wandb_logger(
         project=WANDB_PROJECT,
         entity=WANDB_ENTITY,
         name=f"{group_name}-seed{args.seed}",  # unique per run, human-readable
         group=group_name,  # ties all seeds of this approach together
         job_type="train",  # distinguishes from later "aggregate" runs
         tags=TAGS,
-        settings=wandb.Settings(console="wrap"),
+        config=None if args.smoke_test else vars(args),
     )
-
-    if not args.smoke_test:
-        wandb_logger.experiment.config.update(vars(args), allow_val_change=True)
 
     logger = False if args.smoke_test else wandb_logger
     callbacks = []

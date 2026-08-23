@@ -3,13 +3,12 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-import wandb
-from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
 from constraints import get_data_folder, get_experiment_folder
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.lightning_wrappers.modules import UnetLightning as UnetProjectLightning
+from constraints.logging.wandb_factory import create_wandb_logger
 
 FOLDER = get_experiment_folder(Path("ex3") / "project_arch_unet")
 DATA = get_data_folder() / "artificial" / "downloaded"
@@ -54,15 +53,13 @@ def main(args):
         pin_memory=torch.cuda.is_available(),
     )
 
-    wandb_logger = WandbLogger(
+    wandb_logger = create_wandb_logger(
         project=WANDB_PROJECT,
         entity=WANDB_ENTITY,
         name=f"ex3-{FILE_NAME}-unet-{args.modality}",
         tags=["baseline", "unet", "overlay", "ex3", FILE_NAME, args.modality],
-        settings=wandb.Settings(console="wrap"),
+        config=None if args.smoke_test else vars(args),
     )
-    if not args.smoke_test:
-        wandb_logger.experiment.config.update(vars(args), allow_val_change=True)
 
     logger = False if args.smoke_test else wandb_logger
 

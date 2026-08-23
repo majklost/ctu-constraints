@@ -23,18 +23,17 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
-import wandb
 from constraints import get_data_folder, get_experiment_folder, show_torch_image
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.template_sources import PerSampleTemplateSource
 from constraints.factories.losses import create_loss_computer
 from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.modules import ProjectLightning
-from constraints.models.rigid import ProjectWithTemplateRigid
+from constraints.logging.wandb_factory import create_wandb_logger
 from constraints.models.deform_only import ProjectWithTemplateD
+from constraints.models.rigid import ProjectWithTemplateRigid
 from constraints.transforms.transformers import DeformableTransformer, RigidTransformer
 
 FOLDER = get_experiment_folder(Path("ex3")/"project_arch_initial")
@@ -133,16 +132,13 @@ def main(args):
 
 
     
-    wandb_logger = WandbLogger(
+    wandb_logger = create_wandb_logger(
         project=WANDB_PROJECT,
         entity=WANDB_ENTITY,
         name=f"ex3-{FILE_NAME}-{args.loss_mode}-{args.modality}",
         tags=["scratch", "overlay", "ex3", f"{FILE_NAME}", f"{args.loss_mode}", f"{args.modality}"],
-        settings=wandb.Settings(console="wrap"),  # pass settings through here instead
+        config=None if args.smoke_test else vars(args),
     )
-    # Log all CLI arguments into W&B run config.
-    if not args.smoke_test:
-        wandb_logger.experiment.config.update(vars(args), allow_val_change=True)
 
     logger = False if args.smoke_test else wandb_logger
 
