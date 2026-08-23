@@ -62,7 +62,6 @@ def _empty_staged_metrics() -> StagedMetricComputer:
     )
 
 
-
 class ProjectLightning(pl.LightningModule):
     """The project architecture implemented in Lightning.
 

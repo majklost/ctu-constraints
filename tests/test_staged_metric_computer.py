@@ -18,9 +18,12 @@ def test_staged_metric_computer_registers_explicit_metric_free_stages() -> None:
     metrics = StagedMetricComputer(_all_stages())
 
     assert set(metrics.by_stage) == {"train", "val", "val_extra", "test"}
-    assert metrics.compute(
-        StepContext(stage="test", batch_idx=0, current_epoch=0, global_step=0)
-    ).scalars == {}
+    assert (
+        metrics.compute(
+            StepContext(stage="test", batch_idx=0, current_epoch=0, global_step=0)
+        ).scalars
+        == {}
+    )
 
 
 def test_staged_metric_computer_rejects_missing_stage() -> None:

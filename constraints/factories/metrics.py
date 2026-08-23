@@ -51,19 +51,13 @@ def create_default_staged_metrics(
         {
             "train": CompositeMetric(_iou_metrics(label_schema)),
             "val": CompositeMetric(
-                _validation_metrics(
-                    label_schema, blob_threshold, check_wall_integrity
-                )
+                _validation_metrics(label_schema, blob_threshold, check_wall_integrity)
             ),
             "val_extra": CompositeMetric(
-                _validation_metrics(
-                    label_schema, blob_threshold, check_wall_integrity
-                )
+                _validation_metrics(label_schema, blob_threshold, check_wall_integrity)
             ),
             "test": CompositeMetric(
-                _validation_metrics(
-                    label_schema, blob_threshold, check_wall_integrity
-                )
+                _validation_metrics(label_schema, blob_threshold, check_wall_integrity)
             ),
         }
     )

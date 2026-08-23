@@ -9,7 +9,7 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
-
+notebooks/**/*.ipynb
 
 # Distribution / packaging
 .Python

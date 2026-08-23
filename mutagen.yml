@@ -10,6 +10,8 @@ sync:
         - mutagen.yml
         - "uv.lock"
         # Caches
+        # mutagen.yml → constraints.ignore.paths
+        - "notebooks/**/*.ipynb"
         - "data/"
         - "datasources/"
         - ".mypy_cache/"
