@@ -9,23 +9,16 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-import wandb
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
+import wandb
 from constraints import get_data_folder, get_experiment_folder, show_torch_image
-from constraints.computers.loss_computers import (
-    SBCE_RBCE,
-    SBCE_RDSDF_MSE,
-    ProjectLossComputer,
-    SBCE_RBlurredMSE,
-    SBCE_RCentroid,
-    SBCE_ROneSideSDFSquared,
-    SOneSideSDFSquared_ROneSideSDFSquared,
-)
-from constraints.factories.metrics import create_default_staged_metrics
+from constraints.computers.loss_computers import ProjectLossComputer
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.template_sources import PerSampleTemplateSource
+from constraints.factories.losses import create_loss_computer
+from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.modules import ProjectLightning
 from constraints.lightning_wrappers.sample_strategy import AlwaysGt
 from constraints.losses_metrics import OneSideSDFSquare
@@ -89,21 +82,17 @@ def main(args):
     sample_strategy = AlwaysGt(label_schema)
 
     if args.mode == "decoupledOneSideSDF":
-        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema,
-            seg_loss_weight=1.0, sdf_loss_weight=1.0
-        )
+        loss_computer = create_loss_computer("one_side_sdf_squared_one_side_sdf_squared", label_schema)
     elif args.mode == "decoupledCE":
-        loss_computer = SBCE_RBCE(label_schema, seg_loss_weight=1.0, template_loss_weight=1.0)
+        loss_computer = create_loss_computer("bce_bce", label_schema)
     elif args.mode == "decoupledStandard":
-        loss_computer = SBCE_ROneSideSDFSquared(label_schema,
-            seg_loss_weight=1.0, sdf_loss_weight=1.0
-        )
+        loss_computer = create_loss_computer("bce_one_side_sdf_squared", label_schema, segmentation_weight=1.0)
     elif args.mode == "decoupledDSDF":
-        loss_computer = SBCE_RDSDF_MSE(label_schema)
+        loss_computer = create_loss_computer("bce_dsdf_mse", label_schema)
     elif args.mode == "decoupledCentroid":
-        loss_computer = SBCE_RCentroid(label_schema)
+        loss_computer = create_loss_computer("bce_centroid", label_schema)
     elif args.mode == "decoupledBlurred":
-        loss_computer = SBCE_RBlurredMSE(label_schema)
+        loss_computer = create_loss_computer("bce_blurred_mse", label_schema)
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 

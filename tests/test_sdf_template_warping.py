@@ -4,10 +4,6 @@ import torch
 import torch.nn.functional as functional
 from torch import nn
 
-from constraints.computers.loss_computers import (
-    SBCE_RMSE_SDFTEMPLATE,
-    SBCE_ROneSideSDF_SDFTEMPLATE,
-)
 from constraints.computers.loss_terms import (
     RegistrationDSDFMSETerm,
     RegistrationMSE_SDFTEMPLATETerm,
@@ -15,6 +11,7 @@ from constraints.computers.loss_terms import (
 from constraints.datatools.datasets.types import TemplateAssets
 from constraints.datatools.label_schema import LabelSchema
 from constraints.datatools.template_sources import PerSampleTemplateSource
+from constraints.factories.losses import create_loss_computer
 from constraints.lightning_wrappers.modules import ProjectLightning
 from constraints.transforms.transformers import (
     SequentialTransformer,
@@ -34,6 +31,12 @@ LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen", "plaque"],
     [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1), (0.1, 0.7, 0.1), (0.1, 0.35, 0.95)],
 )
+
+
+def _sdf_template_mse_computer(*, grad_diagnostics: bool = False):
+    return create_loss_computer(
+        "bce_sdf_template_mse", LABEL_SCHEMA, grad_diagnostics=grad_diagnostics
+    )
 
 
 def _template_source() -> PerSampleTemplateSource:
@@ -94,7 +97,7 @@ def test_project_lightning_keeps_mask_and_sdf_template_warps_separate():
     module = ProjectLightning(
         _DummyModel(),
         _IdentityTransformer(),
-        SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA),
+        _sdf_template_mse_computer(),
         _template_source(),
         LABEL_SCHEMA,
     )
@@ -125,7 +128,7 @@ def test_project_lightning_replays_sequential_transforms_for_mask_and_sdf():
     module = ProjectLightning(
         _SequentialModel(transform_spec),
         transformer,
-        SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA),
+        _sdf_template_mse_computer(),
         _template_source(),
         LABEL_SCHEMA,
     )
@@ -147,8 +150,8 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
     target_sdf = torch.randn(batch_size, 3, height, width)
 
     for loss_computer in (
-        SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA),
-        SBCE_ROneSideSDF_SDFTEMPLATE(LABEL_SCHEMA),
+        _sdf_template_mse_computer(),
+        create_loss_computer("bce_sdf_template_one_side_sdf_squared", LABEL_SCHEMA),
     ):
         logits = torch.randn(batch_size, 4, height, width, requires_grad=True)
         warped_template = torch.rand(batch_size, 4, height, width, requires_grad=True)
@@ -230,13 +233,11 @@ def test_gradient_diagnostics_are_opt_in():
         "torch.autograd.grad",
         side_effect=AssertionError("unexpected gradient diagnostic"),
     ):
-        result = SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA).compute(loss_input)
+        result = _sdf_template_mse_computer().compute(loss_input)
 
     assert result.logs is None
 
-    result = SBCE_RMSE_SDFTEMPLATE(
-        LABEL_SCHEMA, grad_diagnostics=True
-    ).compute(loss_input)
+    result = _sdf_template_mse_computer(grad_diagnostics=True).compute(loss_input)
     assert result.logs is not None
     assert "coupling/segmentation_grad_norm" in result.logs
     assert "registration/warped_template_sdf/grad_norm" in result.logs

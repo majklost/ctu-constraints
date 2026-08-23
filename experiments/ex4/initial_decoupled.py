@@ -33,20 +33,7 @@ from constraints import (
     show_torch_image,
     show_torch_mask,
 )
-from constraints.computers.loss_computers import (
-    SBCE_RBCE,
-    SBCE_RDSDF_MSE,
-    SBCE_RMSE_SDFTEMPLATE,
-    ProjectLossComputer,
-    SBCE_RBlurredMSE,
-    SBCE_RCentroid,
-    SBCE_ROneSideSDF,
-    SBCE_ROneSideSDF_SDFTEMPLATE,
-    SBCE_ROneSideSDFSquared,
-    SOneSideSDFPlain_ROneSideSDFPlain,
-    SOneSideSDFSquared_ROneSideSDFSquared,
-)
-from constraints.computers.loss_terms import DeformationGradientTerm
+from constraints.computers.loss_computers import ProjectLossComputer
 from constraints.computers.metric_computers import StagedMetricComputer
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.label_schema import LabelSchema
@@ -54,6 +41,7 @@ from constraints.datatools.template_sources import (
     PerSampleTemplateSource,
     TemplateSource,
 )
+from constraints.factories.losses import create_loss_computer
 from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.callbacks import (
     SegmentationRegistrationEarlyStopping,
@@ -75,7 +63,6 @@ from constraints.transforms.transformers import (
     SequentialTransformer,
     SpatialTransformer,
 )
-from constraints.types import WeightedLossTerm
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
@@ -100,6 +87,18 @@ MODES = [
 
 MODALITIES = ["affine", "deformed", "both"]
 AFF_DEF_MODES = ["calc", "deep"]
+LOSS_PRESETS = {
+    "BCE_OneSideSDFSquared": "bce_one_side_sdf_squared",
+    "BCE_OneSideSDFPlain": "bce_one_side_sdf_plain",
+    "BCE_BCE": "bce_bce",
+    "BCE_CentroidLoss": "bce_centroid",
+    "BCE_BlurredLoss": "bce_blurred_mse",
+    "BCE_DSDF_MSE": "bce_dsdf_mse",
+    "BCE_SDFTEMPLATE_MSE": "bce_sdf_template_mse",
+    "BCE_SDFTEMPLATE_OneSideSDFSQUARE": "bce_sdf_template_one_side_sdf_squared",
+    "OneSideSDFSquared_OneSideSDFSquared": "one_side_sdf_squared_one_side_sdf_squared",
+    "OneSideSDFPlain_OneSideSDFPlain": "one_side_sdf_plain_one_side_sdf_plain",
+}
 
 
 FILE_NAME = Path(__file__).stem
@@ -127,15 +126,6 @@ def handle_decoupled(
     label_schema: LabelSchema,
     template_source: TemplateSource,
 ) -> pl.LightningModule:
-    extra_terms = ()
-    if args.deformation_regularization_weight:
-        extra_terms = (
-            WeightedLossTerm(
-                args.deformation_regularization_weight,
-                DeformationGradientTerm(label_schema),
-            ),
-        )
-    loss_kwargs = {"extra_terms": extra_terms}
     match args.modality:
         case "affine":
             net = ProjectWithTemplateA(max_translation=0.5, ls=label_schema)
@@ -153,29 +143,15 @@ def handle_decoupled(
         case _:
             raise ValueError(f"Unknown modality: {args.modality}")
 
-    match args.mode:
-        case "BCE_OneSideSDFSquared":
-            loss_computer = SBCE_ROneSideSDFSquared(label_schema, **loss_kwargs)
-        case "BCE_OneSideSDFPlain":
-            loss_computer = SBCE_ROneSideSDF(label_schema, **loss_kwargs)
-        case "BCE_BCE":
-            loss_computer = SBCE_RBCE(label_schema, **loss_kwargs)
-        case "BCE_CentroidLoss":
-            loss_computer = SBCE_RCentroid(label_schema, **loss_kwargs)
-        case "BCE_BlurredLoss":
-            loss_computer = SBCE_RBlurredMSE(label_schema, **loss_kwargs)
-        case "BCE_DSDF_MSE":
-            loss_computer = SBCE_RDSDF_MSE(label_schema, **loss_kwargs)
-        case "BCE_SDFTEMPLATE_MSE":
-            loss_computer = SBCE_RMSE_SDFTEMPLATE(label_schema, **loss_kwargs)
-        case "BCE_SDFTEMPLATE_OneSideSDFSQUARE":
-            loss_computer = SBCE_ROneSideSDF_SDFTEMPLATE(label_schema, **loss_kwargs)
-        case "OneSideSDFSquared_OneSideSDFSquared":
-            loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema, **loss_kwargs)
-        case "OneSideSDFPlain_OneSideSDFPlain":
-            loss_computer = SOneSideSDFPlain_ROneSideSDFPlain(label_schema, **loss_kwargs)
-        case _:
-            raise ValueError(f"Unknown mode: {args.mode}")
+    try:
+        preset = LOSS_PRESETS[args.mode]
+    except KeyError as exc:
+        raise ValueError(f"Unknown mode: {args.mode}") from exc
+    loss_computer = create_loss_computer(
+        preset,
+        label_schema,
+        field_regularization_weight=args.deformation_regularization_weight,
+    )
     optimizer_callback = lambda module: torch.optim.Adam(
         module.parameters(), lr=args.learning_rate
     )

@@ -1,494 +1,95 @@
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 
 import torch
 from torch import nn
 
-from ..datatools.label_schema import LabelSchema
 from ..types import LossInput, LossResult, WeightedLossTerm
-from .loss_terms import (
-    LossTerm,
-    RegistrationBlurredMSETerm,
-    RegistrationCentroidTerm,
-    RegistrationCrossEntropyTerm,
-    RegistrationDSDFMSETerm,
-    RegistrationMSE_SDFTEMPLATETerm,
-    RegistrationOneside_SDFTEMPLATETerm,
-    RegistrationOneSideSDFSquareTerm,
-    RegistrationOneSideSDFTerm,
-    SegmentationCrossEntropyTerm,
-    SegmentationOneSideSDFSquareTerm,
-    SegmentationOneSideSDFTerm,
-)
+from .loss_terms import LossTerm
 
 
-def _compute_grad_interaction_logs(
-    loss1: torch.Tensor,
-    loss2: torch.Tensor,
-    grad_refs: list[torch.Tensor | None],
-    eps: float = 1e-12,
-) -> dict[str, float | torch.Tensor] | None:
-    """Compute gradient-balance diagnostics for two scalar losses.
-
-    Gradients are taken w.r.t. provided model-output tensors so metrics are
-    comparable across different model variants.
-    """
+def _interaction_logs(a: torch.Tensor, b: torch.Tensor, refs: list[torch.Tensor | None]):
     if not torch.is_grad_enabled():
         return None
-
-    refs = [
-        tensor for tensor in grad_refs if tensor is not None and tensor.requires_grad
-    ]
+    refs = [ref for ref in refs if ref is not None and ref.requires_grad]
     if not refs:
         return None
 
-    def _grads_or_unused(loss: torch.Tensor) -> tuple[torch.Tensor | None, ...]:
-        if not loss.requires_grad:
-            return tuple(None for _ in refs)
-        return torch.autograd.grad(
-            loss,
-            refs,
-            retain_graph=True,
-            create_graph=False,
-            allow_unused=True,
+    def grads(loss: torch.Tensor):
+        return (
+            torch.autograd.grad(loss, refs, retain_graph=True, allow_unused=True)
+            if loss.requires_grad
+            else (None,) * len(refs)
         )
 
-    grads1 = _grads_or_unused(loss1)
-    grads2 = _grads_or_unused(loss2)
+    def flat(values):
+        return torch.cat(
+            [
+                (torch.zeros_like(ref) if value is None else value).reshape(-1)
+                for value, ref in zip(values, refs, strict=True)
+            ]
+        )
 
-    def _flatten(grads: tuple[torch.Tensor | None, ...]) -> torch.Tensor:
-        chunks = []
-        for grad, ref in zip(grads, refs):
-            if grad is None:
-                chunks.append(torch.zeros_like(ref).reshape(-1))
-            else:
-                chunks.append(grad.reshape(-1))
-        if not chunks:
-            return torch.zeros(1, device=loss1.device, dtype=loss1.dtype)
-        return torch.cat(chunks)
-
-    grad_vec1 = _flatten(grads1)
-    grad_vec2 = _flatten(grads2)
-
-    grad_norm1 = torch.linalg.vector_norm(grad_vec1)
-    grad_norm2 = torch.linalg.vector_norm(grad_vec2)
-    grad_ratio = grad_norm1 / (grad_norm2 + eps)
-    grad_cosine = torch.dot(grad_vec1, grad_vec2) / (grad_norm1 * grad_norm2 + eps)
-    grad_share = grad_norm1 / (grad_norm1 + grad_norm2 + eps)
-
+    vec_a, vec_b = flat(grads(a)), flat(grads(b))
+    norm_a, norm_b = torch.linalg.vector_norm(vec_a), torch.linalg.vector_norm(vec_b)
+    eps = 1e-12
     return {
-        "coupling/segmentation_grad_norm": grad_norm1,
-        "coupling/registration_grad_norm": grad_norm2,
-        "coupling/grad_ratio_segmentation_to_registration": grad_ratio,
-        "coupling/grad_cosine": grad_cosine,
-        "coupling/segmentation_grad_share": grad_share,
+        "coupling/segmentation_grad_norm": norm_a,
+        "coupling/registration_grad_norm": norm_b,
+        "coupling/grad_ratio_segmentation_to_registration": norm_a / (norm_b + eps),
+        "coupling/grad_cosine": torch.dot(vec_a, vec_b) / (norm_a * norm_b + eps),
+        "coupling/segmentation_grad_share": norm_a / (norm_a + norm_b + eps),
     }
 
 
 class LossComputer(nn.Module, ABC):
-    """Base class for configurable loss computation.
-
-    Subclass this for ablations. Implement `compute()` and return `LossResult`.
-
-    Usage convention:
-    - `compute()` is the canonical API for train/val/test steps because it
-        returns the scalar loss and optional components/logs in one call.
-    - `forward()` is a convenience wrapper that returns only
-        `compute(loss_input).total` for scalar-only use cases.
-
-    This avoids double computation when both optimization and logging values are
-    needed.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
+    """Base class for a structured scalar optimization objective."""
 
     @abstractmethod
     def compute(self, loss_input: LossInput) -> LossResult:
-        """Compute one structured loss result.
-
-        Returns:
-            LossResult containing:
-            - `total`: scalar tensor used for `backward()`.
-            - `components`: optional named loss terms for diagnostics.
-            - `logs`: optional values ready for logger integration.
-        """
+        """Compute the scalar total and weighted components."""
 
     def forward(self, loss_input: LossInput) -> torch.Tensor:
-        """Convenience scalar-loss interface.
-
-        Prefer calling `compute()` in training loops if you also need logs or
-        loss components. `forward()` is best when only the scalar objective is
-        required.
-        """
         result = self.compute(loss_input)
         if result.total.ndim != 0:
-            raise ValueError(
-                f"LossResult.total must be a scalar tensor, got shape {tuple(result.total.shape)}"
-            )
+            raise ValueError(f"LossResult.total must be scalar, got {result.total.shape}")
         return result.total
 
 
 class ProjectLossComputer(LossComputer):
-    """
-    Project-specific loss computer used by ProjectLightning.
-
-    Concrete subclasses should implement `compute()` using the shared
-    `LossInput` contract.
-    """
+    """Project loss-computer marker type used by Lightning wrappers."""
 
     @abstractmethod
     def compute(self, loss_input: LossInput) -> LossResult:
-        """Implement project-specific loss from the typed `LossInput` contract."""
+        """Implement the shared LossInput contract."""
 
 
 class CompositeLossComputer(ProjectLossComputer):
-    """Compose weighted loss terms while preserving the ProjectLossComputer API."""
+    """Compose explicitly weighted loss terms into one objective."""
 
-    def __init__(
-        self,
-        terms: list[WeightedLossTerm],
-        *,
-        grad_diagnostics: bool = False,
-    ) -> None:
+    def __init__(self, terms: list[WeightedLossTerm], *, grad_diagnostics=False, preset_name=None):
         super().__init__()
         if not terms:
             raise ValueError("CompositeLossComputer requires at least one loss term")
-
-        if any(weighted_term.weight < 0 for weighted_term in terms):
+        if any(spec.weight < 0 for spec in terms):
             raise ValueError("Loss-term weights must be non-negative")
-
-        self.weights = [float(weighted_term.weight) for weighted_term in terms]
-        self.terms = nn.ModuleList(weighted_term.term for weighted_term in terms)
+        self.weights = [float(spec.weight) for spec in terms]
+        self.terms = nn.ModuleList(spec.term for spec in terms)
         self.grad_diagnostics = grad_diagnostics
+        self.preset_name = preset_name
 
     def compute(self, loss_input: LossInput) -> LossResult:
-        components: dict[str, torch.Tensor] = {}
-        unweighted_components: dict[str, torch.Tensor] = {}
-        weighted_losses: list[torch.Tensor] = []
-        logs: dict[str, float | torch.Tensor] = {}
-
-        for weight, term_module in zip(self.weights, self.terms, strict=True):
-            assert isinstance(term_module, LossTerm)
-            if term_module.name in components:
-                raise ValueError(f"Duplicate loss component name: {term_module.name}")
-            unweighted_loss = term_module(loss_input)
-            weighted_loss = weight * unweighted_loss
-            components[term_module.name] = weighted_loss
-            unweighted_components[term_module.name] = unweighted_loss
+        components, weighted_losses, logs = {}, [], {}
+        for weight, term in zip(self.weights, self.terms, strict=True):
+            if not isinstance(term, LossTerm):
+                raise TypeError(f"Expected LossTerm, got {type(term)}")
+            if term.name in components:
+                raise ValueError(f"Duplicate loss component name: {term.name}")
+            weighted_loss = weight * term(loss_input)
+            components[term.name] = weighted_loss
             weighted_losses.append(weighted_loss)
-
             if self.grad_diagnostics:
-                term_logs = term_module.logs(loss_input, weighted_loss)
-                if term_logs:
-                    logs.update(term_logs)
-
-        total = weighted_losses[0]
-        for weighted_loss in weighted_losses[1:]:
-            total = total + weighted_loss
-
+                logs.update(term.logs(loss_input, weighted_loss) or {})
+        total = sum(weighted_losses)
         if self.grad_diagnostics and len(weighted_losses) >= 2:
-            interaction_logs = _compute_grad_interaction_logs(
-                loss1=weighted_losses[0],
-                loss2=weighted_losses[1],
-                grad_refs=[loss_input.segmentation_logits],
-            )
-            if interaction_logs:
-                logs.update(interaction_logs)
-
-        return LossResult(
-            total=total,
-            components=components,
-            unweighted_components=unweighted_components,
-            logs=logs or None,
-        )
-
-
-def _with_extra_terms(
-    terms: list[WeightedLossTerm], extra_terms: Sequence[WeightedLossTerm]
-) -> list[WeightedLossTerm]:
-    return [*terms, *extra_terms]
-
-
-# BCE0segmentation metrics
-
-
-class SBCE_ROneSideSDFSquared(CompositeLossComputer):
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=20.0,
-        sdf_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFSquareTerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        # Kept for constructor backward compatibility; IoU now lives in metric computers.
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.sdf_loss_weight = sdf_loss_weight
-
-
-class SBCE_ROneSideSDF(CompositeLossComputer):
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=20.0,
-        sdf_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFTerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        # Kept for constructor backward compatibility; IoU now lives in metric computers.
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.sdf_loss_weight = sdf_loss_weight
-
-
-class SBCE_RBCE(CompositeLossComputer):
-    """
-    both losses (warped template vs binary mask) and (segmentation logits vs binary mask) are computed using cross entropy loss
-    """
-
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=1.0,
-        template_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(template_loss_weight, RegistrationCrossEntropyTerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        # Kept for constructor backward compatibility; IoU now lives in metric computers.
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.template_loss_weight = template_loss_weight
-
-
-class SBCE_RCentroid(CompositeLossComputer):
-    """
-    Compute the centroid of the warped template and compare it to the centroid of the ground truth mask.
-    """
-
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        centroid_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(1.0, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(centroid_loss_weight, RegistrationCentroidTerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        self._seg_loss_weight = 1.0
-        self.centroid_loss_weight = centroid_loss_weight
-
-
-class SBCE_RDSDF_MSE(CompositeLossComputer):
-    """
-    differeniable sign distance function computer
-    """
-
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        reg_loss_weight=1e-3,
-        sdf_clip: float | None = None,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(1.0, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(
-                        reg_loss_weight,
-                        RegistrationDSDFMSETerm(label_schema, sdf_clip=sdf_clip),
-                    ),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        self.seg_loss_weight = 1.0
-        self.reg_loss_weight = reg_loss_weight
-        self.sdf_clip = sdf_clip
-
-
-class SBCE_RBlurredMSE(CompositeLossComputer):
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        blur_sigma=1.0,
-        reduction="mean",
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(1.0, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(
-                        1.0,
-                        RegistrationBlurredMSETerm(
-                        label_schema,
-                        blur_sigma=blur_sigma, reduction=reduction
-                        ),
-                    ),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        self.blur_sigma = blur_sigma
-        self.reduction = reduction
-        self.seg_loss_weight = 1.0
-        self.reg_loss_weight = 1.0
-
-
-class SBCE_RMSE_SDFTEMPLATE(CompositeLossComputer):
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=1.0,
-        template_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(template_loss_weight, RegistrationMSE_SDFTEMPLATETerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.template_loss_weight = template_loss_weight
-
-
-class SBCE_ROneSideSDF_SDFTEMPLATE(CompositeLossComputer):
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=1.0,
-        template_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                    WeightedLossTerm(
-                        template_loss_weight,
-                        RegistrationOneside_SDFTEMPLATETerm(label_schema),
-                    ),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.template_loss_weight = template_loss_weight
-
-
-# Misc
-
-
-class SOneSideSDFSquared_ROneSideSDFSquared(CompositeLossComputer):
-    """
-    both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
-    """
-
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=1.0,
-        sdf_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationOneSideSDFSquareTerm(label_schema)),
-                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFSquareTerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        """
-        both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
-        """
-        # Kept for constructor backward compatibility; IoU now lives in metric computers.
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.sdf_loss_weight = sdf_loss_weight
-
-
-class SOneSideSDFPlain_ROneSideSDFPlain(CompositeLossComputer):
-    """
-    both losses (warped template vs binary mask in SDF representation) and (segmentation logits vs binary mask in SDF representation) are computed using one-sided sdf loss
-    """
-
-    def __init__(
-        self,
-        label_schema: LabelSchema,
-        seg_loss_weight=1.0,
-        sdf_loss_weight=1.0,
-        grad_diagnostics=False,
-        extra_terms: Sequence[WeightedLossTerm] = (),
-    ):
-        super().__init__(
-            terms=_with_extra_terms(
-                [
-                    WeightedLossTerm(seg_loss_weight, SegmentationOneSideSDFTerm(label_schema)),
-                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFTerm(label_schema)),
-                ],
-                extra_terms,
-            ),
-            grad_diagnostics=grad_diagnostics,
-        )
-        self.label_schema = label_schema
-        self.seg_loss_weight = seg_loss_weight
-        self.sdf_loss_weight = sdf_loss_weight
+            logs.update(_interaction_logs(weighted_losses[0], weighted_losses[1], [loss_input.segmentation_logits]) or {})
+        return LossResult(total=total, components=components, logs=logs or None)

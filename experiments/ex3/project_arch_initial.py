@@ -17,25 +17,25 @@ deformed
 
 
 """
-from argparse import ArgumentParser
 import os
+from argparse import ArgumentParser
 from pathlib import Path
-import torch
-import pytorch_lightning as pl
-import wandb
 
-from constraints.lightning_wrappers.modules import ProjectLightning
+import pytorch_lightning as pl
+import torch
+from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader
+
+import wandb
+from constraints import get_data_folder, get_experiment_folder, show_torch_image
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.template_sources import PerSampleTemplateSource
-from constraints import get_experiment_folder, get_data_folder, show_torch_image
-from constraints.transforms.transformers import RigidTransformer,DeformableTransformer
-from constraints.models.affine import ProjectWithTemplateA 
-from constraints.models.deform_only import ProjectWithTemplateD
-from constraints.computers.loss_computers import SBCE_ROneSideSDFSquared, SBCE_RBCE,SOneSideSDFSquared_ROneSideSDFSquared
+from constraints.factories.losses import create_loss_computer
 from constraints.factories.metrics import create_default_staged_metrics
-from torch.utils.data import DataLoader
-from pytorch_lightning.loggers import WandbLogger
-
+from constraints.lightning_wrappers.modules import ProjectLightning
+from constraints.models.affine import ProjectWithTemplateA
+from constraints.models.deform_only import ProjectWithTemplateD
+from constraints.transforms.transformers import DeformableTransformer, RigidTransformer
 
 FOLDER = get_experiment_folder(Path("ex3")/"project_arch_initial")
 DATA = get_data_folder() / "artificial" / "downloaded"
@@ -84,15 +84,15 @@ def main(args):
         net = ProjectWithTemplateD(label_schema)
 
     if args.loss_mode == "sanityS":
-        loss_computer = SBCE_ROneSideSDFSquared(label_schema, seg_loss_weight=20.0, sdf_loss_weight=0)
+        loss_computer = create_loss_computer("bce_one_side_sdf_squared", label_schema, registration_weight=0)
     elif args.loss_mode == "sanityD":
-        loss_computer = SBCE_ROneSideSDFSquared(label_schema, seg_loss_weight=0, sdf_loss_weight=1.0)
+        loss_computer = create_loss_computer("bce_one_side_sdf_squared", label_schema, segmentation_weight=0)
     elif args.loss_mode == "naive":
-        loss_computer = SBCE_ROneSideSDFSquared(label_schema, seg_loss_weight=20.0, sdf_loss_weight=1.0)
+        loss_computer = create_loss_computer("bce_one_side_sdf_squared", label_schema)
     elif args.loss_mode == "fullSDF":
-        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema, seg_loss_weight=1.0, sdf_loss_weight=1.0)
+        loss_computer = create_loss_computer("one_side_sdf_squared_one_side_sdf_squared", label_schema)
     elif args.loss_mode == "fullCE":
-        loss_computer = SBCE_RBCE(label_schema, seg_loss_weight=1.0, template_loss_weight=1.0)
+        loss_computer = create_loss_computer("bce_bce", label_schema)
     else:
         raise ValueError(f"Unknown loss mode: {args.loss_mode}")
     staged_metric_computer = create_default_staged_metrics(label_schema)
@@ -178,5 +178,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
-
 

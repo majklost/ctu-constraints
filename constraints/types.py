@@ -103,7 +103,6 @@ class LossResult:
     total: torch.Tensor
     # Weighted contributions, whose sum is ``total``.
     components: dict[str, torch.Tensor] | None = None
-    unweighted_components: dict[str, torch.Tensor] | None = None
     logs: dict[str, float | torch.Tensor] | None = None
 
 

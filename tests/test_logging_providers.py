@@ -33,7 +33,6 @@ def test_provider_logs_training_loss_per_step_and_validation_loss_per_epoch() ->
     result = LossResult(
         total=torch.tensor(1.0),
         components={"segmentation/cross_entropy": torch.tensor(0.8)},
-        unweighted_components={"segmentation/cross_entropy": torch.tensor(0.4)},
         logs={"coupling/grad_norm": torch.tensor(0.2)},
     )
 
@@ -43,10 +42,9 @@ def test_provider_logs_training_loss_per_step_and_validation_loss_per_epoch() ->
     assert calls[0][0][0] == "train/loss"
     assert calls[0][1] == {"on_step": True, "on_epoch": True, "prog_bar": True}
     assert calls[1][0][0] == "train/loss/segmentation/cross_entropy"
-    assert calls[2][0][0] == "train/loss/segmentation/cross_entropy/unweighted"
-    assert calls[3][0][0] == "train/info/coupling/grad_norm"
-    assert calls[4][0][0] == "val/loss"
-    assert calls[4][1] == {"on_step": False, "on_epoch": True, "prog_bar": False}
+    assert calls[2][0][0] == "train/info/coupling/grad_norm"
+    assert calls[3][0][0] == "val/loss"
+    assert calls[3][1] == {"on_step": False, "on_epoch": True, "prog_bar": False}
 
 
 @dataclass

@@ -97,11 +97,8 @@ def test_composite_logs_unweighted_and_weighted_deformation_regularization() -> 
         )
     )
 
-    assert result.unweighted_components is not None
-    unweighted = result.unweighted_components["registration/deformation_gradient"]
     assert result.components is not None
     weighted = result.components["registration/deformation_gradient"]
-    assert torch.allclose(weighted, 0.25 * unweighted)
     assert torch.allclose(result.total, weighted)
 
 

@@ -72,13 +72,6 @@ class LightningWandbLoggingProvider(LoggingProvider):
                 on_step=on_step,
                 on_epoch=True,
             )
-        for name, value in (result.unweighted_components or {}).items():
-            self._scalar_log(
-                f"{context.stage}/loss/{name}/unweighted",
-                value,
-                on_step=on_step,
-                on_epoch=True,
-            )
         for name, value in (result.logs or {}).items():
             self._scalar_log(
                 f"{context.stage}/info/{name}",
