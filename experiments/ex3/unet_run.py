@@ -21,9 +21,9 @@ FILE_NAME = Path(__file__).stem
 def main(args):
     print(f"Experiment folder: {FOLDER}")
     print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
-    if args.modality == "affine":
-        TRN_FOLDER = DATA / "trn" / "affine"
-        VAL_FOLDER = DATA / "val" / "affine"
+    if args.modality == "rigid":
+        TRN_FOLDER = DATA / "trn" / "rigid"
+        VAL_FOLDER = DATA / "val" / "rigid"
 
     elif args.modality == "deformed":
         TRN_FOLDER = DATA / "trn" / "deformed"
@@ -90,7 +90,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_epochs", type=int, default=60)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--modality", type=str, choices=["affine", "deformed"])
+    parser.add_argument("--modality", type=str, choices=["rigid", "deformed"])
     parser.add_argument(
         "--smoke_test",
         action="store_true",

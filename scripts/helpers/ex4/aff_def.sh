@@ -15,21 +15,21 @@ MODES=(
     "OneSideSDFSquared_OneSideSDFSquared"
     "OneSideSDFPlain_OneSideSDFPlain"
 )
-AFF_DEF_MODES=("calc" "deep")
+RIGID_DEF_MODES=("calc" "deep")
 MODALITY="both"
 SCRIPT="experiments/ex4/initial_decoupled.py"
 # UNET never touches the registration net, so it is run once rather than once per
-# aff_def mode. --aff_def_mode is still passed because --modality both requires it.
-UNET_AFF_DEF_MODE="calc"
+# rigid_def mode. --rigid_def_mode is still passed because --modality both requires it.
+UNET_RIGID_DEF_MODE="calc"
 
 FAILED=()
 
-echo "=== SMOKE TEST: all aff_def_mode x mode combinations ==="
+echo "=== SMOKE TEST: all rigid_def_mode x mode combinations ==="
 echo "--- smoke: modality=${MODALITY} mode=UNET ---"
 if ! uv run python "${SCRIPT}" \
     --modality "${MODALITY}" \
     --mode "UNET" \
-    --aff_def_mode "${UNET_AFF_DEF_MODE}" \
+    --rigid_def_mode "${UNET_RIGID_DEF_MODE}" \
     --batch_size 4 \
     --num_workers 0 \
     --seed "${seed}" \
@@ -38,19 +38,19 @@ if ! uv run python "${SCRIPT}" \
     FAILED+=("${MODALITY}/UNET")
 fi
 
-for aff_def_mode in "${AFF_DEF_MODES[@]}"; do
+for rigid_def_mode in "${RIGID_DEF_MODES[@]}"; do
     for mode in "${MODES[@]}"; do
-        echo "--- smoke: modality=${MODALITY} aff_def=${aff_def_mode} mode=${mode} ---"
+        echo "--- smoke: modality=${MODALITY} rigid_def=${rigid_def_mode} mode=${mode} ---"
         if ! uv run python "${SCRIPT}" \
             --modality "${MODALITY}" \
-            --aff_def_mode "${aff_def_mode}" \
+            --rigid_def_mode "${rigid_def_mode}" \
             --mode "${mode}" \
             --batch_size 4 \
             --num_workers 0 \
             --seed "${seed}" \
             --smoke_test; then
-            echo "!!! SMOKE TEST FAILED: aff_def=${aff_def_mode} mode=${mode}"
-            FAILED+=("${aff_def_mode}/${mode}")
+            echo "!!! SMOKE TEST FAILED: rigid_def=${rigid_def_mode} mode=${mode}"
+            FAILED+=("${rigid_def_mode}/${mode}")
         fi
     done
 done
@@ -67,21 +67,21 @@ echo "--- submit: modality=${MODALITY} mode=UNET ---"
 ./remote_submit.sh "${SCRIPT}" \
     --modality "${MODALITY}" \
     --mode "UNET" \
-    --aff_def_mode "${UNET_AFF_DEF_MODE}" \
+    --rigid_def_mode "${UNET_RIGID_DEF_MODE}" \
     --seed "${seed}" \
-    --special_tag "aff_def_unet"
+    --special_tag "rigid_def_unet"
 
-for aff_def_mode in "${AFF_DEF_MODES[@]}"; do
+for rigid_def_mode in "${RIGID_DEF_MODES[@]}"; do
     for mode in "${MODES[@]}"; do
-        echo "--- submit: modality=${MODALITY} aff_def=${aff_def_mode} mode=${mode} ---"
-        # The W&B group/run name does not encode aff_def_mode, so the tag is the
+        echo "--- submit: modality=${MODALITY} rigid_def=${rigid_def_mode} mode=${mode} ---"
+        # The W&B group/run name does not encode rigid_def_mode, so the tag is the
         # only thing separating the calc and deep sweeps in the UI.
         ./remote_submit.sh "${SCRIPT}" \
             --modality "${MODALITY}" \
-            --aff_def_mode "${aff_def_mode}" \
+            --rigid_def_mode "${rigid_def_mode}" \
             --mode "${mode}" \
             --seed "${seed}" \
-            --special_tag "aff_def_${aff_def_mode}"
+            --special_tag "rigid_def_${rigid_def_mode}"
     done
 done
 

@@ -15,18 +15,18 @@ from constraints.losses_metrics import (
 )
 from constraints.transforms import differentiable_rigid
 
-FOLDER = get_experiment_folder(Path("ex3") / "affine_losscomp")
+FOLDER = get_experiment_folder(Path("ex3") / "rigid_losscomp")
 DATA = get_data_folder() / "artificial" / "custom"
-AFFINE_SMALL = DATA / "affine_small"
-AFFINE_LARGE = DATA / "affine_large"
+RIGID_SMALL = DATA / "rigid_small"
+RIGID_LARGE = DATA / "rigid_large"
 RESULTS_CSV = FOLDER / "violation_summary.csv"
 RESULTS_MD = FOLDER / "violation_summary.md"
 
 DATASET_SPECS = {
-    "small_scipy": (AFFINE_SMALL, "scipy"),
-    "large_scipy": (AFFINE_LARGE, "scipy"),
-    "small_kornia": (AFFINE_SMALL, "kornia"),
-    "large_kornia": (AFFINE_LARGE, "kornia"),
+    "small_scipy": (RIGID_SMALL, "scipy"),
+    "large_scipy": (RIGID_LARGE, "scipy"),
+    "small_kornia": (RIGID_SMALL, "kornia"),
+    "large_kornia": (RIGID_LARGE, "kornia"),
 }
 
 
@@ -283,7 +283,7 @@ def test_loss(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compare affine optimization violations across losses and datasets."
+        description="Compare rigid optimization violations across losses and datasets."
     )
     parser.add_argument(
         "--loss", nargs="*", default=None, help="Optional subset of loss names to run."
@@ -330,7 +330,7 @@ def _validate_subset(
 def main() -> None:
     args = parse_args()
     log(f"Output folder: {FOLDER}")
-    log("Starting compare_losses_affine experiment")
+    log("Starting compare_losses_rigid experiment")
     selected_losses = _validate_subset(args.loss, LOSSES, "losses")
     selected_datasets = _validate_subset(args.dataset, DATASET_SPECS, "datasets")
 

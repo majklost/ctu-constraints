@@ -48,12 +48,10 @@ from constraints.lightning_wrappers.callbacks import (
 )
 from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightning
 from constraints.lightning_wrappers.sample_strategy import AlwaysGt, NoGt
-from constraints.models.affine import ProjectWithTemplateA
-from constraints.models.affine_deform import (
-    CalcAffDefRegistrationNet,
-    DeepAffDefRegistrationNet,
-    ProjectWithTemplateBCalcAff,
-    ProjectWithTemplateBDeepAff,
+from constraints.models.rigid import ProjectWithTemplateRigid
+from constraints.models.rigid_deform import (
+    ProjectWithTemplateBCalcRigid,
+    ProjectWithTemplateBDeepRigid,
 )
 from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.models.segmentator import set_segmentator_encoder_weights
@@ -85,8 +83,8 @@ MODES = [
     "OneSideSDFPlain_OneSideSDFPlain",
 ]
 
-MODALITIES = ["affine", "deformed", "both"]
-AFF_DEF_MODES = ["calc", "deep"]
+MODALITIES = ["rigid", "deformed", "both"]
+RIGID_DEF_MODES = ["calc", "deep"]
 LOSS_PRESETS = {
     "BCE_OneSideSDFSquared": "bce_one_side_sdf_squared",
     "BCE_OneSideSDFPlain": "bce_one_side_sdf_plain",
@@ -127,19 +125,19 @@ def handle_decoupled(
     template_source: TemplateSource,
 ) -> pl.LightningModule:
     match args.modality:
-        case "affine":
-            net = ProjectWithTemplateA(max_translation=0.5, ls=label_schema)
+        case "rigid":
+            net = ProjectWithTemplateRigid(max_translation=0.5, ls=label_schema)
         case "deformed":
             net = ProjectWithTemplateD(ls=label_schema)
         case "both":
-            if args.aff_def_mode == "calc":
-                net = ProjectWithTemplateBCalcAff(
+            if args.rigid_def_mode == "calc":
+                net = ProjectWithTemplateBCalcRigid(
                     label_schema=label_schema, max_translation=0.5
                 )
-            elif args.aff_def_mode == "deep":
-                net = ProjectWithTemplateBDeepAff(ls=label_schema, max_translation=0.5)
+            elif args.rigid_def_mode == "deep":
+                net = ProjectWithTemplateBDeepRigid(ls=label_schema, max_translation=0.5)
             else:
-                raise ValueError(f"Unknown aff_def_mode: {args.aff_def_mode}")
+                raise ValueError(f"Unknown rigid_def_mode: {args.rigid_def_mode}")
         case _:
             raise ValueError(f"Unknown modality: {args.modality}")
 
@@ -197,27 +195,27 @@ def main(args):
     print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
     configure_reproducibility(seed=args.seed)
     print(f"Seed: {args.seed}")
-    if args.aff_def_mode is not None and args.modality != "both":
-        raise ValueError("aff_def_mode can only be used with modality 'both'")
-    if args.modality == "both" and args.aff_def_mode is None:
+    if args.rigid_def_mode is not None and args.modality != "both":
+        raise ValueError("rigid_def_mode can only be used with modality 'both'")
+    if args.modality == "both" and args.rigid_def_mode is None:
         raise ValueError(
-            "When modality is 'both', aff_def_mode must be specified (either 'calc' or 'deep')"
+            "When modality is 'both', rigid_def_mode must be specified (either 'calc' or 'deep')"
         )
 
     if args.segmentator_unlearned:
         set_segmentator_encoder_weights(None)
 
-    if args.modality == "affine":
-        TRN_FOLDER = DATA / "affine" / "trn"
-        VAL_FOLDER = DATA / "affine" / "val"
+    if args.modality == "rigid":
+        TRN_FOLDER = DATA / "rigid" / "trn"
+        VAL_FOLDER = DATA / "rigid" / "val"
         transformer = RigidTransformer()
     elif args.modality == "deformed":
         TRN_FOLDER = DATA / "deformed" / "trn"
         VAL_FOLDER = DATA / "deformed" / "val"
         transformer = DeformableTransformer()
     elif args.modality == "both":
-        TRN_FOLDER = DATA / "affine_deformed" / "trn"
-        VAL_FOLDER = DATA / "affine_deformed" / "val"
+        TRN_FOLDER = DATA / "rigid_deformed" / "trn"
+        VAL_FOLDER = DATA / "rigid_deformed" / "val"
         transformer = SequentialTransformer()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
@@ -271,9 +269,9 @@ def main(args):
     group_name = (
         f"ex3-{FILE_NAME}-{args.mode}-{args.modality}"  # identifies the "approach"
     )
-    if args.aff_def_mode is not None:
+    if args.rigid_def_mode is not None:
         # calc and deep are different approaches - they must not share a group.
-        group_name += f"-{args.aff_def_mode}"
+        group_name += f"-{args.rigid_def_mode}"
 
     TAGS = [
         "scratch",
@@ -284,8 +282,8 @@ def main(args):
         args.modality,
         "newer",
     ]
-    if args.aff_def_mode is not None:
-        TAGS.append(args.aff_def_mode)
+    if args.rigid_def_mode is not None:
+        TAGS.append(args.rigid_def_mode)
     if args.special_tag:
         TAGS.append(args.special_tag)
 
@@ -396,11 +394,11 @@ if __name__ == "__main__":
         "--special_tag", type=str, default="", help="Add a special tag to the W&B run."
     )
     parser.add_argument(
-        "--aff_def_mode",
+        "--rigid_def_mode",
         type=str,
-        choices=AFF_DEF_MODES,
+        choices=RIGID_DEF_MODES,
         default=None,
-        help="Choose the affine-deformable registration mode.",
+        help="Choose the rigid-deformable registration mode.",
     )
     args = parser.parse_args()
 

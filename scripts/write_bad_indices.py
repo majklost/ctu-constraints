@@ -13,7 +13,7 @@ def main() -> None:
     parser.add_argument(
         "dataset_dir",
         type=Path,
-        help="Directory containing mask.npy, for example data/artificial/affine_deformed/trn",
+        help="Directory containing mask.npy, for example data/artificial/rigid_deformed/trn",
     )
     parser.add_argument(
         "--check-wall-integrity",

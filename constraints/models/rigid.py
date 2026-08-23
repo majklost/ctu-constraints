@@ -42,7 +42,7 @@ from .segmentator import get_segmentator
 #         return decoded, angle, translation
 
 
-class AffineRegistrationNet(torch.nn.Module):
+class RigidRegistrationNet(torch.nn.Module):
     def __init__(
         self,
         ls: LabelSchema,
@@ -68,7 +68,7 @@ class AffineRegistrationNet(torch.nn.Module):
         return TransformSpec(rigid=rigid)
 
 
-class ProjectWithTemplateA(SegmentationRegistrationModel):
+class ProjectWithTemplateRigid(SegmentationRegistrationModel):
     """
     Encode->Decode segmentations, then pass the segmentation map and template into registration network
     Registration network processes both, return the transformation parameters
@@ -83,7 +83,7 @@ class ProjectWithTemplateA(SegmentationRegistrationModel):
         segmentation_net = get_segmentator(num_classes=ls.num_classes)
         super().__init__(
             segmentation_net=segmentation_net,
-            registration_net=AffineRegistrationNet(
+            registration_net=RigidRegistrationNet(
                 max_translation=max_translation, ls=ls
             ),
             registration_input_mode="probabilities",
@@ -95,10 +95,10 @@ class ProjectWithTemplateA(SegmentationRegistrationModel):
 
     @property
     def encoder(self) -> torch.nn.Module:
-        registration_net = cast(AffineRegistrationNet, self.registration_net)
+        registration_net = cast(RigidRegistrationNet, self.registration_net)
         return registration_net.encoder
 
     @property
     def TransformHead(self) -> RigidTransformHead:
-        registration_net = cast(AffineRegistrationNet, self.registration_net)
+        registration_net = cast(RigidRegistrationNet, self.registration_net)
         return registration_net.transform_head

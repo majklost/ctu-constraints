@@ -18,7 +18,7 @@ MODES=(
     "OneSideSDFSquared_OneSideSDFSquared"
     "OneSideSDFPlain_OneSideSDFPlain"
 )
-MODALITIES=("affine" "deformed")
+MODALITIES=("rigid" "deformed")
 SCRIPT="experiments/ex4/initial_decoupled.py"
 SPECIAL_TAG="learned_segmentator_coupled"
 FAILED=()

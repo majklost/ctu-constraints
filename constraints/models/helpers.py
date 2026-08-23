@@ -87,7 +87,7 @@ def rigid_matrix_to_grid_params(R, t, H, W):
     return angle, dx, dy
 
 
-class MomentsAffineAlignment(nn.Module):
+class MomentsRigidAlignment(nn.Module):
     def __init__(self):
         super().__init__()
 

@@ -35,14 +35,11 @@ experiment matrix.
 
 ### Naming and run metadata
 
-- [ ] Decide whether to rename the domain-level `affine` terminology to `rigid`
-  now or retain it for compatibility with existing datasets and experiments.
+- [x] Rename domain-level `affine` terminology to `rigid`.
   - The implemented transform is rotation plus translation and is therefore
     rigid.
-  - Keep PyTorch/API concepts such as `affine_matrix`, `affine_grid`, and their
-    low-level helpers named affine.
-  - If renamed, preserve compatibility for existing cached dataset layouts and
-    old CLI arguments where practical.
+  - Keep generic PyTorch/API concepts such as `affine_grid` and VoxelMorph's
+    affine utilities named affine.
 - [ ] Add Slurm and source metadata to W&B runs:
   - `SLURM_JOB_ID`, when available;
   - Git commit hash and whether the worktree was dirty;
@@ -82,9 +79,7 @@ experiment matrix.
 
 ## 2. Harder artificial datasets
 
-Keep the existing rigid/affine dataset creation path for compatibility. New
-experiments may use new scripts instead of extending
-`create_artificial_dataset.py`.
+Use the rigid dataset creation path for new experiments.
 
 ### Runtime rigid transformation
 

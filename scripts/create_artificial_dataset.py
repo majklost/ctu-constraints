@@ -15,10 +15,10 @@ from constraints.datatools.datasets import (
     write_bad_indices,
 )
 from constraints.generators.generators import (
-    ArteryGeneratorAffine,
+    ArteryGeneratorRigid,
     ArteryGeneratorDeformed,
-    AffineSampleBound,
-    NO_AFFINE,
+    RigidSampleBounds,
+    NO_RIGID,
     ROT_ONLY,
     SMALL,
 )
@@ -60,23 +60,23 @@ def _save_template(output_dir: Path, template: torch.Tensor):
 
 
 
-def _resolve_affine_sample_specs(affine_mode: str) -> AffineSampleBound:
-    if affine_mode == "rot":
+def _resolve_rigid_sample_specs(rigid_mode: str) -> RigidSampleBounds:
+    if rigid_mode == "rot":
         return ROT_ONLY
-    elif affine_mode == "small":
+    elif rigid_mode == "small":
         return SMALL
-    elif affine_mode == "large":
-        return AffineSampleBound()
-    elif affine_mode == "none":
-        return NO_AFFINE
+    elif rigid_mode == "large":
+        return RigidSampleBounds()
+    elif rigid_mode == "none":
+        return NO_RIGID
     else:
-        raise ValueError(f"Unknown affine mode: {affine_mode}")
+        raise ValueError(f"Unknown rigid mode: {rigid_mode}")
 
 
-def create_affine(args) -> None:
-    sample_specs = _resolve_affine_sample_specs(args.affine_mode)
+def create_rigid(args) -> None:
+    sample_specs = _resolve_rigid_sample_specs(args.rigid_mode)
     output_dir = Path(args.output_dir)
-    dataset = ArteryGeneratorAffine(
+    dataset = ArteryGeneratorRigid(
         fixed_seed=args.seed,
         num_samples=args.num_samples,
         speckle=0.2,
@@ -87,12 +87,12 @@ def create_affine(args) -> None:
     img_shape = tuple(first_sample["img"].shape)
     mask_shape = tuple(first_sample["mask"].shape)
     sdf_shape = tuple(foreground_channels(first_sample["mask"]).shape)
-    affine_shape = tuple(first_sample["affine"].shape)
+    rigid_shape = tuple(first_sample["rigid"].shape)
 
     category_shapes = {
         "img": img_shape,
         "mask": mask_shape,
-        "transform": affine_shape,
+        "transform": rigid_shape,
     }
     if args.sdf_type in ("scipy", "both"):
         category_shapes["sdf_scipy"] = sdf_shape
@@ -102,18 +102,18 @@ def create_affine(args) -> None:
     files = _prepare_files(output_dir, args.num_samples, category_shapes)
     _save_template(output_dir, first_sample["template"])
 
-    for idx in tqdm(range(len(dataset)), desc="Generating affine dataset"):
+    for idx in tqdm(range(len(dataset)), desc="Generating rigid dataset"):
         sample = dataset[idx]
-        img, mask, template, affine = (
+        img, mask, template, rigid = (
             sample["img"],
             sample["mask"],
             sample["template"],
-            sample["affine"],  # (2,3) affine matrix
+            sample["rigid"],  # (2, 3) rigid matrix
         )
 
         files["img"][idx] = _to_numpy(img)
         files["mask"][idx] = _to_numpy(mask)
-        files["transform"][idx] = _to_numpy(affine)
+        files["transform"][idx] = _to_numpy(rigid)
         foreground_mask = foreground_channels(mask)
 
         if args.sdf_type in ("scipy", "both"):
@@ -132,7 +132,7 @@ def create_affine(args) -> None:
 
 
 def create_deformed(args) -> None:
-    sample_specs = _resolve_affine_sample_specs(args.affine_mode)
+    sample_specs = _resolve_rigid_sample_specs(args.rigid_mode)
     output_dir = Path(args.output_dir)
     dataset = ArteryGeneratorDeformed(
         num_samples=args.num_samples,
@@ -200,7 +200,7 @@ if __name__ == "__main__":
         "--output_dir",
         type=str,
         required=True,
-        help="Output directory e.g. data/artificial/affine",
+        help="Output directory e.g. data/artificial/rigid",
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="Random seed for reproducibility"
@@ -217,15 +217,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--generator_type",
         type=str,
-        choices=["affine", "deformed", "both"],
-        default="affine",
+        choices=["rigid", "deformed", "both"],
+        default="rigid",
         help="Type of generator to use",
     )
     parser.add_argument(
-        "--affine_mode",
+        "--rigid_mode",
         type=str,
         choices=["none", "rot", "small", "large"],
-        help="Mode for affine transformation before optional deformation",
+        help="Mode for rigid transformation before optional deformation",
         default="large",
     )
 
@@ -234,16 +234,16 @@ if __name__ == "__main__":
         raise ValueError("num_samples must be a positive integer.")
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    if args.generator_type == "affine":
-        create_affine(args)
+    if args.generator_type == "rigid":
+        create_rigid(args)
     elif args.generator_type == "deformed":
         create_deformed(args)
     elif args.generator_type == "both":
-        affine_args = deepcopy(args)
-        affine_args.generator_type = "affine"
-        affine_args.output_dir = str(Path(args.output_dir) / "affine")
-        Path(affine_args.output_dir).mkdir(parents=True, exist_ok=True)
-        create_affine(affine_args)
+        rigid_args = deepcopy(args)
+        rigid_args.generator_type = "rigid"
+        rigid_args.output_dir = str(Path(args.output_dir) / "rigid")
+        Path(rigid_args.output_dir).mkdir(parents=True, exist_ok=True)
+        create_rigid(rigid_args)
 
         deformed_args = deepcopy(args)
         deformed_args.generator_type = "deformed"

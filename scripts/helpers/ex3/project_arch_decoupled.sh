@@ -2,7 +2,7 @@
 set -uo pipefail  # NOT -e: we want to keep going and report failures, not abort
 
 MODES=("decoupledOneSideSDF" "decoupledCE" "decoupledStandard" "decoupledDSDF" "decoupledCentroid" "decoupledBlurred")
-MODALITIES=("affine" "deformed")
+MODALITIES=("rigid" "deformed")
 SCRIPT="experiments/ex3/project_arch_decoupled.py"
 
 FAILED=()

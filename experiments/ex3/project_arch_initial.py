@@ -4,7 +4,7 @@ Extension of notebook project_firstex.ipynb in ex3
 
 Results
 - investigated fully coupled (gradient was passed via segmentation logits)
-affine
+rigid
     - converged fullSDF, naive
 - naive - 0.87 IoU warp, 0.97 IoU pred
 - fullSDF - 0.84 IoU warp, 0.96 IoU pred
@@ -33,7 +33,7 @@ from constraints.datatools.template_sources import PerSampleTemplateSource
 from constraints.factories.losses import create_loss_computer
 from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.modules import ProjectLightning
-from constraints.models.affine import ProjectWithTemplateA
+from constraints.models.rigid import ProjectWithTemplateRigid
 from constraints.models.deform_only import ProjectWithTemplateD
 from constraints.transforms.transformers import DeformableTransformer, RigidTransformer
 
@@ -61,9 +61,9 @@ def main(args):
     print(f"Seed: {args.seed}")
     print("Determinism check: warn_only")
 
-    if args.modality == "affine":
-        TRN_FOLDER = DATA / "trn" / "affine"
-        VAL_FOLDER = DATA / "val" / "affine"
+    if args.modality == "rigid":
+        TRN_FOLDER = DATA / "trn" / "rigid"
+        VAL_FOLDER = DATA / "trn" / "rigid"
         transformer = RigidTransformer()
     elif args.modality == "deformed":
         TRN_FOLDER = DATA / "trn" / "deformed"
@@ -78,8 +78,8 @@ def main(args):
     template_source = PerSampleTemplateSource(
         trn_dataset.template_assets, label_schema
     )
-    if args.modality == "affine":
-        net = ProjectWithTemplateA(label_schema, max_translation=0.5)
+    if args.modality == "rigid":
+        net = ProjectWithTemplateRigid(label_schema, max_translation=0.5)
     else:
         net = ProjectWithTemplateD(label_schema)
 
@@ -171,11 +171,10 @@ if __name__ == "__main__":
     parser.add_argument("--max_epochs", type=int, default=60)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--modality", type=str, choices=["affine", "deformed"])
+    parser.add_argument("--modality", type=str, choices=["rigid", "deformed"])
     parser.add_argument("--loss_mode", type=str, choices=LOSS_MODES, default="naive")
     parser.add_argument("--smoke_test", action="store_true",
                         help="Use Lightning's fast_dev_run to sanity-check the run.")
     args = parser.parse_args()
 
     main(args)
-

@@ -218,7 +218,7 @@ def signed_distance_kornia_differentiable(mask: torch.Tensor) -> torch.Tensor:
 
 
 def mat2params(mat: torch.Tensor) -> RigidParams:
-    """Convert a batch of 2D affine matrices to rotation angle and translation.
+    """Convert a batch of 2D rigid matrices to rotation angle and translation.
 
     Args:
         mat: Tensor with shape (N, 2, 3) or (2, 3).
@@ -244,7 +244,7 @@ def mat2params(mat: torch.Tensor) -> RigidParams:
 
 
 def mat2inv(mat: torch.Tensor) -> torch.Tensor:
-    """Compute the inverse of a batch of 2D affine matrices.
+    """Compute the inverse of a batch of 2D rigid matrices.
 
     Args:
         mat: Tensor with shape (N, 2, 3) or (2, 3).
