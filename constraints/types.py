@@ -69,6 +69,11 @@ class DiscreteSegmentation:
 class LossInput:
     """Canonical model output contract used by loss computers.
 
+    ``segmentation_logits`` contains raw, unnormalized model logits.  A loss
+    that needs class probabilities must apply softmax itself.  In contrast,
+    ``warped_template`` is already a soft class mask produced by interpolation
+    and must not be treated as logits or passed through softmax.
+
     Keep common outputs explicit and route ablation-specific outputs through
     `extras` to avoid changing call signatures during experiments.
     """
@@ -93,7 +98,12 @@ class LossResult:
 
 @dataclass
 class MetricInput:
-    """Canonical model output contract used by metric computers."""
+    """Canonical model output contract used by metric computers.
+
+    ``segmentation_logits`` contains raw, unnormalized model logits, while
+    ``warped_template`` is an interpolated soft class mask.  Metrics requiring
+    discrete masks convert either representation with ``argmax(dim=1)``.
+    """
 
     image: torch.Tensor
     segmentation_logits: torch.Tensor | None = None
