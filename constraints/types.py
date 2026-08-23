@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, get_args
 import torch
 
 if TYPE_CHECKING:
+    from .computers.loss_terms import LossTerm
     from .datatools.label_schema import LabelSchema
 
 STAGES = Literal["train", "val", "val_extra", "test"]
@@ -87,12 +88,22 @@ class LossInput:
     extras: dict[str, torch.Tensor] | None = None
 
 
+@dataclass(frozen=True)
+class WeightedLossTerm:
+    """An explicitly weighted term in a composite optimization objective."""
+
+    weight: float
+    term: "LossTerm"
+
+
 @dataclass
 class LossResult:
     """Structured loss output with total scalar for backward()."""
 
     total: torch.Tensor
+    # Weighted contributions, whose sum is ``total``.
     components: dict[str, torch.Tensor] | None = None
+    unweighted_components: dict[str, torch.Tensor] | None = None
     logs: dict[str, float | torch.Tensor] | None = None
 
 

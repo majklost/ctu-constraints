@@ -3,8 +3,13 @@ import torch.nn.functional as functional
 
 from constraints.datatools.label_schema import LabelSchema
 from constraints.factories.metrics import create_default_staged_metrics
-from constraints.types import DiscreteSegmentation, MetricInput, StepContext
-
+from constraints.types import (
+    DiscreteSegmentation,
+    FieldParams,
+    MetricInput,
+    StepContext,
+    TransformSpec,
+)
 
 LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen", "plaque"],
@@ -83,3 +88,33 @@ def test_default_staged_metrics_do_not_share_state_between_validation_stages() -
 
     assert metrics.compute(_context("val")).scalars
     assert metrics.compute(_context("val_extra")).scalars == {}
+
+
+def test_deformation_jacobian_diagnostics_report_identity_and_folding() -> None:
+    valid = _valid_vessel_labels()
+    metrics = create_default_staged_metrics(LABEL_SCHEMA)
+    context = _context("val")
+    inputs = _input(torch.stack((valid, valid)), torch.stack((valid, valid)))
+    # Identity for the first sample; the second maps y -> -y and folds with
+    # determinant -1 everywhere.
+    field = torch.zeros((2, 2, 8, 8))
+    field[1, 0] = -2 * torch.arange(8).view(8, 1)
+    inputs.transform_spec = TransformSpec(field=FieldParams(field))
+
+    metrics.update(context, inputs)
+    result = metrics.compute(context).scalars
+
+    assert torch.isclose(
+        torch.as_tensor(result["registration/jacobian/mean_nonpositive_pixel_fraction"]),
+        torch.tensor(0.5),
+    )
+    assert torch.isclose(
+        torch.as_tensor(result["registration/jacobian/samples_with_nonpositive_fraction"]),
+        torch.tensor(0.5),
+    )
+    assert torch.isclose(
+        result["registration/jacobian/mean_sample_minimum"], torch.tensor(0.0)
+    )
+    assert torch.isclose(
+        result["registration/jacobian/p01_sample_minimum"], torch.tensor(-0.98)
+    )

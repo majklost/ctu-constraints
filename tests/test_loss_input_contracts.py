@@ -3,7 +3,9 @@ import torch
 import torch.nn.functional as functional
 from torch import nn
 
+from constraints.computers.loss_computers import CompositeLossComputer
 from constraints.computers.loss_terms import (
+    DeformationGradientTerm,
     RegistrationBlurredMSETerm,
     RegistrationCentroidTerm,
     RegistrationCrossEntropyTerm,
@@ -14,7 +16,13 @@ from constraints.computers.loss_terms import (
     SegmentationOneSideSDFTerm,
 )
 from constraints.datatools.label_schema import LabelSchema
-from constraints.types import DiscreteSegmentation, LossInput
+from constraints.types import (
+    DiscreteSegmentation,
+    FieldParams,
+    LossInput,
+    TransformSpec,
+    WeightedLossTerm,
+)
 
 LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen"],
@@ -50,6 +58,51 @@ def test_segmentation_cross_entropy_receives_raw_logits() -> None:
     assert not torch.allclose(
         actual, functional.cross_entropy(logits.softmax(dim=1), labels)
     )
+
+
+def test_deformation_gradient_uses_voxelmorph_field_and_preserves_gradients() -> None:
+    field = torch.zeros((1, 2, 4, 5), requires_grad=True)
+    with torch.no_grad():
+        field[:, 0] = torch.arange(4).view(1, 4, 1)
+
+    loss = DeformationGradientTerm(LABEL_SCHEMA)(
+        LossInput(transform_spec=TransformSpec(field=FieldParams(field)))
+    )
+
+    assert loss.ndim == 0
+    assert loss.item() > 0
+    loss.backward()
+    assert field.grad is not None
+    assert torch.count_nonzero(field.grad) > 0
+
+
+def test_composite_logs_unweighted_and_weighted_deformation_regularization() -> None:
+    field = torch.zeros((1, 2, 4, 5), requires_grad=True)
+    with torch.no_grad():
+        field[:, 0] = torch.arange(4).view(1, 4, 1)
+    logits = torch.randn((1, LABEL_SCHEMA.num_classes, 4, 5), requires_grad=True)
+    labels = torch.zeros((1, 4, 5), dtype=torch.long)
+    computer = CompositeLossComputer(
+        terms=[
+            WeightedLossTerm(0.0, SegmentationCrossEntropyTerm(LABEL_SCHEMA)),
+            WeightedLossTerm(0.25, DeformationGradientTerm(LABEL_SCHEMA)),
+        ],
+    )
+
+    result = computer.compute(
+        LossInput(
+            segmentation_logits=logits,
+            gt=_gt(labels),
+            transform_spec=TransformSpec(field=FieldParams(field)),
+        )
+    )
+
+    assert result.unweighted_components is not None
+    unweighted = result.unweighted_components["registration/deformation_gradient"]
+    assert result.components is not None
+    weighted = result.components["registration/deformation_gradient"]
+    assert torch.allclose(weighted, 0.25 * unweighted)
+    assert torch.allclose(result.total, weighted)
 
 
 @pytest.mark.parametrize(

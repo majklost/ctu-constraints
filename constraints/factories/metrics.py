@@ -3,6 +3,7 @@
 from ..computers.metric_computers import StagedMetricComputer
 from ..computers.metric_terms import (
     CompositeMetric,
+    DeformationJacobianTerm,
     RegistrationConstraintViolationTerm,
     RegistrationIoUTerm,
     SegmentationConstraintViolationTerm,
@@ -23,6 +24,7 @@ def _validation_metrics(
 ) -> list:
     return [
         *_iou_metrics(label_schema),
+        DeformationJacobianTerm(label_schema),
         SegmentationConstraintViolationTerm(
             label_schema,
             blob_threshold=blob_threshold,

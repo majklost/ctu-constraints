@@ -1,10 +1,11 @@
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 import torch
 from torch import nn
 
 from ..datatools.label_schema import LabelSchema
-from ..types import LossInput, LossResult
+from ..types import LossInput, LossResult, WeightedLossTerm
 from .loss_terms import (
     LossTerm,
     RegistrationBlurredMSETerm,
@@ -146,7 +147,7 @@ class CompositeLossComputer(ProjectLossComputer):
 
     def __init__(
         self,
-        terms: list[tuple[float, LossTerm]],
+        terms: list[WeightedLossTerm],
         *,
         grad_diagnostics: bool = False,
     ) -> None:
@@ -154,12 +155,16 @@ class CompositeLossComputer(ProjectLossComputer):
         if not terms:
             raise ValueError("CompositeLossComputer requires at least one loss term")
 
-        self.weights = [float(weight) for weight, _ in terms]
-        self.terms = nn.ModuleList(term for _, term in terms)
+        if any(weighted_term.weight < 0 for weighted_term in terms):
+            raise ValueError("Loss-term weights must be non-negative")
+
+        self.weights = [float(weighted_term.weight) for weighted_term in terms]
+        self.terms = nn.ModuleList(weighted_term.term for weighted_term in terms)
         self.grad_diagnostics = grad_diagnostics
 
     def compute(self, loss_input: LossInput) -> LossResult:
         components: dict[str, torch.Tensor] = {}
+        unweighted_components: dict[str, torch.Tensor] = {}
         weighted_losses: list[torch.Tensor] = []
         logs: dict[str, float | torch.Tensor] = {}
 
@@ -167,8 +172,10 @@ class CompositeLossComputer(ProjectLossComputer):
             assert isinstance(term_module, LossTerm)
             if term_module.name in components:
                 raise ValueError(f"Duplicate loss component name: {term_module.name}")
-            weighted_loss = weight * term_module(loss_input)
+            unweighted_loss = term_module(loss_input)
+            weighted_loss = weight * unweighted_loss
             components[term_module.name] = weighted_loss
+            unweighted_components[term_module.name] = unweighted_loss
             weighted_losses.append(weighted_loss)
 
             if self.grad_diagnostics:
@@ -189,7 +196,18 @@ class CompositeLossComputer(ProjectLossComputer):
             if interaction_logs:
                 logs.update(interaction_logs)
 
-        return LossResult(total=total, components=components, logs=logs or None)
+        return LossResult(
+            total=total,
+            components=components,
+            unweighted_components=unweighted_components,
+            logs=logs or None,
+        )
+
+
+def _with_extra_terms(
+    terms: list[WeightedLossTerm], extra_terms: Sequence[WeightedLossTerm]
+) -> list[WeightedLossTerm]:
+    return [*terms, *extra_terms]
 
 
 # BCE0segmentation metrics
@@ -202,12 +220,16 @@ class SBCE_ROneSideSDFSquared(CompositeLossComputer):
         seg_loss_weight=20.0,
         sdf_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                (sdf_loss_weight, RegistrationOneSideSDFSquareTerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFSquareTerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         # Kept for constructor backward compatibility; IoU now lives in metric computers.
@@ -223,12 +245,16 @@ class SBCE_ROneSideSDF(CompositeLossComputer):
         seg_loss_weight=20.0,
         sdf_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                (sdf_loss_weight, RegistrationOneSideSDFTerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFTerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         # Kept for constructor backward compatibility; IoU now lives in metric computers.
@@ -248,12 +274,16 @@ class SBCE_RBCE(CompositeLossComputer):
         seg_loss_weight=1.0,
         template_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                (template_loss_weight, RegistrationCrossEntropyTerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(template_loss_weight, RegistrationCrossEntropyTerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         # Kept for constructor backward compatibility; IoU now lives in metric computers.
@@ -272,12 +302,16 @@ class SBCE_RCentroid(CompositeLossComputer):
         label_schema: LabelSchema,
         centroid_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (1.0, SegmentationCrossEntropyTerm(label_schema)),
-                (centroid_loss_weight, RegistrationCentroidTerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(1.0, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(centroid_loss_weight, RegistrationCentroidTerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         self._seg_loss_weight = 1.0
@@ -295,15 +329,19 @@ class SBCE_RDSDF_MSE(CompositeLossComputer):
         reg_loss_weight=1e-3,
         sdf_clip: float | None = None,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (1.0, SegmentationCrossEntropyTerm(label_schema)),
-                (
-                    reg_loss_weight,
-                    RegistrationDSDFMSETerm(label_schema, sdf_clip=sdf_clip),
-                ),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(1.0, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(
+                        reg_loss_weight,
+                        RegistrationDSDFMSETerm(label_schema, sdf_clip=sdf_clip),
+                    ),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         self.seg_loss_weight = 1.0
@@ -318,18 +356,22 @@ class SBCE_RBlurredMSE(CompositeLossComputer):
         blur_sigma=1.0,
         reduction="mean",
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (1.0, SegmentationCrossEntropyTerm(label_schema)),
-                (
-                    1.0,
-                    RegistrationBlurredMSETerm(
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(1.0, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(
+                        1.0,
+                        RegistrationBlurredMSETerm(
                         label_schema,
                         blur_sigma=blur_sigma, reduction=reduction
+                        ),
                     ),
-                ),
-            ],
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         self.blur_sigma = blur_sigma
@@ -345,12 +387,16 @@ class SBCE_RMSE_SDFTEMPLATE(CompositeLossComputer):
         seg_loss_weight=1.0,
         template_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                (template_loss_weight, RegistrationMSE_SDFTEMPLATETerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(template_loss_weight, RegistrationMSE_SDFTEMPLATETerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         self.label_schema = label_schema
@@ -365,15 +411,19 @@ class SBCE_ROneSideSDF_SDFTEMPLATE(CompositeLossComputer):
         seg_loss_weight=1.0,
         template_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
-                (
-                    template_loss_weight,
-                    RegistrationOneside_SDFTEMPLATETerm(label_schema),
-                ),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationCrossEntropyTerm(label_schema)),
+                    WeightedLossTerm(
+                        template_loss_weight,
+                        RegistrationOneside_SDFTEMPLATETerm(label_schema),
+                    ),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         self.label_schema = label_schema
@@ -395,12 +445,16 @@ class SOneSideSDFSquared_ROneSideSDFSquared(CompositeLossComputer):
         seg_loss_weight=1.0,
         sdf_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationOneSideSDFSquareTerm(label_schema)),
-                (sdf_loss_weight, RegistrationOneSideSDFSquareTerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationOneSideSDFSquareTerm(label_schema)),
+                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFSquareTerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         """
@@ -423,12 +477,16 @@ class SOneSideSDFPlain_ROneSideSDFPlain(CompositeLossComputer):
         seg_loss_weight=1.0,
         sdf_loss_weight=1.0,
         grad_diagnostics=False,
+        extra_terms: Sequence[WeightedLossTerm] = (),
     ):
         super().__init__(
-            terms=[
-                (seg_loss_weight, SegmentationOneSideSDFTerm(label_schema)),
-                (sdf_loss_weight, RegistrationOneSideSDFTerm(label_schema)),
-            ],
+            terms=_with_extra_terms(
+                [
+                    WeightedLossTerm(seg_loss_weight, SegmentationOneSideSDFTerm(label_schema)),
+                    WeightedLossTerm(sdf_loss_weight, RegistrationOneSideSDFTerm(label_schema)),
+                ],
+                extra_terms,
+            ),
             grad_diagnostics=grad_diagnostics,
         )
         self.label_schema = label_schema

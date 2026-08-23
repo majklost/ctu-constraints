@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+import neurite as ne
 import torch
 from torch import nn
 
@@ -13,6 +14,7 @@ from ..losses_metrics import (
 )
 from ..types import LossInput
 from ..utils import signed_distance_kornia_differentiable
+from .utils import iter_deformation_fields
 
 
 def _require_channels(tensor: torch.Tensor, expected_channels: int, name: str) -> None:
@@ -90,6 +92,41 @@ class LossTerm(nn.Module, ABC):
         return None
 
 
+class DeformationGradientTerm(LossTerm):
+    """VoxelMorph diffusion regularizer for predicted displacement fields.
+
+    Fields in this project use VoxelMorph's channels-first, voxel-coordinate
+    displacement convention: ``[B, ndim, *spatial]``.  The L2/mean setting is
+    therefore the mean squared finite difference over field components and
+    spatial axes, matching ``neurite``'s implementation.
+    """
+
+    def __init__(self, label_schema: LabelSchema) -> None:
+        super().__init__("registration/deformation_gradient", label_schema)
+        self._gradient = ne.nn.modules.SpatialGradient("l2", reduction="mean")
+
+    def forward(self, loss_input: LossInput) -> torch.Tensor:
+        transform_spec = loss_input.transform_spec
+        fields = list(iter_deformation_fields(transform_spec))
+        if not fields:
+            reference = next(
+                (
+                    tensor
+                    for tensor in (
+                        loss_input.segmentation_logits,
+                        loss_input.warped_template,
+                    )
+                    if tensor is not None
+                ),
+                None,
+            )
+            if reference is None:
+                raise ValueError(
+                    "DeformationGradientTerm requires a deformation field or a "
+                    "tensor from which to construct a zero loss"
+                )
+            return reference.sum() * 0.0
+        return torch.stack([self._gradient(field) for field in fields]).mean()
 class SegmentationCrossEntropyTerm(LossTerm):
     def __init__(self, label_schema: LabelSchema) -> None:
         super().__init__("segmentation/cross_entropy", label_schema)

@@ -19,14 +19,14 @@ experiment matrix.
 
 ### Deformation-field regularity
 
-- [ ] Add a diffusion regularization loss term that penalizes spatial gradients
+- [x] Add a diffusion regularization loss term that penalizes spatial gradients
   of the deformation field.
   - Reuse the conventions and machinery already used by VoxelMorph, including
     the choice of field representation, measurement units, and reduction.
       - make use of `neurite` package if convenient... may look to implementation at `notebooks/ex1/voxelmorph_test_MNIST.ipynb` for inspiration
   - Expose the regularization weight in experiment configuration.
   - Log both the unweighted term and its weighted contribution to total loss.
-- [ ] Add epoch-level Jacobian-determinant diagnostics for the final deformation:
+- [x] Add epoch-level Jacobian-determinant diagnostics for the final deformation:
   - mean fraction of pixels with `det(J) <= 0`;
   - fraction of samples containing at least one pixel with `det(J) <= 0`;
   - mean of the per-sample minimum determinant;

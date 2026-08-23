@@ -8,6 +8,7 @@ from torchmetrics import JaccardIndex
 from ..datatools.label_schema import LabelSchema
 from ..losses_metrics.metrics import ConstraintViolationCounter
 from ..types import ConstraintViolationSamples, MetricInput, MetricResult
+from .utils import iter_deformation_fields
 
 
 class StatefulMetric(nn.Module, ABC):
@@ -192,6 +193,86 @@ class RegistrationIoUTerm(MetricTerm):
     def reset(self) -> None:
         self._macro_iou.reset()
         self._per_class_iou.reset()
+
+
+class DeformationJacobianTerm(MetricTerm):
+    """Epoch diagnostics for folding in predicted 2-D deformation fields.
+
+    The project warps with VoxelMorph displacement fields in pixel coordinates,
+    so the sampled mapping is ``phi(y, x) = (y, x) + u(y, x)``.  Forward
+    finite differences evaluate its Jacobian on the interior pixel cells.
+    Rigid steps have determinant one and therefore do not alter these folding
+    diagnostics; sequential specs contribute their deformable field steps.
+    """
+
+    metric_prefix = "registration/jacobian"
+
+    def __init__(self, label_schema: LabelSchema) -> None:
+        super().__init__(label_schema)
+        self._pixel_nonpositive_sum = 0.0
+        self._sample_nonpositive_sum = 0.0
+        self._sample_minima: list[torch.Tensor] = []
+
+    @staticmethod
+    def _determinants(field: torch.Tensor) -> torch.Tensor:
+        if field.ndim != 4 or field.shape[1] != 2:
+            raise ValueError(
+                "Jacobian diagnostics require a 2-D field of shape [B, 2, H, W], "
+                f"got {tuple(field.shape)}"
+            )
+        if field.shape[2] < 2 or field.shape[3] < 2:
+            raise ValueError("Jacobian diagnostics require H and W to be at least 2")
+
+        # Field component 0 follows the first spatial (y) axis and component 1
+        # the second (x) axis, the same order used by VoxelMorph meshgrids.
+        du_dy = field[:, :, 1:, :-1] - field[:, :, :-1, :-1]
+        du_dx = field[:, :, :-1, 1:] - field[:, :, :-1, :-1]
+        return (1.0 + du_dy[:, 0]) * (1.0 + du_dx[:, 1]) - (
+            du_dx[:, 0] * du_dy[:, 1]
+        )
+
+    def update(self, inputs: MetricInput) -> MetricResult:
+        fields = list(iter_deformation_fields(inputs.transform_spec))
+        if not fields:
+            return MetricResult()
+
+        # One deformable stage is currently used.  For future sequential
+        # deformable stages, report each stage's samples rather than silently
+        # discarding a possible folding field.
+        determinants = torch.cat(
+            [self._determinants(field.detach()) for field in fields], dim=0
+        )
+        per_sample_fraction = (determinants <= 0).float().mean(dim=(1, 2))
+        per_sample_minimum = determinants.amin(dim=(1, 2))
+        self._pixel_nonpositive_sum += per_sample_fraction.sum().item()
+        self._sample_nonpositive_sum += (per_sample_fraction > 0).sum().item()
+        self._sample_minima.extend(per_sample_minimum.cpu())
+        return MetricResult()
+
+    def compute(self) -> MetricResult:
+        if not self._sample_minima:
+            return MetricResult()
+        minima = torch.stack(self._sample_minima)
+        sample_count = len(self._sample_minima)
+        return MetricResult(
+            scalars={
+                f"{self.metric_prefix}/mean_nonpositive_pixel_fraction": (
+                    self._pixel_nonpositive_sum / sample_count
+                ),
+                f"{self.metric_prefix}/samples_with_nonpositive_fraction": (
+                    self._sample_nonpositive_sum / sample_count
+                ),
+                f"{self.metric_prefix}/mean_sample_minimum": minima.mean(),
+                f"{self.metric_prefix}/p01_sample_minimum": torch.quantile(
+                    minima, 0.01
+                ),
+            }
+        )
+
+    def reset(self) -> None:
+        self._pixel_nonpositive_sum = 0.0
+        self._sample_nonpositive_sum = 0.0
+        self._sample_minima = []
 
 
 class _ConstraintViolationTerm(MetricTerm, ABC):

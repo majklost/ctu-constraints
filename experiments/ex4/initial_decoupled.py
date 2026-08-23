@@ -46,6 +46,7 @@ from constraints.computers.loss_computers import (
     SOneSideSDFPlain_ROneSideSDFPlain,
     SOneSideSDFSquared_ROneSideSDFSquared,
 )
+from constraints.computers.loss_terms import DeformationGradientTerm
 from constraints.computers.metric_computers import StagedMetricComputer
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.label_schema import LabelSchema
@@ -74,6 +75,7 @@ from constraints.transforms.transformers import (
     SequentialTransformer,
     SpatialTransformer,
 )
+from constraints.types import WeightedLossTerm
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
@@ -125,6 +127,15 @@ def handle_decoupled(
     label_schema: LabelSchema,
     template_source: TemplateSource,
 ) -> pl.LightningModule:
+    extra_terms = ()
+    if args.deformation_regularization_weight:
+        extra_terms = (
+            WeightedLossTerm(
+                args.deformation_regularization_weight,
+                DeformationGradientTerm(label_schema),
+            ),
+        )
+    loss_kwargs = {"extra_terms": extra_terms}
     match args.modality:
         case "affine":
             net = ProjectWithTemplateA(max_translation=0.5, ls=label_schema)
@@ -144,25 +155,25 @@ def handle_decoupled(
 
     match args.mode:
         case "BCE_OneSideSDFSquared":
-            loss_computer = SBCE_ROneSideSDFSquared(label_schema)
+            loss_computer = SBCE_ROneSideSDFSquared(label_schema, **loss_kwargs)
         case "BCE_OneSideSDFPlain":
-            loss_computer = SBCE_ROneSideSDF(label_schema)
+            loss_computer = SBCE_ROneSideSDF(label_schema, **loss_kwargs)
         case "BCE_BCE":
-            loss_computer = SBCE_RBCE(label_schema)
+            loss_computer = SBCE_RBCE(label_schema, **loss_kwargs)
         case "BCE_CentroidLoss":
-            loss_computer = SBCE_RCentroid(label_schema)
+            loss_computer = SBCE_RCentroid(label_schema, **loss_kwargs)
         case "BCE_BlurredLoss":
-            loss_computer = SBCE_RBlurredMSE(label_schema)
+            loss_computer = SBCE_RBlurredMSE(label_schema, **loss_kwargs)
         case "BCE_DSDF_MSE":
-            loss_computer = SBCE_RDSDF_MSE(label_schema)
+            loss_computer = SBCE_RDSDF_MSE(label_schema, **loss_kwargs)
         case "BCE_SDFTEMPLATE_MSE":
-            loss_computer = SBCE_RMSE_SDFTEMPLATE(label_schema)
+            loss_computer = SBCE_RMSE_SDFTEMPLATE(label_schema, **loss_kwargs)
         case "BCE_SDFTEMPLATE_OneSideSDFSQUARE":
-            loss_computer = SBCE_ROneSideSDF_SDFTEMPLATE(label_schema)
+            loss_computer = SBCE_ROneSideSDF_SDFTEMPLATE(label_schema, **loss_kwargs)
         case "OneSideSDFSquared_OneSideSDFSquared":
-            loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema)
+            loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema, **loss_kwargs)
         case "OneSideSDFPlain_OneSideSDFPlain":
-            loss_computer = SOneSideSDFPlain_ROneSideSDFPlain(label_schema)
+            loss_computer = SOneSideSDFPlain_ROneSideSDFPlain(label_schema, **loss_kwargs)
         case _:
             raise ValueError(f"Unknown mode: {args.mode}")
     optimizer_callback = lambda module: torch.optim.Adam(
@@ -353,6 +364,12 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_epochs", type=int, default=200)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument(
+        "--deformation_regularization_weight",
+        type=float,
+        default=0.0,
+        help="Weight of VoxelMorph L2 diffusion regularization for displacement fields.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--early_stopping_patience",
