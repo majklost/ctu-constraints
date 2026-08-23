@@ -12,12 +12,16 @@ from constraints.computers.loss_terms import (
     RegistrationDSDFMSETerm,
     RegistrationMSE_SDFTEMPLATETerm,
 )
+from constraints.datatools.datasets.types import TemplateAssets
+from constraints.datatools.label_schema import LabelSchema
+from constraints.datatools.template_sources import PerSampleTemplateSource
 from constraints.lightning_wrappers.modules import ProjectLightning
 from constraints.transforms.transformers import (
     SequentialTransformer,
     SpatialTransformer,
 )
 from constraints.types import (
+    DiscreteSegmentation,
     FieldParams,
     LossInput,
     RigidParams,
@@ -25,6 +29,15 @@ from constraints.types import (
     WarpResult,
 )
 from constraints.utils import signed_distance_kornia_differentiable
+
+LABEL_SCHEMA = LabelSchema.from_lists(
+    ["background", "boundary", "lumen", "plaque"],
+    [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1), (0.1, 0.7, 0.1), (0.1, 0.35, 0.95)],
+)
+
+
+def _template_source() -> PerSampleTemplateSource:
+    return PerSampleTemplateSource(TemplateAssets(), LABEL_SCHEMA)
 
 
 class _DummyModel(nn.Module):
@@ -67,13 +80,23 @@ def _one_hot_target(batch_size: int, height: int, width: int) -> torch.Tensor:
     return functional.one_hot(labels, num_classes=4).permute(0, 3, 1, 2).float()
 
 
+def _discrete_target(one_hot: torch.Tensor) -> DiscreteSegmentation:
+    return DiscreteSegmentation(
+        labels=one_hot.argmax(dim=1), label_schema=LABEL_SCHEMA
+    )
+
+
 def test_project_lightning_keeps_mask_and_sdf_template_warps_separate():
     batch_size, height, width = 2, 12, 12
     logits = torch.randn(batch_size, 4, height, width)
     template = torch.rand(batch_size, 4, height, width)
     template_sdf = torch.randn(batch_size, 3, height, width)
     module = ProjectLightning(
-        _DummyModel(), _IdentityTransformer(), SBCE_RMSE_SDFTEMPLATE()
+        _DummyModel(),
+        _IdentityTransformer(),
+        SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA),
+        _template_source(),
+        LABEL_SCHEMA,
     )
 
     predicted_logits, result = module.forward(
@@ -100,7 +123,11 @@ def test_project_lightning_replays_sequential_transforms_for_mask_and_sdf():
     transform_spec = TransformSpec(steps=(rigid_spec, field_spec))
     transformer = SequentialTransformer()
     module = ProjectLightning(
-        _SequentialModel(transform_spec), transformer, SBCE_RMSE_SDFTEMPLATE()
+        _SequentialModel(transform_spec),
+        transformer,
+        SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA),
+        _template_source(),
+        LABEL_SCHEMA,
     )
 
     logits = torch.randn(1, 4, 12, 12)
@@ -119,7 +146,10 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
     target = _one_hot_target(batch_size, height, width)
     target_sdf = torch.randn(batch_size, 3, height, width)
 
-    for loss_computer in (SBCE_RMSE_SDFTEMPLATE(), SBCE_ROneSideSDF_SDFTEMPLATE()):
+    for loss_computer in (
+        SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA),
+        SBCE_ROneSideSDF_SDFTEMPLATE(LABEL_SCHEMA),
+    ):
         logits = torch.randn(batch_size, 4, height, width, requires_grad=True)
         warped_template = torch.rand(batch_size, 4, height, width, requires_grad=True)
         warped_template_sdf = torch.randn(
@@ -131,7 +161,7 @@ def test_sdf_template_losses_use_dedicated_sdf_warp():
                 segmentation_logits=logits,
                 warped_template=warped_template,
                 warped_template_sdf=warped_template_sdf,
-                gt_mask=target,
+                gt=_discrete_target(target),
                 gt_mask_sdf=target_sdf,
             )
         ).total
@@ -151,10 +181,10 @@ def test_dsdf_mse_has_finite_gradients_for_binary_foreground_template():
     target_sdf = signed_distance_kornia_differentiable(target[:, 1:])
     warped_template = target.clone().requires_grad_()
 
-    loss = RegistrationDSDFMSETerm()(
+    loss = RegistrationDSDFMSETerm(LABEL_SCHEMA)(
         LossInput(
             warped_template=warped_template,
-            gt_mask=target,
+            gt=_discrete_target(target),
             gt_mask_sdf=target_sdf,
         )
     )
@@ -171,7 +201,7 @@ def test_sdf_template_mse_compares_matching_signed_distances():
         [[[[-10.0, 10.0]], [[-10.0, 10.0]], [[-10.0, 10.0]]]]
     )
 
-    loss = RegistrationMSE_SDFTEMPLATETerm()(
+    loss = RegistrationMSE_SDFTEMPLATETerm(LABEL_SCHEMA)(
         LossInput(
             warped_template_sdf=warped_template_sdf,
             gt_mask_sdf=warped_template_sdf.clone(),
@@ -192,7 +222,7 @@ def test_gradient_diagnostics_are_opt_in():
         warped_template_sdf=torch.randn(
             batch_size, 3, height, width, requires_grad=True
         ),
-        gt_mask=target,
+        gt=_discrete_target(target),
         gt_mask_sdf=torch.randn(batch_size, 3, height, width),
     )
 
@@ -200,11 +230,13 @@ def test_gradient_diagnostics_are_opt_in():
         "torch.autograd.grad",
         side_effect=AssertionError("unexpected gradient diagnostic"),
     ):
-        result = SBCE_RMSE_SDFTEMPLATE().compute(loss_input)
+        result = SBCE_RMSE_SDFTEMPLATE(LABEL_SCHEMA).compute(loss_input)
 
     assert result.logs is None
 
-    result = SBCE_RMSE_SDFTEMPLATE(grad_diagnostics=True).compute(loss_input)
+    result = SBCE_RMSE_SDFTEMPLATE(
+        LABEL_SCHEMA, grad_diagnostics=True
+    ).compute(loss_input)
     assert result.logs is not None
     assert "coupling/segmentation_grad_norm" in result.logs
     assert "registration/warped_template_sdf/grad_norm" in result.logs

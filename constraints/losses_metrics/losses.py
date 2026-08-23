@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 
-from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES, artificial_mask_to_label_map
 from ..visu.helpers import to_label_map
 
 
@@ -13,11 +12,9 @@ class RawMaskCrossEntropyLoss(torch.nn.Module):
         self._cross_entropy = torch.nn.CrossEntropyLoss(reduction=reduction)
 
     def forward(self, logits: torch.Tensor, raw_target: torch.Tensor) -> torch.Tensor:
-        if logits.shape[1] == ARTIFICIAL_MASK_NUM_CLASSES and raw_target.ndim == 4:
-            target = artificial_mask_to_label_map(raw_target)
-        else:
-            target = to_label_map(raw_target)
+        target = to_label_map(raw_target)
         return self._cross_entropy(logits, target)
+
 
 # TODO: Make _Weighted loss from it
 class CentroidLoss(torch.nn.Module):
@@ -64,6 +61,7 @@ class BlurredMSELoss(torch.nn.Module):
         loss = MSE(pred, gaussian_blur(gt))
     Expected input shape: [B, C, H, W]
     """
+
     def __init__(
         self,
         kernel_size: int = 7,
@@ -93,7 +91,11 @@ class BlurredMSELoss(torch.nn.Module):
         self.reduction = reduction
         self.padding_mode = padding_mode
 
-        self.register_buffer("kernel2d", self._make_gaussian_kernel2d(kernel_size, sigma), persistent=False)
+        self.register_buffer(
+            "kernel2d",
+            self._make_gaussian_kernel2d(kernel_size, sigma),
+            persistent=False,
+        )
 
     @staticmethod
     def _make_gaussian_kernel2d(kernel_size: int, sigma: float) -> torch.Tensor:
@@ -105,14 +107,18 @@ class BlurredMSELoss(torch.nn.Module):
 
     def _blur(self, x: torch.Tensor) -> torch.Tensor:
         if x.dim() != 4:
-            raise ValueError(f"Expected 4D tensor [B,C,H,W], got shape {tuple(x.shape)}.")
+            raise ValueError(
+                f"Expected 4D tensor [B,C,H,W], got shape {tuple(x.shape)}."
+            )
 
         b, c, h, w = x.shape
         pad = self.kernel_size // 2
 
         kernel2d = self.kernel2d
         assert isinstance(kernel2d, torch.Tensor)
-        kernel = kernel2d.to(device=x.device, dtype=x.dtype).expand(c, 1, -1, -1)  # [C,1,K,K]
+        kernel = kernel2d.to(device=x.device, dtype=x.dtype).expand(
+            c, 1, -1, -1
+        )  # [C,1,K,K]
         x = F.pad(x, (pad, pad, pad, pad), mode=self.padding_mode)
         return F.conv2d(x, kernel, groups=c)
 
@@ -121,10 +127,16 @@ class BlurredMSELoss(torch.nn.Module):
             raise ValueError(
                 f"`pred` and `gt` must have the same shape, got {tuple(pred.shape)} vs {tuple(gt.shape)}."
             )
+        if not pred.is_floating_point():
+            raise TypeError(
+                f"`pred` must be a floating-point tensor, got {pred.dtype}."
+            )
 
-        gt_blurred = self._blur(gt)
+        # LabelSchema produces integer one-hot masks.  Convolution requires a
+        # floating-point input (notably on CUDA), so match the prediction dtype
+        # before blurring the target.
+        gt_blurred = self._blur(gt.to(dtype=pred.dtype))
         return F.mse_loss(pred, gt_blurred, reduction=self.reduction)
-
 
 
 class OneSideSDFSquare(torch.nn.Module):
@@ -151,6 +163,7 @@ class OneSideSDFSquare(torch.nn.Module):
     :math:`i` and class :math:`c`, and :math:`\mathrm{SDF}_{i,c}` is the
     signed distance field of the corresponding ground-truth mask.
     """
+
     def __init__(self, reduction="mean") -> None:
         super().__init__()
         if reduction not in {"none", "mean", "sum"}:
@@ -165,8 +178,10 @@ class OneSideSDFSquare(torch.nn.Module):
         """
         Predicted probabilities `pred` and signed distance field `sdf` should have the same shape [B, C, H, W].
         """
-        loss = pred * torch.clamp(sdf, min=0) ** 2 + \
-               (1 - pred) * torch.clamp(-sdf, min=0) ** 2
+        loss = (
+            pred * torch.clamp(sdf, min=0) ** 2
+            + (1 - pred) * torch.clamp(-sdf, min=0) ** 2
+        )
 
         if self.reduction == "mean":
             return loss.mean()
@@ -174,7 +189,7 @@ class OneSideSDFSquare(torch.nn.Module):
             return loss.sum()
         else:  # "none"
             return loss
-        
+
 
 class OneSideSDF(torch.nn.Module):
     r"""
@@ -200,6 +215,7 @@ class OneSideSDF(torch.nn.Module):
     :math:`i` and class :math:`c`, and :math:`\mathrm{SDF}_{i,c}` is the
     signed distance field of the corresponding ground-truth mask.
     """
+
     def __init__(self, reduction="mean") -> None:
         super().__init__()
         if reduction not in {"none", "mean", "sum"}:
@@ -211,8 +227,7 @@ class OneSideSDF(torch.nn.Module):
         self.reduction = reduction
 
     def forward(self, pred, sdf):
-        loss = pred * torch.clamp(sdf, min=0) + \
-               (1 - pred) * torch.clamp(-sdf, min=0)
+        loss = pred * torch.clamp(sdf, min=0) + (1 - pred) * torch.clamp(-sdf, min=0)
 
         if self.reduction == "mean":
             return loss.mean()
@@ -220,4 +235,3 @@ class OneSideSDF(torch.nn.Module):
             return loss.sum()
         else:  # "none"
             return loss
-        

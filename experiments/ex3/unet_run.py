@@ -1,21 +1,14 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-import numpy as np
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
 from constraints import get_data_folder, get_experiment_folder
-from constraints.datatools.datasets import (
-    ARTIFICIAL_MASK_CLASS_LABELS,
-    ARTIFICIAL_MASK_NUM_CLASSES,
-    CachedArtificalDataset,
-    artificial_mask_to_label_map,
-)
+from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.lightning_wrappers.modules import UnetLightning as UnetProjectLightning
 
 FOLDER = get_experiment_folder(Path("ex3") / "project_arch_unet")
@@ -38,10 +31,13 @@ def main(args):
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
 
-    trn_dataset = CachedArtificalDataset(TRN_FOLDER, sdf_mode="scipy")
-    val_dataset = CachedArtificalDataset(VAL_FOLDER, sdf_mode="scipy")
+    trn_dataset = CachedArtificialDataset(TRN_FOLDER, sdf_mode="scipy")
+    val_dataset = CachedArtificialDataset(VAL_FOLDER, sdf_mode="scipy")
 
-    module = UnetProjectLightning(learning_rate=args.learning_rate)
+    module = UnetProjectLightning(
+        label_schema=trn_dataset.label_schema,
+        learning_rate=args.learning_rate,
+    )
 
     trn_loader = DataLoader(
         trn_dataset,

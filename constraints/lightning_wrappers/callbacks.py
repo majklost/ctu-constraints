@@ -54,7 +54,7 @@ class GradientNormLogger(Callback):
 class SegmentationRegistrationEarlyStopping(Callback):
     """Stop only after segmentation and registration IoU both plateau.
 
-    Models without ``val/registration/iou/warped_vs_gt``, such as the plain
+    Models without ``val/epoch/registration/iou/warped_vs_gt``, such as the plain
     U-Net baseline, are stopped solely based on segmentation IoU.
     """
 
@@ -90,11 +90,11 @@ class SegmentationRegistrationEarlyStopping(Callback):
             return
 
         metrics = trainer.callback_metrics
-        segmentation_metric = metrics.get("val/segmentation/iou/pred_vs_gt")
+        segmentation_metric = metrics.get("val/epoch/segmentation/iou/pred_vs_gt")
         if segmentation_metric is None:
             raise RuntimeError(
                 "SegmentationRegistrationEarlyStopping requires "
-                "'val/segmentation/iou/pred_vs_gt'."
+                "'val/epoch/segmentation/iou/pred_vs_gt'."
             )
 
         segmentation_iou = self._metric_value(segmentation_metric)
@@ -109,7 +109,7 @@ class SegmentationRegistrationEarlyStopping(Callback):
             self.best_segmentation_iou = segmentation_iou
 
         registration_improved = False
-        registration_metric = metrics.get("val/registration/iou/warped_vs_gt")
+        registration_metric = metrics.get("val/epoch/registration/iou/warped_vs_gt")
         if registration_metric is not None:
             registration_iou = self._metric_value(registration_metric)
             if not math.isfinite(registration_iou):

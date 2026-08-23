@@ -6,6 +6,7 @@
 # PROJECT_DIR="/mnt/personal/mrkosmic/DL/synced"
 mutagen project start
 mutagen project resume
+mutagen sync flush constraints 
 REMOTE="mrkosmic@rci"
 PROJECT_DIR="/mnt/personal/mrkosmic/synced/constraints"
 

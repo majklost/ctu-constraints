@@ -2,6 +2,7 @@ from typing import cast
 
 import torch
 
+from ..datatools.label_schema import LabelSchema
 from ..transforms.transformers import RigidTransformer
 from ..types import TransformSpec
 from .affine import AffineRegistrationNet
@@ -16,15 +17,15 @@ class DeepAffDefRegistrationNet(torch.nn.Module):
     Registration net that predicts first affine parameters and then a deformation field
     """
 
-    def __init__(self, max_translation=0.3):
+    def __init__(self, label_schema: LabelSchema, max_translation=0.3):
         super().__init__()
         self.rigid_transformer = (
             RigidTransformer()
         )  # must transform before passing to next component
         self.affine_registration_net = AffineRegistrationNet(
-            max_translation=max_translation
+            ls=label_schema, max_translation=max_translation
         )
-        self.deformable_registration_net = DeformableRegistrationNet()
+        self.deformable_registration_net = DeformableRegistrationNet(ls=label_schema)
 
     def forward(
         self, registration_input: torch.Tensor, template: torch.Tensor
@@ -45,12 +46,12 @@ class CalcAffDefRegistrationNet(torch.nn.Module):
     then predicts a deformation field.
     """
 
-    def __init__(self, max_translation=0.3):
+    def __init__(self, label_schema: LabelSchema, max_translation=0.3):
         super().__init__()
         self.rigid_transformer = (
             RigidTransformer()
         )  # must transform before passing to next component
-        self.deformable_registration_net = DeformableRegistrationNet()
+        self.deformable_registration_net = DeformableRegistrationNet(ls=label_schema)
         self.moments_affine_alignment = MomentsAffineAlignment()
 
     def forward(
@@ -70,10 +71,16 @@ class ProjectWithTemplateBDeepAff(SegmentationRegistrationModel):
     """Segment an image, then register it with predicted affine and deformable
     stages."""
 
-    def __init__(self, max_translation: float = 0.3) -> None:
+    def __init__(
+        self,
+        ls: LabelSchema,
+        max_translation: float = 0.3,
+    ) -> None:
         super().__init__(
-            segmentation_net=get_segmentator(),
-            registration_net=DeepAffDefRegistrationNet(max_translation=max_translation),
+            segmentation_net=get_segmentator(ls.num_classes),
+            registration_net=DeepAffDefRegistrationNet(
+                label_schema=ls, max_translation=max_translation
+            ),
             registration_input_mode="probabilities",
         )
 
@@ -91,10 +98,12 @@ class ProjectWithTemplateBCalcAff(SegmentationRegistrationModel):
     """Segment an image, then register it with a moment-aligned affine stage
     followed by a deformable one."""
 
-    def __init__(self, max_translation: float = 0.3) -> None:
+    def __init__(self, label_schema: LabelSchema, max_translation: float = 0.3) -> None:
         super().__init__(
-            segmentation_net=get_segmentator(),
-            registration_net=CalcAffDefRegistrationNet(max_translation=max_translation),
+            segmentation_net=get_segmentator(label_schema.num_classes),
+            registration_net=CalcAffDefRegistrationNet(
+                label_schema=label_schema, max_translation=max_translation
+            ),
             # Moment alignment is only defined on non-negative input: on raw logits
             # the centroid denominator goes negative and the affine stage collapses
             # to (roughly) the image centre with a flipped sign.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail  # Keep testing combinations and report every failure.
-USE_UNLEARNED_SEGMENTATOR=false
-# USE_UNLEARNED_SEGMENTATOR=true
+# USE_UNLEARNED_SEGMENTATOR=false
+USE_UNLEARNED_SEGMENTATOR=true
 seed=42
 # seed=1234
 # seed=219
@@ -42,6 +42,7 @@ for modality in "${MODALITIES[@]}"; do
             "${SEGMENTATOR_ARGS[@]}"; then
             echo "!!! SMOKE TEST FAILED: modality=${modality} mode=${mode}"
             FAILED+=("${modality}/${mode}")
+            exit 1
         fi
     done
 done
@@ -54,19 +55,19 @@ if [ "${#FAILED[@]}" -ne 0 ]; then
 fi
 
 echo "=== All smoke tests passed. Launching full sweep. ==="
-for modality in "${MODALITIES[@]}"; do
-    for mode in "${MODES[@]}"; do
-        echo "--- submit: modality=${modality} mode=${mode} ---"
-        ./remote_submit.sh "${SCRIPT}" \
-            --modality "${modality}" \
-            --mode "${mode}" \
-            --seed "${seed}" \
-            --learning_sample_strategy "no_gt" \
-            --validation_sample_strategy "always_gt" \
-            --special_tag "${SPECIAL_TAG}" \
-            "${SEGMENTATOR_ARGS[@]}"
+# for modality in "${MODALITIES[@]}"; do
+#     for mode in "${MODES[@]}"; do
+#         echo "--- submit: modality=${modality} mode=${mode} ---"
+#         ./remote_submit.sh "${SCRIPT}" \
+#             --modality "${modality}" \
+#             --mode "${mode}" \
+#             --seed "${seed}" \
+#             --learning_sample_strategy "no_gt" \
+#             --validation_sample_strategy "always_gt" \
+#             --special_tag "${SPECIAL_TAG}" \
+#             "${SEGMENTATOR_ARGS[@]}"
 
-    done
-done
+#     done
+# done
 
 echo "=== Sweep submission complete ==="

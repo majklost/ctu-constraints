@@ -6,9 +6,13 @@ import pandas as pd
 import torch
 
 from constraints import get_data_folder, get_experiment_folder
-from constraints.datatools import CachedArtificalDataset
-from constraints.datatools.datasets import Sample
-from constraints.losses_metrics import BlurredMSELoss, CentroidLoss, OneSideSDF, OneSideSDFSquare
+from constraints.datatools import CachedArtificialDataset
+from constraints.losses_metrics import (
+    BlurredMSELoss,
+    CentroidLoss,
+    OneSideSDF,
+    OneSideSDFSquare,
+)
 from constraints.transforms import differentiable_rigid
 
 FOLDER = get_experiment_folder(Path("ex3") / "affine_losscomp")
@@ -36,7 +40,7 @@ def build_datasets(dataset_names: list[str]) -> dict:
     for name in dataset_names:
         folder, sdf_mode = DATASET_SPECS[name]
         log(f"Loading dataset '{name}' from {folder} (sdf_mode={sdf_mode})")
-        datasets[name] = CachedArtificalDataset(folder, sdf_mode=sdf_mode)
+        datasets[name] = CachedArtificialDataset(folder, sdf_mode=sdf_mode)
         log(f"Loaded dataset '{name}' with {len(datasets[name])} samples")
     return datasets
 
@@ -86,15 +90,13 @@ def _maybe_add_batch_dim(x: torch.Tensor, add: bool) -> torch.Tensor:
 def loss_fn_wrapper(
     loss_name: str,
     loss_fn: torch.nn.Module,
-    needs_sdf: bool,
-    sample: Sample,
+    target: torch.Tensor,
     value: torch.Tensor,
 ):
-    key = "sdf" if needs_sdf else "mask"
     add_batch_dim = LOSS_EXPECTS_BATCH_DIM[loss_name]
     pred = _maybe_add_batch_dim(value, add_batch_dim)
-    target = _maybe_add_batch_dim(sample[key], add_batch_dim)
-    return loss_fn(pred, target)
+    batched_target = _maybe_add_batch_dim(target, add_batch_dim)
+    return loss_fn(pred, batched_target)
 
 
 def _results_to_markdown(df: pd.DataFrame) -> str:
@@ -127,7 +129,11 @@ def save_results_table(rows: list[dict]) -> None:
 
 
 def _upsert_result(rows: list[dict], row: dict) -> list[dict]:
-    updated = [r for r in rows if not (r["loss"] == row["loss"] and r["dataset"] == row["dataset"])]
+    updated = [
+        r
+        for r in rows
+        if not (r["loss"] == row["loss"] and r["dataset"] == row["dataset"])
+    ]
     updated.append(row)
     return updated
 
@@ -202,18 +208,30 @@ def test_loss(
         net = DirectOptimizer()
         optimizer = torch.optim.Adam(net.parameters(), lr=lr)
         mse_calc = torch.nn.MSELoss()
+        schema = dataset.label_schema
+        target_semantic = schema.label_map_to_one_hot(
+            sample["target_labels"]
+        ).float()
+        template_semantic = schema.label_map_to_one_hot(sample["template"]).float()
+        if LOSS_NEEDS_SDF[loss_fn_name]:
+            template = schema.foreground_channels(template_semantic)
+            target = sample["sdf"]
+            mse_target = schema.foreground_channels(target_semantic)
+        else:
+            template = template_semantic
+            target = target_semantic
+            mse_target = target_semantic
 
         for _ in range(num_iterations):
             optimizer.zero_grad()
-            transformed_template = net(sample["template"])
+            transformed_template = net(template)
             loss = loss_fn_wrapper(
                 loss_name=loss_fn_name,
                 loss_fn=LOSSES[loss_fn_name],
-                needs_sdf=LOSS_NEEDS_SDF[loss_fn_name],
-                sample=sample,
+                target=target,
                 value=transformed_template,
             )
-            mse_err = mse_calc(transformed_template, sample["mask"])
+            mse_err = mse_calc(transformed_template, mse_target)
             loss.backward()
             optimizer.step()
 
@@ -257,33 +275,54 @@ def test_loss(
     print(
         f"{loss_fn_name:>16} on {dataset_name:<12} "
         f"-> violations {violations}/{num_runs} ({violation_portion:.2%}), "
-        f"avg_mse={avg_final_mse:.6f}, avg_loss={avg_final_loss:.6f}"
-        ,
+        f"avg_mse={avg_final_mse:.6f}, avg_loss={avg_final_loss:.6f}",
         flush=True,
     )
     return row
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compare affine optimization violations across losses and datasets.")
-    parser.add_argument("--loss", nargs="*", default=None, help="Optional subset of loss names to run.")
-    parser.add_argument("--dataset", nargs="*", default=None, help="Optional subset of dataset names to run.")
+    parser = argparse.ArgumentParser(
+        description="Compare affine optimization violations across losses and datasets."
+    )
+    parser.add_argument(
+        "--loss", nargs="*", default=None, help="Optional subset of loss names to run."
+    )
+    parser.add_argument(
+        "--dataset",
+        nargs="*",
+        default=None,
+        help="Optional subset of dataset names to run.",
+    )
     parser.add_argument("--max-runs", type=int, default=50)
     parser.add_argument("--num-iterations", type=int, default=100)
     parser.add_argument("--mse-threshold", type=float, default=0.01)
     parser.add_argument("--lr", type=float, default=0.05)
-    parser.add_argument("--progress-every", type=int, default=5, help="Heartbeat period in samples within one combo.")
-    parser.add_argument("--resume", action="store_true", help="Resume from existing CSV by skipping completed loss/dataset combos.")
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=5,
+        help="Heartbeat period in samples within one combo.",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from existing CSV by skipping completed loss/dataset combos.",
+    )
     return parser.parse_args()
 
 
-def _validate_subset(selected: list[str] | None, available: dict, label: str) -> list[str]:
+def _validate_subset(
+    selected: list[str] | None, available: dict, label: str
+) -> list[str]:
     if selected is None:
         return list(available.keys())
 
     missing = sorted(set(selected) - set(available.keys()))
     if missing:
-        raise ValueError(f"Unknown {label}: {missing}. Available: {list(available.keys())}")
+        raise ValueError(
+            f"Unknown {label}: {missing}. Available: {list(available.keys())}"
+        )
 
     return selected
 
@@ -313,7 +352,9 @@ def main() -> None:
             idx += 1
             key = _combo_key(loss_name, dataset_name)
             if key in completed_combo_keys:
-                log(f"[{idx}/{total}] Skipping {loss_name} x {dataset_name} (already in CSV)")
+                log(
+                    f"[{idx}/{total}] Skipping {loss_name} x {dataset_name} (already in CSV)"
+                )
                 continue
 
             log(f"[{idx}/{total}] Running {loss_name} x {dataset_name}")

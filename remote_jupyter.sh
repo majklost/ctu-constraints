@@ -8,7 +8,7 @@ LOCAL_PORT=8080
 # Clean muting for Mutagen startup checks
 mutagen project start >/dev/null 2>&1
 mutagen project resume >/dev/null 2>&1
-
+mutagen sync flush constraints >/dev/null 2>&1
 echo "=== Submitting Jupyter job to SLURM ==="
 
 # FIX: Added -q (quiet) and -T (no pseudo-terminal) flags.

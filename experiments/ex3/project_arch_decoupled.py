@@ -23,8 +23,9 @@ from constraints.computers.loss_computers import (
     SBCE_ROneSideSDFSquared,
     SOneSideSDFSquared_ROneSideSDFSquared,
 )
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
-from constraints.datatools.datasets import CachedArtificalDataset
+from constraints.factories.metrics import create_default_staged_metrics
+from constraints.datatools.datasets import CachedArtificialDataset
+from constraints.datatools.template_sources import PerSampleTemplateSource
 from constraints.lightning_wrappers.modules import ProjectLightning
 from constraints.lightning_wrappers.sample_strategy import AlwaysGt
 from constraints.losses_metrics import OneSideSDFSquare
@@ -68,49 +69,57 @@ def main(args):
         TRN_FOLDER = DATA / "trn" / "affine"
         VAL_FOLDER = DATA / "val" / "affine"
         transformer = RigidTransformer()
-        net = ProjectWithTemplateA(max_translation=0.5)
     elif args.modality == "deformed":
         TRN_FOLDER = DATA / "trn" / "deformed"
         VAL_FOLDER = DATA / "val" / "deformed"
         transformer = DeformableTransformer()
-        net = ProjectWithTemplateD()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
 
-    trn_dataset = CachedArtificalDataset(TRN_FOLDER, sdf_mode="scipy")
-    val_dataset = CachedArtificalDataset(VAL_FOLDER, sdf_mode="scipy")
-    sample_strategy = AlwaysGt()
+    trn_dataset = CachedArtificialDataset(TRN_FOLDER, sdf_mode="scipy")
+    val_dataset = CachedArtificialDataset(VAL_FOLDER, sdf_mode="scipy")
+    label_schema = trn_dataset.label_schema
+    template_source = PerSampleTemplateSource(
+        trn_dataset.template_assets, label_schema
+    )
+    if args.modality == "affine":
+        net = ProjectWithTemplateA(label_schema, max_translation=0.5)
+    else:
+        net = ProjectWithTemplateD(label_schema)
+    sample_strategy = AlwaysGt(label_schema)
 
     if args.mode == "decoupledOneSideSDF":
-        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(
+        loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema,
             seg_loss_weight=1.0, sdf_loss_weight=1.0
         )
     elif args.mode == "decoupledCE":
-        loss_computer = SBCE_RBCE(seg_loss_weight=1.0, template_loss_weight=1.0)
+        loss_computer = SBCE_RBCE(label_schema, seg_loss_weight=1.0, template_loss_weight=1.0)
     elif args.mode == "decoupledStandard":
-        loss_computer = SBCE_ROneSideSDFSquared(
+        loss_computer = SBCE_ROneSideSDFSquared(label_schema,
             seg_loss_weight=1.0, sdf_loss_weight=1.0
         )
     elif args.mode == "decoupledDSDF":
-        loss_computer = SBCE_RDSDF_MSE()
+        loss_computer = SBCE_RDSDF_MSE(label_schema)
     elif args.mode == "decoupledCentroid":
-        loss_computer = SBCE_RCentroid()
+        loss_computer = SBCE_RCentroid(label_schema)
     elif args.mode == "decoupledBlurred":
-        loss_computer = SBCE_RBlurredMSE()
+        loss_computer = SBCE_RBlurredMSE(label_schema)
     else:
         raise ValueError(f"Unknown mode: {args.mode}")
 
-    metric_computer = DefaultSegmentationMetricComputer()
+    staged_metric_computer = create_default_staged_metrics(label_schema)
 
     optimizer_callback = lambda module: torch.optim.Adam(
         module.parameters(), lr=args.learning_rate
     )
 
     module = ProjectLightning(
-        net,
-        transformer,
-        loss_computer,
-        metric_computer=metric_computer,
+        model=net,
+        spatial_transform=transformer,
+        loss_computer=loss_computer,
+        template_source=template_source,
+        label_schema=label_schema,
+        staged_metric_computer=staged_metric_computer,
         optimizer_callback=optimizer_callback,
         gt_strategy=sample_strategy,
     )

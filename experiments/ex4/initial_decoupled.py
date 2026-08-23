@@ -23,10 +23,10 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-import wandb
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader
 
+import wandb
 from constraints import (
     get_data_folder,
     get_experiment_folder,
@@ -46,8 +46,14 @@ from constraints.computers.loss_computers import (
     SOneSideSDFPlain_ROneSideSDFPlain,
     SOneSideSDFSquared_ROneSideSDFSquared,
 )
-from constraints.computers.metric_computers import DefaultSegmentationMetricComputer
-from constraints.datatools.datasets import CachedArtificalDataset
+from constraints.computers.metric_computers import StagedMetricComputer
+from constraints.datatools.datasets import CachedArtificialDataset
+from constraints.datatools.label_schema import LabelSchema
+from constraints.datatools.template_sources import (
+    PerSampleTemplateSource,
+    TemplateSource,
+)
+from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.callbacks import (
     SegmentationRegistrationEarlyStopping,
 )
@@ -103,28 +109,34 @@ def configure_reproducibility(seed: int) -> None:
 
 
 def handle_unet(
-    args, metric_computer: DefaultSegmentationMetricComputer
+    args, staged_metric_computer: StagedMetricComputer, ls: LabelSchema
 ) -> pl.LightningModule:
     return UnetLightning(
-        learning_rate=args.learning_rate, metric_computer=metric_computer
+        learning_rate=args.learning_rate,
+        staged_metric_computer=staged_metric_computer,
+        label_schema=ls,
     )
 
 
 def handle_decoupled(
     args,
     transformer: SpatialTransformer,
-    metric_computer: DefaultSegmentationMetricComputer,
+    staged_metric_computer: StagedMetricComputer,
+    label_schema: LabelSchema,
+    template_source: TemplateSource,
 ) -> pl.LightningModule:
     match args.modality:
         case "affine":
-            net = ProjectWithTemplateA(max_translation=0.5)
+            net = ProjectWithTemplateA(max_translation=0.5, ls=label_schema)
         case "deformed":
-            net = ProjectWithTemplateD()
+            net = ProjectWithTemplateD(ls=label_schema)
         case "both":
             if args.aff_def_mode == "calc":
-                net = ProjectWithTemplateBCalcAff(max_translation=0.5)
+                net = ProjectWithTemplateBCalcAff(
+                    label_schema=label_schema, max_translation=0.5
+                )
             elif args.aff_def_mode == "deep":
-                net = ProjectWithTemplateBDeepAff(max_translation=0.5)
+                net = ProjectWithTemplateBDeepAff(ls=label_schema, max_translation=0.5)
             else:
                 raise ValueError(f"Unknown aff_def_mode: {args.aff_def_mode}")
         case _:
@@ -132,25 +144,25 @@ def handle_decoupled(
 
     match args.mode:
         case "BCE_OneSideSDFSquared":
-            loss_computer = SBCE_ROneSideSDFSquared()
+            loss_computer = SBCE_ROneSideSDFSquared(label_schema)
         case "BCE_OneSideSDFPlain":
-            loss_computer = SBCE_ROneSideSDF()
+            loss_computer = SBCE_ROneSideSDF(label_schema)
         case "BCE_BCE":
-            loss_computer = SBCE_RBCE()
+            loss_computer = SBCE_RBCE(label_schema)
         case "BCE_CentroidLoss":
-            loss_computer = SBCE_RCentroid()
+            loss_computer = SBCE_RCentroid(label_schema)
         case "BCE_BlurredLoss":
-            loss_computer = SBCE_RBlurredMSE()
+            loss_computer = SBCE_RBlurredMSE(label_schema)
         case "BCE_DSDF_MSE":
-            loss_computer = SBCE_RDSDF_MSE()
+            loss_computer = SBCE_RDSDF_MSE(label_schema)
         case "BCE_SDFTEMPLATE_MSE":
-            loss_computer = SBCE_RMSE_SDFTEMPLATE()
+            loss_computer = SBCE_RMSE_SDFTEMPLATE(label_schema)
         case "BCE_SDFTEMPLATE_OneSideSDFSQUARE":
-            loss_computer = SBCE_ROneSideSDF_SDFTEMPLATE()
+            loss_computer = SBCE_ROneSideSDF_SDFTEMPLATE(label_schema)
         case "OneSideSDFSquared_OneSideSDFSquared":
-            loss_computer = SOneSideSDFSquared_ROneSideSDFSquared()
+            loss_computer = SOneSideSDFSquared_ROneSideSDFSquared(label_schema)
         case "OneSideSDFPlain_OneSideSDFPlain":
-            loss_computer = SOneSideSDFPlain_ROneSideSDFPlain()
+            loss_computer = SOneSideSDFPlain_ROneSideSDFPlain(label_schema)
         case _:
             raise ValueError(f"Unknown mode: {args.mode}")
     optimizer_callback = lambda module: torch.optim.Adam(
@@ -159,7 +171,7 @@ def handle_decoupled(
 
     match args.learning_sample_strategy:
         case "always_gt":
-            sample_strategy = AlwaysGt()
+            sample_strategy = AlwaysGt(label_schema=label_schema)
         case "no_gt":
             sample_strategy = NoGt(detach_seg=True)
         case _:
@@ -169,7 +181,7 @@ def handle_decoupled(
 
     match args.validation_sample_strategy:
         case "always_gt":
-            validation_strategy = AlwaysGt()
+            validation_strategy = AlwaysGt(label_schema=label_schema)
         case "no_gt":
             validation_strategy = NoGt(detach_seg=True)
         case "none":
@@ -183,10 +195,12 @@ def handle_decoupled(
         model=net,
         spatial_transform=transformer,
         loss_computer=loss_computer,
-        metric_computer=metric_computer,
+        staged_metric_computer=staged_metric_computer,
         optimizer_callback=optimizer_callback,
         gt_strategy=sample_strategy,
         validation_strategy=validation_strategy,
+        label_schema=label_schema,
+        template_source=template_source,
     )
     return module
 
@@ -220,24 +234,32 @@ def main(args):
         transformer = SequentialTransformer()
     else:
         raise ValueError(f"Unknown modality: {args.modality}")
-
-    metric_computer = DefaultSegmentationMetricComputer()
-
-    if args.mode == "UNET":
-        module = handle_unet(args, metric_computer)
-    else:
-        module = handle_decoupled(args, transformer, metric_computer)
-
     return_template_sdf = args.mode in [
         "BCE_SDFTEMPLATE_MSE",
         "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
     ]
-    trn_dataset = CachedArtificalDataset(
+    trn_dataset = CachedArtificialDataset(
         TRN_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
     )
-    val_dataset = CachedArtificalDataset(
+    val_dataset = CachedArtificialDataset(
         VAL_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
     )
+    template_source = PerSampleTemplateSource(
+        trn_dataset.template_assets, trn_dataset.label_schema
+    )
+
+    staged_metric_computer = create_default_staged_metrics(trn_dataset.label_schema)
+
+    if args.mode == "UNET":
+        module = handle_unet(args, staged_metric_computer, ls=trn_dataset.label_schema)
+    else:
+        module = handle_decoupled(
+            args,
+            transformer,
+            staged_metric_computer,
+            label_schema=trn_dataset.label_schema,
+            template_source=template_source,
+        )
 
     BATCH_SIZE = args.batch_size
     NUM_WORKERS = args.num_workers
