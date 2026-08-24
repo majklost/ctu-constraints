@@ -15,18 +15,18 @@ from constraints.datatools.datasets import (
     write_bad_indices,
 )
 from constraints.generators.generators import (
-    ArteryGeneratorRigid,
-    ArteryGeneratorDeformed,
-    RigidSampleBounds,
     NO_RIGID,
     ROT_ONLY,
     SMALL,
+    ArteryGeneratorDeformed,
+    ArteryGeneratorRigid,
+    RigidSampleBounds,
 )
 from constraints.utils import (
+    foreground_channels,
     save_manifest,
     signed_distance_kornia,
     signed_distance_scipy,
-    foreground_channels,
 )
 
 
@@ -55,9 +55,6 @@ def _prepare_files(
 
 def _save_template(output_dir: Path, template: torch.Tensor):
     np.save(output_dir / "template.npy", _to_numpy(template))
-
-
-
 
 
 def _resolve_rigid_sample_specs(rigid_mode: str) -> RigidSampleBounds:
@@ -119,7 +116,9 @@ def create_rigid(args) -> None:
         if args.sdf_type in ("scipy", "both"):
             files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(foreground_mask))
         if args.sdf_type in ("kornia", "both"):
-            files["sdf_kornia"][idx] = _to_numpy(signed_distance_kornia(foreground_mask))
+            files["sdf_kornia"][idx] = _to_numpy(
+                signed_distance_kornia(foreground_mask)
+            )
 
         if idx == 0 and template.shape != first_sample["template"].shape:
             raise RuntimeError("Template shape changed across samples unexpectedly.")
@@ -127,7 +126,9 @@ def create_rigid(args) -> None:
     for mmap in files.values():
         mmap.flush()
     bad_indices = write_bad_indices(output_dir, check_wall_integrity=False)
-    print(f"Saved {len(bad_indices)} invalid sample indices to {output_dir / 'bad_indices.csv'}")
+    print(
+        f"Saved {len(bad_indices)} invalid sample indices to {output_dir / 'bad_indices.csv'}"
+    )
     save_manifest(output_dir, args)
 
 
@@ -181,7 +182,9 @@ def create_deformed(args) -> None:
         if args.sdf_type in ("scipy", "both"):
             files["sdf_scipy"][idx] = _to_numpy(signed_distance_scipy(foreground_mask))
         if args.sdf_type in ("kornia", "both"):
-            files["sdf_kornia"][idx] = _to_numpy(signed_distance_kornia(foreground_mask))
+            files["sdf_kornia"][idx] = _to_numpy(
+                signed_distance_kornia(foreground_mask)
+            )
 
         if idx == 0 and template.shape != first_sample["template"].shape:
             raise RuntimeError("Template shape changed across samples unexpectedly.")
@@ -189,7 +192,9 @@ def create_deformed(args) -> None:
     for mmap in files.values():
         mmap.flush()
     bad_indices = write_bad_indices(output_dir, check_wall_integrity=False)
-    print(f"Saved {len(bad_indices)} invalid sample indices to {output_dir / 'bad_indices.csv'}")
+    print(
+        f"Saved {len(bad_indices)} invalid sample indices to {output_dir / 'bad_indices.csv'}"
+    )
     save_manifest(output_dir, args)
 
 

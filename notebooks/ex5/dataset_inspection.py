@@ -24,22 +24,30 @@
 import pandas as pd
 import torch
 from matplotlib import pyplot as plt
+from pathlib import Path
+from constraints import show_torch_image, show_torch_mask,get_data_folder
+from constraints.datatools.datasets import CachedArtificialDataset
 
-from constraints.computers.metric_computers import StagedMetricComputer
-from constraints.transforms.transformers import RigidTransformer
 
 # %%
-
-
-plt.imshow(torch.rand((200, 200, 3)).numpy())
-
-# %%
-pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+DATAF = get_data_folder()
+DATAS = DATAF/"artificial"/"downloaded"/"deformed"/"trn"
+print(list(DATAF.iterdir()))
 
 # %%
-print(torch.cuda.is_available())
+dset = CachedArtificialDataset(DATAS,return_transform=True,return_template_sdf=True)
+sample = dset[0]
+show_torch_mask(sample['template'])
 
 # %%
-print("TEST")
+# show_torch_image(sample['image'],cmap="grey")
+
+
+
+show_torch_mask(sample['target_labels'])
+print(sample["target_labels"].unique())
+
+# %%
+show_torch_image(sample['image'],cmap="grey")
 
 # %%
