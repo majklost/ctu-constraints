@@ -10,7 +10,6 @@ from constraints.types import (
     StepContext,
 )
 
-
 SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen"],
     [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1), (0.1, 0.7, 0.1)],
@@ -91,4 +90,31 @@ def test_segmentation_overlay_skips_unscheduled_context_or_absent_ids() -> None:
     assert overlay_computer.compute(
         metric_input,
         StepContext(stage="val", batch_idx=0, current_epoch=2, global_step=0),
+    ) == {}
+
+
+def test_segmentation_overlay_uses_first_samples_from_first_epoch_batch() -> None:
+    overlay_computer = SegmentationOverlayComputer(
+        SCHEMA,
+        OverlayPolicy(
+            stages=frozenset({"val"}),
+            every_n_epochs=1,
+            first_n_samples=2,
+        ),
+    )
+    metric_input = MetricInput(
+        image=torch.zeros((3, 1, 2, 2)),
+        segmentation_logits=_channels(torch.zeros((3, 2, 2), dtype=torch.long)),
+        sample_ids=("first", "second", "third"),
+    )
+
+    overlays = overlay_computer.compute(
+        metric_input,
+        StepContext(stage="val", batch_idx=0, current_epoch=1, global_step=0),
+    )
+
+    assert list(overlays) == ["labels/first", "labels/second"]
+    assert overlay_computer.compute(
+        metric_input,
+        StepContext(stage="val", batch_idx=1, current_epoch=1, global_step=1),
     ) == {}

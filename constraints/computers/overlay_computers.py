@@ -35,7 +35,11 @@ class SegmentationOverlayComputer(OverlayComputer):
     def compute(
         self, metric_input: MetricInput, context: StepContext
     ) -> dict[str, OverlayResult]:
-        if not self._policy.allows(context) or not metric_input.sample_ids:
+        if (
+            not self._policy.allows(context)
+            or not self._policy.selects_batch(context)
+            or not metric_input.sample_ids
+        ):
             return {}
 
         positions = self._policy.batch_positions(metric_input.sample_ids)

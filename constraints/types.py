@@ -180,16 +180,18 @@ class OverlayResult:
 
 @dataclass(frozen=True)
 class OverlayPolicy:
-    """Immutable scheduling and stable-sample selection for an overlay computer.
+    """Immutable scheduling and sample selection for an overlay computer.
 
     An empty collection of overlay computers disables overlays.  A configured
     policy must name its target stages explicitly; it never uses ``None`` as a
-    special "all stages" value.
+    special "all stages" value.  Select either stable ``sample_ids`` or the
+    first ``first_n_samples`` in the first batch of each scheduled epoch.
     """
 
     stages: frozenset[STAGES]
     every_n_epochs: int
-    sample_ids: tuple[str, ...]
+    sample_ids: tuple[str, ...] = ()
+    first_n_samples: int = 0
 
     def __post_init__(self) -> None:
         valid_stages = set(get_args(STAGES))
@@ -200,6 +202,16 @@ class OverlayPolicy:
             raise ValueError(f"OverlayPolicy has unknown stages: {unknown_stages}")
         if self.every_n_epochs <= 0:
             raise ValueError("OverlayPolicy.every_n_epochs must be > 0")
+        if self.first_n_samples < 0:
+            raise ValueError("OverlayPolicy.first_n_samples must be >= 0")
+        if self.sample_ids and self.first_n_samples:
+            raise ValueError(
+                "OverlayPolicy must use either sample_ids or first_n_samples, not both"
+            )
+        if not self.sample_ids and not self.first_n_samples:
+            raise ValueError(
+                "OverlayPolicy must configure sample_ids or first_n_samples"
+            )
         if any(not sample_id for sample_id in self.sample_ids):
             raise ValueError("OverlayPolicy.sample_ids must not contain empty IDs")
         if len(set(self.sample_ids)) != len(self.sample_ids):
@@ -212,12 +224,19 @@ class OverlayPolicy:
             and context.current_epoch % self.every_n_epochs == 0
         )
 
-    def batch_positions(self, batch_sample_ids: Sequence[str]) -> tuple[int, ...]:
-        """Resolve configured IDs in O(batch_size + configured_samples) time.
+    def selects_batch(self, context: StepContext) -> bool:
+        """Whether this batch can contain samples selected by the policy."""
+        return bool(self.sample_ids) or context.batch_idx == 0
 
-        Positions are returned in policy order, keeping artifact output stable
-        regardless of DataLoader ordering or batch size.
+    def batch_positions(self, batch_sample_ids: Sequence[str]) -> tuple[int, ...]:
+        """Resolve selected samples to batch positions.
+
+        Stable IDs are returned in policy order.  ``first_n_samples`` returns
+        the leading positions in batch order; callers should use
+        :meth:`selects_batch` to limit that mode to the first batch of an epoch.
         """
+        if self.first_n_samples:
+            return tuple(range(min(self.first_n_samples, len(batch_sample_ids))))
         positions_by_id = {
             sample_id: position for position, sample_id in enumerate(batch_sample_ids)
         }

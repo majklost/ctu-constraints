@@ -20,12 +20,30 @@ def test_overlay_policy_resolves_global_ids_in_policy_order() -> None:
     )
 
 
+def test_overlay_policy_selects_first_samples_of_the_epoch() -> None:
+    policy = OverlayPolicy(
+        stages=frozenset({"val"}),
+        every_n_epochs=1,
+        first_n_samples=2,
+    )
+
+    assert policy.batch_positions(("sample-a", "sample-b", "sample-c")) == (0, 1)
+    assert policy.selects_batch(
+        StepContext(stage="val", batch_idx=0, current_epoch=1, global_step=10)
+    )
+    assert not policy.selects_batch(
+        StepContext(stage="val", batch_idx=1, current_epoch=1, global_step=11)
+    )
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
         ({"stages": frozenset()}, "must not be empty"),
         ({"every_n_epochs": 0}, "must be > 0"),
         ({"sample_ids": ("a", "a")}, "must be unique"),
+        ({"sample_ids": (), "first_n_samples": 0}, "must configure"),
+        ({"sample_ids": ("a",), "first_n_samples": 2}, "either sample_ids"),
     ],
 )
 def test_overlay_policy_validates_configuration(

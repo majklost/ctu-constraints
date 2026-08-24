@@ -33,6 +33,7 @@ from constraints import (
 )
 from constraints.computers.loss_computers import ProjectLossComputer
 from constraints.computers.metric_computers import StagedMetricComputer
+from constraints.computers.overlay_computers import SegmentationOverlayComputer
 from constraints.datatools.datasets import CachedArtificialDataset
 from constraints.datatools.label_schema import LabelSchema
 from constraints.datatools.template_sources import (
@@ -60,6 +61,7 @@ from constraints.transforms.transformers import (
     SequentialTransformer,
     SpatialTransformer,
 )
+from constraints.types import OverlayPolicy
 
 FOLDER = get_experiment_folder(Path("ex4") / "initial_decoupled")
 DATA = get_data_folder() / "artificial" / "downloaded"
@@ -134,7 +136,9 @@ def handle_decoupled(
                     label_schema=label_schema, max_translation=0.5
                 )
             elif args.rigid_def_mode == "deep":
-                net = ProjectWithTemplateBDeepRigid(ls=label_schema, max_translation=0.5)
+                net = ProjectWithTemplateBDeepRigid(
+                    ls=label_schema, max_translation=0.5
+                )
             else:
                 raise ValueError(f"Unknown rigid_def_mode: {args.rigid_def_mode}")
         case _:
@@ -175,6 +179,14 @@ def handle_decoupled(
                 f"Unknown validation_sample_strategy: {args.validation_sample_strategy}"
             )
 
+    overlay_policy = OverlayPolicy(
+        stages=frozenset({"val"}),
+        every_n_epochs=1,
+        first_n_samples=2,
+    )
+
+    overlay_computer = SegmentationOverlayComputer(label_schema, overlay_policy)
+
     module = ProjectLightning(
         model=net,
         spatial_transform=transformer,
@@ -185,6 +197,7 @@ def handle_decoupled(
         validation_strategy=validation_strategy,
         label_schema=label_schema,
         template_source=template_source,
+        overlay_computers=(overlay_computer,),
     )
     return module
 
