@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 
 from constraints import get_data_folder, get_experiment_folder
 from constraints.datatools.datasets import CachedArtificialDataset
+from constraints.lightning_wrappers.callbacks import InferenceWeightsCheckpoint
 from constraints.lightning_wrappers.modules import UnetLightning as UnetProjectLightning
 from constraints.logging.wandb_factory import create_wandb_logger
 
@@ -69,10 +70,20 @@ def main(args):
         devices="auto",
         logger=logger,
         log_every_n_steps=1,
-        enable_checkpointing=False,
+        enable_checkpointing=not args.smoke_test,
         enable_progress_bar=True,
         fast_dev_run=args.smoke_test,
-        callbacks=[],
+        callbacks=(
+            []
+            if args.smoke_test
+            else [
+                InferenceWeightsCheckpoint(
+                    experiment="ex3",
+                    filename=FILE_NAME,
+                    run_id=wandb_logger.experiment.id,
+                )
+            ]
+        ),
     )
 
     trainer.fit(module, train_dataloaders=trn_loader, val_dataloaders=val_loader)

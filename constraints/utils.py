@@ -34,6 +34,19 @@ def get_experiment_folder(experiment_name: str | Path) -> Path:
     return folder
 
 
+def get_weights_folder(
+    experiment_name: str | Path, filename: str | Path, run_id: str
+) -> Path:
+    """Return the local inference-weight folder for one experiment run.
+
+    ``weights.ckpt`` is deliberately excluded from Mutagen synchronization while
+    the surrounding directory and its metadata remain synchronized.
+    """
+    folder = REPO_ROOT / "synced" / "weights" / experiment_name / filename / run_id
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def get_data_folder() -> Path:
     folder = REPO_ROOT / "data"
     assert folder.exists(), f"Data folder does not exist: {folder}"

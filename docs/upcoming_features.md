@@ -23,7 +23,7 @@ experiment matrix.
   of the deformation field.
   - Reuse the conventions and machinery already used by VoxelMorph, including
     the choice of field representation, measurement units, and reduction.
-      - make use of `neurite` package if convenient... may look to implementation at `notebooks/ex1/voxelmorph_test_MNIST.ipynb` for inspiration
+    - make use of `neurite` pack0age if convenient... may look to implementation at `notebooks/ex1/voxelmorph_test_MNIST.ipynb` for inspiration
   - Expose the regularization weight in experiment configuration.
   - Log both the unweighted term and its weighted contribution to total loss.
 - [x] Add epoch-level Jacobian-determinant diagnostics for the final deformation:
@@ -48,32 +48,33 @@ experiment matrix.
 
 ## 1. Model weight saving
 
-- [ ] Implement inference-weight saving using `model_state_dict`; training does
+- [x] Implement inference-weight saving using a weights-only Lightning checkpoint;
+  training does
   not need to be resumable.
-- [ ] Select the saved checkpoint using the best validation registration metric.
+- [x] Select the saved checkpoint using the best validation registration metric.
   Fall back to the best validation segmentation metric when registration is not
   available, as for the UNet-only baseline.
-- [ ] Add a `get_weights_folder` helper analogous to
+- [x] Add a `get_weights_folder` helper analogous to
   `get_experiment_folder`, with the structure:
 
   ```text
   synced/weights/<experiment>/<filename>/<run-id>/
-      weights.pth
+      weights.ckpt
       metadata.json
   ```
 
-- [ ] Store at least the following in `metadata.json`:
+- [x] Store at least the following in `metadata.json`:
   - W&B run name, run ID, and URL;
   - creation time;
   - experiment filename and command-line arguments;
   - Git commit hash and dirty-worktree status;
   - Slurm job ID, when available;
-  - checkpoint-selection metric, value, and epoch;
+  - checkpoint-selection metric and value;
   - model construction/configuration information needed to load the state dict;
   - weight-file size.
-- [ ] Configure Mutagen so the folder hierarchy and metadata are synchronized,
-  while `weights.pth` files remain local and are not synchronized.
-- [ ] Add a round-trip smoke test: save weights, construct a fresh model, load
+- [x] Configure Mutagen so the folder hierarchy and metadata are synchronized,
+  while `weights.ckpt` files remain local and are not synchronized.
+- [x] Add a round-trip smoke test: save weights, construct a fresh model, load
   the state dict, and verify identical outputs on a fixed input.
 
 ## 2. Harder artificial datasets

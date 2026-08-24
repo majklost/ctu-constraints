@@ -43,6 +43,7 @@ from constraints.datatools.template_sources import (
 from constraints.factories.losses import create_loss_computer
 from constraints.factories.metrics import create_default_staged_metrics
 from constraints.lightning_wrappers.callbacks import (
+    InferenceWeightsCheckpoint,
     SegmentationRegistrationEarlyStopping,
 )
 from constraints.lightning_wrappers.modules import ProjectLightning, UnetLightning
@@ -319,6 +320,13 @@ def main(args):
                 registration_min_delta=args.registration_early_stopping_min_delta,
             )
         )
+        callbacks.append(
+            InferenceWeightsCheckpoint(
+                experiment="ex4",
+                filename=FILE_NAME,
+                run_id=wandb_logger.experiment.id,
+            )
+        )
 
     trainer = pl.Trainer(
         max_epochs=EPOCHS,
@@ -327,7 +335,7 @@ def main(args):
         logger=logger,
         log_every_n_steps=1,
         deterministic="warn",
-        enable_checkpointing=False,
+        enable_checkpointing=not args.smoke_test,
         enable_progress_bar=True,
         fast_dev_run=args.smoke_test,
         callbacks=callbacks,
