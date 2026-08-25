@@ -17,3 +17,12 @@
 - After changing a paired notebook `.py`, run:
   `.venv/bin/jupytext --sync path/to/notebook.py`
   unless the user has the paired notebook open with unsaved changes.
+
+## Editing Jupytext notebooks
+
+- Before editing a canonical `notebooks/**/*.py` file, check whether its paired
+  `.ipynb` is open in the user's editor.
+- If it is open, ask the user to close it or save and close it before editing.
+- After editing the `.py`, run:
+  `.venv/bin/jupytext --sync path/to/notebook.py`
+- Do not edit the generated `.ipynb` directly.

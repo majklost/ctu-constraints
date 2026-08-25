@@ -4,8 +4,10 @@ from scipy.ndimage import binary_dilation, generate_binary_structure
 
 from constraints.generators.parametrization.plaque_generators import (
     PowerPlaqueParameters,
+    create_anatomical_target_label_mask,
+    create_artery_label_mask,
+    create_grayscale_image_from_label_mask,
     create_power_plaque,
-    render_artery,
 )
 from constraints.generators.parametrization.plaque_samplers import (
     FloatRange,
@@ -16,8 +18,8 @@ from constraints.generators.parametrization.plaque_samplers import (
 from constraints.generators.types import ArteryClass, ArterySpec, PlaqueSpec
 
 
-def test_render_artery_creates_background_wall_and_lumen() -> None:
-    labels = render_artery(
+def test_create_artery_label_mask_creates_background_wall_and_lumen() -> None:
+    labels = create_artery_label_mask(
         ArterySpec(
             image_size=(65, 65),
             center_yx_px=(32, 32),
@@ -42,7 +44,7 @@ def test_power_plaque_touches_lumen_and_wall_but_not_background() -> None:
         ),
         lumen_radius_px=lumen_radius,
     )
-    labels = render_artery(
+    labels = create_artery_label_mask(
         ArterySpec(
             image_size=(97, 97),
             center_yx_px=(48, 48),
@@ -66,7 +68,7 @@ def test_custom_radial_functions_can_cross_wrapped_angle_boundary() -> None:
         inner_radius=lambda offset: np.full_like(offset, 15.0),
         outer_radius=lambda offset: np.full_like(offset, 22.0),
     )
-    labels = render_artery(
+    labels = create_artery_label_mask(
         ArterySpec(
             image_size=(65, 65),
             center_yx_px=(32, 32),
@@ -89,7 +91,7 @@ def test_renderer_rejects_plaque_reaching_background() -> None:
     )
 
     with pytest.raises(ValueError, match="must preserve wall"):
-        render_artery(
+        create_artery_label_mask(
             ArterySpec(
                 image_size=(65, 65),
                 lumen_radius_px=20,
@@ -109,7 +111,7 @@ def test_wallless_artery_allows_plaque_to_reach_background_boundary() -> None:
     )
     plaque = create_power_plaque(parameters, lumen_radius_px=lumen_radius)
 
-    labels = render_artery(
+    labels = create_artery_label_mask(
         ArterySpec(
             image_size=(65, 65),
             center_yx_px=(32, 32),
@@ -171,6 +173,32 @@ def test_sampling_repeats_with_same_seed() -> None:
     assert len(first) == 4
 
 
+def test_batch_sampling_accepts_one_range_configuration_per_plaque() -> None:
+    first_ranges = PowerPlaqueSamplingRanges(angle_rad=FloatRange.fixed(0.25))
+    second_ranges = PowerPlaqueSamplingRanges(angle_rad=FloatRange.fixed(1.25))
+
+    samples = sample_power_plaque_parameter_batch(
+        (first_ranges, second_ranges),
+        2,
+        lumen_radius_px=73,
+        wall_thickness_px=12,
+        rng=np.random.default_rng(42),
+    )
+
+    assert tuple(sample.angle_rad for sample in samples) == (0.25, 1.25)
+
+
+def test_batch_sampling_rejects_wrong_number_of_range_configurations() -> None:
+    with pytest.raises(ValueError, match="expected 2.*got 1"):
+        sample_power_plaque_parameter_batch(
+            (PowerPlaqueSamplingRanges(),),
+            2,
+            lumen_radius_px=73,
+            wall_thickness_px=12,
+            rng=np.random.default_rng(42),
+        )
+
+
 def test_sampling_stays_inside_ranges() -> None:
     ranges = PowerPlaqueSamplingRanges(
         angle_rad=FloatRange(-1, 1),
@@ -192,3 +220,50 @@ def test_sampling_stays_inside_ranges() -> None:
     assert all(5 <= sample.inward_depth_px <= 20 for sample in samples)
     assert all(2 <= sample.wall_depth_px <= 7 for sample in samples)
     assert all(0.3 <= sample.shape_power <= 1.5 for sample in samples)
+
+
+def test_fake_plaque_is_separate_for_synthesis_and_boundary_in_target() -> None:
+    lumen_radius = 30.0
+    fake_plaque = create_power_plaque(
+        PowerPlaqueParameters(
+            angle_rad=0,
+            angular_width_rad=np.deg2rad(35),
+            inward_depth_px=8,
+            wall_depth_px=3,
+        ),
+        lumen_radius_px=lumen_radius,
+    )
+    synthesis_mask = create_artery_label_mask(
+        ArterySpec(
+            image_size=(97, 97),
+            center_yx_px=(48, 48),
+            lumen_radius_px=lumen_radius,
+            wall_thickness_px=8,
+            fake_plaques=(fake_plaque,),
+        )
+    )
+
+    target_mask = create_anatomical_target_label_mask(synthesis_mask)
+
+    assert np.any(synthesis_mask == ArteryClass.FAKE_PLAQUE)
+    assert not np.any(target_mask == ArteryClass.FAKE_PLAQUE)
+    assert np.all(
+        target_mask[synthesis_mask == ArteryClass.FAKE_PLAQUE]
+        == ArteryClass.BOUNDARY
+    )
+
+
+def test_fake_and_real_plaque_can_have_same_grayscale_intensity() -> None:
+    label_mask = np.array(
+        [[ArteryClass.PLAQUE, ArteryClass.FAKE_PLAQUE]], dtype=np.uint8
+    )
+
+    image = create_grayscale_image_from_label_mask(
+        label_mask,
+        {
+            ArteryClass.PLAQUE: 0.7,
+            ArteryClass.FAKE_PLAQUE: 0.7,
+        },
+    )
+
+    np.testing.assert_array_equal(image, np.array([[0.7, 0.7]], dtype=np.float32))

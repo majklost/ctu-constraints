@@ -15,6 +15,7 @@ class ArteryClass(IntEnum):
     BOUNDARY = 1
     LUMEN = 2
     PLAQUE = 3
+    FAKE_PLAQUE = 4
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,6 @@ class ArterySpec:
     wall_thickness_px: float = 12.0
     plaques: tuple[PlaqueSpec, ...] = ()
     fake_plaques: tuple[PlaqueSpec, ...] = ()
-    
 
     def __post_init__(self) -> None:
         height, width = self.image_size

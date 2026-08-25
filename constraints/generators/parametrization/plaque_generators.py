@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite, pi
 
@@ -82,12 +83,17 @@ def create_power_plaque(
     )
 
 
-def render_artery(spec: ArterySpec) -> LabelMap:
-    """Rasterize an artery specification into a ``[H, W]`` class-ID map.
+def create_artery_label_mask(spec: ArterySpec) -> LabelMap:
+    """Rasterize an artery specification into a synthesis class-ID mask.
 
     NumPy evaluates the radial interval at every pixel directly. This avoids the
     angular sampling and polygon-edge artifacts that ``cv2.fillPoly`` would add
     for shapes already defined as radial functions.
+
+    The returned mask may contain :attr:`ArteryClass.FAKE_PLAQUE`. This class is
+    useful for image synthesis but must be converted to the appropriate
+    anatomical target class before training. Real plaques take precedence where
+    real and fake plaques overlap.
     """
     height, width = spec.image_size
     center_y, center_x = spec.center
@@ -101,17 +107,89 @@ def render_artery(spec: ArterySpec) -> LabelMap:
     labels[radius <= spec.outer_radius_px] = ArteryClass.BOUNDARY
     labels[radius <= spec.lumen_radius_px] = ArteryClass.LUMEN
 
-    plaque_mask = np.zeros(spec.image_size, dtype=bool)
-    for plaque in spec.plaques:
-        plaque_mask |= _render_plaque(
+    fake_plaque_mask = _combine_plaque_masks(
+        radius,
+        angle,
+        spec.fake_plaques,
+        artery_outer_radius_px=spec.outer_radius_px,
+        has_wall=spec.wall_thickness_px > 0,
+    )
+    labels[fake_plaque_mask] = ArteryClass.FAKE_PLAQUE
+
+    plaque_mask = _combine_plaque_masks(
+        radius,
+        angle,
+        spec.plaques,
+        artery_outer_radius_px=spec.outer_radius_px,
+        has_wall=spec.wall_thickness_px > 0,
+    )
+    labels[plaque_mask] = ArteryClass.PLAQUE
+    return labels
+
+
+def create_anatomical_target_label_mask(
+    synthesis_label_mask: LabelMap,
+    *,
+    fake_plaque_target: ArteryClass = ArteryClass.BOUNDARY,
+) -> LabelMap:
+    """Remove the image-only fake-plaque class from a training target.
+
+    Boundary is the default target because fake plaques represent plaque-like
+    wall appearance rather than real plaque anatomy. For a wall-less label
+    schema, callers may explicitly choose another underlying target, typically
+    :attr:`ArteryClass.LUMEN`.
+    """
+    if synthesis_label_mask.ndim != 2:
+        raise ValueError("synthesis_label_mask must have shape [H, W]")
+    if fake_plaque_target in {ArteryClass.PLAQUE, ArteryClass.FAKE_PLAQUE}:
+        raise ValueError("fake_plaque_target must be a non-plaque anatomical class")
+
+    target = np.array(synthesis_label_mask, dtype=np.uint8, copy=True)
+    target[target == ArteryClass.FAKE_PLAQUE] = fake_plaque_target
+    return target
+
+
+def create_grayscale_image_from_label_mask(
+    label_mask: LabelMap,
+    class_intensities: Mapping[ArteryClass, float],
+) -> NDArray[np.float32]:
+    """Map every class in a label mask to a configured grayscale intensity."""
+    if label_mask.ndim != 2:
+        raise ValueError("label_mask must have shape [H, W]")
+
+    image = np.empty(label_mask.shape, dtype=np.float32)
+    for class_id in np.unique(label_mask):
+        try:
+            artery_class = ArteryClass(int(class_id))
+        except ValueError as error:
+            raise ValueError(f"unknown artery class ID: {class_id}") from error
+        if artery_class not in class_intensities:
+            raise ValueError(f"missing grayscale intensity for {artery_class.name}")
+        intensity = float(class_intensities[artery_class])
+        if not isfinite(intensity):
+            raise ValueError(f"intensity for {artery_class.name} must be finite")
+        image[label_mask == class_id] = intensity
+    return image
+
+
+def _combine_plaque_masks(
+    radius: FloatArray,
+    angle: FloatArray,
+    plaques: tuple[PlaqueSpec, ...],
+    *,
+    artery_outer_radius_px: float,
+    has_wall: bool,
+) -> NDArray[np.bool_]:
+    combined = np.zeros(radius.shape, dtype=bool)
+    for plaque in plaques:
+        combined |= _render_plaque(
             radius,
             angle,
             plaque,
-            artery_outer_radius_px=spec.outer_radius_px,
-            has_wall=spec.wall_thickness_px > 0,
+            artery_outer_radius_px=artery_outer_radius_px,
+            has_wall=has_wall,
         )
-    labels[plaque_mask] = ArteryClass.PLAQUE
-    return labels
+    return combined
 
 
 def _render_plaque(

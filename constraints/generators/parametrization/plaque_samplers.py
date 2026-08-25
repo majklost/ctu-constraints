@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from math import isfinite, pi
+from typing import Self
 
 import numpy as np
 
@@ -23,6 +24,10 @@ class FloatRange:
         if self.minimum == self.maximum:
             return self.minimum
         return float(rng.uniform(self.minimum, self.maximum))
+
+    @classmethod
+    def fixed(cls, number: float) -> Self:
+        return cls(minimum=number, maximum=number)
 
 
 @dataclass(frozen=True)
@@ -89,22 +94,37 @@ def sample_power_plaque_parameters(
 
 
 def sample_power_plaque_parameter_batch(
-    ranges: PowerPlaqueSamplingRanges,
+    ranges: PowerPlaqueSamplingRanges | tuple[PowerPlaqueSamplingRanges, ...],
     count: int,
     *,
     lumen_radius_px: float,
     wall_thickness_px: float,
     rng: np.random.Generator,
 ) -> tuple[PowerPlaqueParameters, ...]:
-    """Sample ``count`` independent plaques from the same ranges."""
+    """Sample ``count`` plaques from shared or per-plaque ranges.
+
+    A single :class:`PowerPlaqueSamplingRanges` is reused for every plaque. A
+    tuple supplies one range configuration per plaque and must have length
+    ``count``.
+    """
     if count < 0:
         raise ValueError("count must be non-negative")
+
+    if isinstance(ranges, tuple):
+        if len(ranges) != count:
+            raise ValueError(
+                f"expected {count} plaque range configurations, got {len(ranges)}"
+            )
+        ranges_per_plaque = ranges
+    else:
+        ranges_per_plaque = (ranges,) * count
+
     return tuple(
         sample_power_plaque_parameters(
-            ranges,
+            plaque_ranges,
             lumen_radius_px=lumen_radius_px,
             wall_thickness_px=wall_thickness_px,
             rng=rng,
         )
-        for _ in range(count)
+        for plaque_ranges in ranges_per_plaque
     )

@@ -1,6 +1,6 @@
 {
   // Use Ruff for everything (Linting + Formatting)
-  "python.analysis.importFormat": "relative",
+  "python.analysis.importFormat": "absolute",
   "python.analysis.exclude": [
     "**/node_modules",
     "**/__pycache__",

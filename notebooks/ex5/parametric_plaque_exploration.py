@@ -379,8 +379,8 @@ from matplotlib.patches import Patch
 
 from constraints.generators.parametrization import (
     PowerPlaqueParameters,
+    create_artery_label_mask,
     create_power_plaque,
-    render_artery,
 )
 from constraints.generators.types import ArterySpec
 
@@ -406,7 +406,7 @@ for shape_power in shape_powers:
     )
     plaque = create_power_plaque(parameters, lumen_radius_px=LUMEN_RADIUS_PX)
     label_maps.append(
-        render_artery(
+        create_artery_label_mask(
             ArterySpec(
                 image_size=IMAGE_SIZE,
                 lumen_radius_px=LUMEN_RADIUS_PX,
@@ -489,7 +489,7 @@ from constraints.generators.parametrization.plaque_samplers import sample_power_
 params =sample_power_plaque_parameter_batch(power_sample_range,3,lumen_radius_px=LUMEN_RADIUS_PX,wall_thickness_px=WALL_THICKNESS_PX,rng=rng)
 plaques = map(lambda x: create_power_plaque(x,LUMEN_RADIUS_PX),params)
 
-label_map =         render_artery(
+label_map = create_artery_label_mask(
             ArterySpec(
                 image_size=IMAGE_SIZE,
                 lumen_radius_px=LUMEN_RADIUS_PX,
