@@ -15,6 +15,6 @@ def __getattr__(name: str) -> Any:
     if name not in _LEGACY_GENERATOR_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-    from . import generators
+    from . import deprecated_generators
 
-    return getattr(generators, name)
+    return getattr(deprecated_generators, name)

@@ -26,7 +26,12 @@ ROT_ONLY = RigidSampleBounds(
 )
 
 SMALL = RigidSampleBounds(
-    dx_min=-0.08, dx_max=0.08, dy_min=-0.08, dy_max=0.08, angle_min=-np.pi / 18, angle_max=np.pi / 18
+    dx_min=-0.08,
+    dx_max=0.08,
+    dy_min=-0.08,
+    dy_max=0.08,
+    angle_min=-np.pi / 18,
+    angle_max=np.pi / 18,
 )
 NO_RIGID = RigidSampleBounds(
     dx_min=0, dx_max=0, dy_min=0, dy_max=0, angle_min=0, angle_max=0
@@ -132,7 +137,9 @@ class ArteryGeneratorRigid(Dataset):
             raise IndexError("Index out of range for the dataset.")
         rng = np.random.default_rng(self._sample_seed(idx, stream=0))
         rigid_matrix = _sample_rigid_matrix(self.sample_specs, rng)
-        target_mask = _fill_missing_background(_apply_rigid(self.template, rigid_matrix))
+        target_mask = _fill_missing_background(
+            _apply_rigid(self.template, rigid_matrix)
+        )
         img = _mask_to_image(target_mask)
 
         # Apply deterministic ultrasound speckle noise in-memory.
@@ -229,7 +236,9 @@ class ArteryGeneratorDeformed(Dataset):
                 integrations=self.integrations,
                 fractal_mode=self.fractal_mode,
             )
-        target_mask = _fill_missing_background(spatial_transform(batched_template, field, isdisp=True).squeeze(0))
+        target_mask = _fill_missing_background(
+            spatial_transform(batched_template, field, isdisp=True).squeeze(0)
+        )
         img = _mask_to_image(target_mask)
 
         # Apply deterministic ultrasound speckle noise in-memory.
