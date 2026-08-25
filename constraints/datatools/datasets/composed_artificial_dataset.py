@@ -1,0 +1,119 @@
+"""Lazy composition of independently stored artificial source layers."""
+
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from constraints.generators.composition import PlaqueLayer
+from constraints.generators.factories import (
+    compose_artificial_sample,
+    get_source_config,
+)
+from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
+from constraints.generators.types import ArteryClass
+
+from ..label_schema import LabelSchema
+from .base_dataset import PerSampleDataset
+from .types import Sample
+
+_LABEL_SCHEMA = LabelSchema.from_lists(
+    names=["background", "boundary", "lumen", "plaque"],
+    colors=[
+        (0.0, 0.0, 0.0),
+        (0.9, 0.1, 0.1),
+        (0.1, 0.7, 0.1),
+        (0.1, 0.35, 0.95),
+    ],
+)
+
+
+class ComposedArtificialDataset(PerSampleDataset):
+    """Compose selected plaque collections lazily for each source sample.
+
+    ``plaques`` contains names of real-plaque collections. ``fake_plaques``
+    maps collection names to the anatomical class they imitate in the target.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        plaques: Sequence[str] = (),
+        fake_plaques: Mapping[str, ArteryClass] | None = None,
+        class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
+    ) -> None:
+        self.root = Path(root)
+        self.config = get_source_config(self.root)
+        self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
+        self._class_intensities = dict(class_intensities)
+
+        fake_plaques = {} if fake_plaques is None else dict(fake_plaques)
+        duplicate_names = set(plaques) & fake_plaques.keys()
+        if duplicate_names:
+            raise ValueError(
+                f"collections cannot be both real and fake: {sorted(duplicate_names)}"
+            )
+
+        self._real_masks = {
+            name: self._load_plaque_collection(name) for name in plaques
+        }
+        self._fake_masks: dict[str, tuple[np.ndarray, ArteryClass]] = {}
+        for name, target_class in fake_plaques.items():
+            target_class = ArteryClass(target_class)
+            if target_class not in {ArteryClass.BOUNDARY, ArteryClass.LUMEN}:
+                raise ValueError("fake plaques must resolve to boundary or lumen")
+            self._fake_masks[name] = (
+                self._load_plaque_collection(name),
+                target_class,
+            )
+
+    def __len__(self) -> int:
+        return self.config.num_elements
+
+    def __getitem__(self, index: int) -> Sample:
+        index = self._normalize_index(index)
+        layers = [
+            PlaqueLayer(name, masks[index], ArteryClass.PLAQUE)
+            for name, masks in self._real_masks.items()
+        ]
+        layers.extend(
+            PlaqueLayer(name, masks[index], target_class)
+            for name, (masks, target_class) in self._fake_masks.items()
+        )
+        arrays = compose_artificial_sample(
+            self._empty_artery,
+            layers,
+            self._class_intensities,
+        )
+        return Sample(
+            image=torch.from_numpy(arrays.image[None]),
+            target_labels=torch.from_numpy(arrays.target_labels).long(),
+            sample_id=str(index),
+        )
+
+    @property
+    def label_schema(self) -> LabelSchema:
+        return _LABEL_SCHEMA
+
+    def _load_plaque_collection(self, name: str) -> np.ndarray:
+        if not name or Path(name).name != name:
+            raise ValueError("plaque collection name must be a filename component")
+        path = self.root / "plaques" / f"{name}.npy"
+        masks = np.load(path, mmap_mode="r")
+        expected_shape = (self.config.num_elements, *self.config.image_size)
+        if masks.shape != expected_shape or masks.dtype != np.bool_:
+            raise ValueError(
+                f"invalid plaque collection {name!r}: expected Boolean "
+                f"{expected_shape}, got {masks.shape} {masks.dtype}"
+            )
+        return masks
+
+    def _normalize_index(self, index: int) -> int:
+        index = int(index)
+        if index < 0:
+            index += len(self)
+        if not 0 <= index < len(self):
+            raise IndexError(index)
+        return index

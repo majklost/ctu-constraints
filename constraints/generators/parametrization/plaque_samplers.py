@@ -1,70 +1,12 @@
-from dataclasses import dataclass
-from math import isfinite, pi
-from typing import Self
+from math import isfinite
 
 import numpy as np
 
-from .plaque_generators import PowerPlaqueParameters
-
-
-@dataclass(frozen=True)
-class FloatRange:
-    """Bounds for a uniformly sampled floating-point parameter."""
-
-    minimum: float
-    maximum: float
-
-    def __post_init__(self) -> None:
-        if not isfinite(self.minimum) or not isfinite(self.maximum):
-            raise ValueError("range bounds must be finite")
-        if self.minimum > self.maximum:
-            raise ValueError("range minimum must not exceed maximum")
-
-    def sample(self, rng: np.random.Generator) -> float:
-        if self.minimum == self.maximum:
-            return self.minimum
-        return float(rng.uniform(self.minimum, self.maximum))
-
-    @classmethod
-    def fixed(cls, number: float) -> Self:
-        return cls(minimum=number, maximum=number)
-
-
-@dataclass(frozen=True)
-class PowerPlaqueSamplingRanges:
-    """Resolution-independent ranges for power-profile plaques.
-
-    Angular measurements are in radians. ``inward_depth_fraction`` is relative
-    to the lumen radius and ``wall_depth_fraction`` is relative to wall
-    thickness. Sampling resolves both fractions to pixels.
-
-    Angles do not need to be normalized to ``[-pi, pi]``. To cross the wrap
-    point, use an unwrapped range such as 350 to 370 degrees in radians.
-    """
-
-    angle_rad: FloatRange = FloatRange(-pi, pi)
-    angular_width_rad: FloatRange = FloatRange(pi / 12, pi / 3)
-    inward_depth_fraction: FloatRange = FloatRange(0.05, 0.3)
-    wall_depth_fraction: FloatRange = FloatRange(0.1, 0.5)
-    shape_power: FloatRange = FloatRange(0.25, 2.0)
-
-    def __post_init__(self) -> None:
-        if self.angular_width_rad.minimum <= 0:
-            raise ValueError("angular_width_rad must be positive")
-        if self.angular_width_rad.maximum > 2 * pi:
-            raise ValueError("angular_width_rad must not exceed 2*pi")
-        if self.inward_depth_fraction.minimum <= 0:
-            raise ValueError("inward_depth_fraction must be positive")
-        if self.inward_depth_fraction.maximum >= 1:
-            raise ValueError("inward_depth_fraction must be less than 1")
-        if self.wall_depth_fraction.minimum < 0:
-            raise ValueError("wall_depth_fraction must be non-negative")
-        if self.wall_depth_fraction.maximum >= 1:
-            raise ValueError(
-                "wall_depth_fraction must be less than 1 to preserve outer wall"
-            )
-        if self.shape_power.minimum <= 0:
-            raise ValueError("shape_power must be positive")
+from ..types import (
+    EmptyArteryConfig,
+    PowerPlaqueParameters,
+    PowerPlaqueSamplingRanges,
+)
 
 
 def sample_power_plaque_parameters(
@@ -96,9 +38,7 @@ def sample_power_plaque_parameters(
 def sample_power_plaque_parameter_batch(
     ranges: PowerPlaqueSamplingRanges | tuple[PowerPlaqueSamplingRanges, ...],
     count: int,
-    *,
-    lumen_radius_px: float,
-    wall_thickness_px: float,
+    empty_artery_config: EmptyArteryConfig,
     rng: np.random.Generator,
 ) -> tuple[PowerPlaqueParameters, ...]:
     """Sample ``count`` plaques from shared or per-plaque ranges.
@@ -122,8 +62,8 @@ def sample_power_plaque_parameter_batch(
     return tuple(
         sample_power_plaque_parameters(
             plaque_ranges,
-            lumen_radius_px=lumen_radius_px,
-            wall_thickness_px=wall_thickness_px,
+            lumen_radius_px=empty_artery_config.lumen_radius_px,
+            wall_thickness_px=empty_artery_config.wall_thickness_px,
             rng=rng,
         )
         for plaque_ranges in ranges_per_plaque

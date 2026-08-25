@@ -1,0 +1,61 @@
+import numpy as np
+import torch
+
+from constraints.datatools.datasets import ComposedArtificialDataset
+from constraints.generators.factories import create_plaque_collection
+from constraints.generators.source import create_source
+from constraints.generators.types import (
+    ArteryClass,
+    EmptyArteryConfig,
+    FloatRange,
+    PowerPlaqueSamplingRanges,
+    SourceConfig,
+)
+
+
+def _create_source_with_plaques(tmp_path):
+    root = tmp_path / "source"
+    config = SourceConfig(
+        num_elements=2,
+        image_size=(65, 65),
+        empty_artery=EmptyArteryConfig(20, 5),
+    )
+    create_source(root, config)
+    ranges = PowerPlaqueSamplingRanges(
+        angle_rad=FloatRange.fixed(0),
+        angular_width_rad=FloatRange.fixed(0.5),
+        inward_depth_fraction=FloatRange.fixed(0.25),
+        wall_depth_fraction=FloatRange.fixed(0.2),
+        shape_power=FloatRange.fixed(0.5),
+    )
+    create_plaque_collection(root, "blob", ranges, seed=3)
+    return root
+
+
+def test_dataset_composes_selected_real_plaque_collection(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    dataset = ComposedArtificialDataset(root, plaques=("blob",))
+
+    sample = dataset[0]
+
+    assert len(dataset) == 2
+    assert sample["image"].shape == (1, 65, 65)
+    assert sample["image"].dtype == torch.float32
+    assert sample["target_labels"].shape == (65, 65)
+    assert sample["target_labels"].dtype == torch.int64
+    assert torch.any(sample["target_labels"] == ArteryClass.PLAQUE)
+
+
+def test_fake_plaque_changes_target_but_keeps_plaque_appearance(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    dataset = ComposedArtificialDataset(
+        root,
+        fake_plaques={"blob": ArteryClass.LUMEN},
+    )
+    masks = np.load(root / "plaques" / "blob.npy")
+
+    sample = dataset[0]
+    fake_pixels = torch.from_numpy(masks[0])
+
+    assert torch.all(sample["target_labels"][fake_pixels] == ArteryClass.LUMEN)
+    assert torch.all(sample["image"][0, fake_pixels] == 1.0)
