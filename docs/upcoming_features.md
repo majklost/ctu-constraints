@@ -117,7 +117,7 @@ Use the rigid dataset creation path for new experiments.
 
 ### Configurable plaque generation
 
-- [ ] Implement a configuration-driven, parametric plaque generator supporting:
+- [x] Implement a configuration-driven, parametric plaque generator supporting:
   - plaque count, including more than two plaques;
   - angular positions and separation;
   - plaque sizes;

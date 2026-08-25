@@ -58,6 +58,8 @@ class ArterySpec:
     lumen_radius_px: float = 73.0
     wall_thickness_px: float = 12.0
     plaques: tuple[PlaqueSpec, ...] = ()
+    fake_plaques: tuple[PlaqueSpec, ...] = ()
+    
 
     def __post_init__(self) -> None:
         height, width = self.image_size
@@ -65,8 +67,8 @@ class ArterySpec:
             raise ValueError("image_size dimensions must be positive")
         if not isfinite(self.lumen_radius_px) or self.lumen_radius_px <= 0:
             raise ValueError("lumen_radius_px must be finite and positive")
-        if not isfinite(self.wall_thickness_px) or self.wall_thickness_px <= 0:
-            raise ValueError("wall_thickness_px must be finite and positive")
+        if not isfinite(self.wall_thickness_px) or self.wall_thickness_px < 0:
+            raise ValueError("wall_thickness_px must be finite and non-negative")
         if self.center_yx_px is not None and not all(
             isfinite(value) for value in self.center_yx_px
         ):

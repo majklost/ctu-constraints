@@ -56,6 +56,8 @@
 # The mask and SDF are changed only by spatial transformations. Fake plaques,
 # dropout rectangles, and speckle modify the image but never its target.
 
+# %%
+
 # %% [markdown]
 # ## 1. Parametric vessel and plaque geometry
 #
@@ -385,11 +387,11 @@ from constraints.generators.types import ArterySpec
 # %%
 IMAGE_SIZE = (256, 256)
 LUMEN_RADIUS_PX = 60.0
-WALL_THICKNESS_PX = 12.0
+WALL_THICKNESS_PX = 0.0
 PLAQUE_ANGLE_RAD = np.deg2rad(-60)
 PLAQUE_ANGULAR_WIDTH_RAD = np.deg2rad(55)
 INWARD_DEPTH_PX = 10.0
-WALL_DEPTH_PX = 1
+WALL_DEPTH_PX = 0
 
 shape_powers = (0.25, 0.11, 1.0, 2.0)
 
@@ -467,3 +469,35 @@ plt.show()
 # parameters or recipe used to construct its functions rather than attempting
 # to serialize the callables themselves.
 
+
+# %%
+# Sampling plaque
+from constraints.generators.parametrization.plaque_samplers import sample_power_plaque_parameters, PowerPlaqueSamplingRanges
+
+
+# %%
+power_sample_range = PowerPlaqueSamplingRanges()
+rng= np.random.default_rng(25)
+
+# %%
+
+# %%
+from constraints.generators.parametrization.plaque_samplers import sample_power_plaque_parameter_batch
+
+
+
+params =sample_power_plaque_parameter_batch(power_sample_range,3,lumen_radius_px=LUMEN_RADIUS_PX,wall_thickness_px=WALL_THICKNESS_PX,rng=rng)
+plaques = map(lambda x: create_power_plaque(x,LUMEN_RADIUS_PX),params)
+
+label_map =         render_artery(
+            ArterySpec(
+                image_size=IMAGE_SIZE,
+                lumen_radius_px=LUMEN_RADIUS_PX,
+                wall_thickness_px=WALL_THICKNESS_PX,
+                plaques=plaques,
+            )
+        )
+plt.imshow(label_map)
+
+
+# %%

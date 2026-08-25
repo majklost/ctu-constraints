@@ -103,7 +103,13 @@ def render_artery(spec: ArterySpec) -> LabelMap:
 
     plaque_mask = np.zeros(spec.image_size, dtype=bool)
     for plaque in spec.plaques:
-        plaque_mask |= _render_plaque(radius, angle, plaque, spec.outer_radius_px)
+        plaque_mask |= _render_plaque(
+            radius,
+            angle,
+            plaque,
+            artery_outer_radius_px=spec.outer_radius_px,
+            has_wall=spec.wall_thickness_px > 0,
+        )
     labels[plaque_mask] = ArteryClass.PLAQUE
     return labels
 
@@ -113,6 +119,7 @@ def _render_plaque(
     angle: FloatArray,
     plaque: PlaqueSpec,
     artery_outer_radius_px: float,
+    has_wall: bool,
 ) -> NDArray[np.bool_]:
     delta = np.arctan2(
         np.sin(angle - plaque.angle_rad),
@@ -130,10 +137,10 @@ def _render_plaque(
         raise ValueError("plaque inner_radius must be non-negative")
     if np.any(inner > outer):
         raise ValueError("plaque inner_radius must not exceed outer_radius")
-    if np.any(outer >= artery_outer_radius_px):
-        raise ValueError(
-            "plaque outer_radius must remain inside the artery outer radius"
-        )
+    outside_artery = outer > artery_outer_radius_px
+    replaces_outer_wall = has_wall & (outer >= artery_outer_radius_px)
+    if np.any(outside_artery | replaces_outer_wall):
+        raise ValueError("plaque outer_radius must preserve wall before the background")
 
     supported_radii = radius[support]
     mask[support] = (supported_radii >= inner) & (supported_radii <= outer)
