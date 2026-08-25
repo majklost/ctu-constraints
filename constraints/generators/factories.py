@@ -8,12 +8,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .composition import PlaqueLayer, compose_target_labels
+from .deformation import generate_deformation_fields
 from .rendering import (
     DEFAULT_CLASS_INTENSITIES,
     create_grayscale_image_from_label_mask,
 )
 from .source import generate_plaque_masks_power, load_source_config
-from .types import ArteryClass, PowerPlaqueSamplingRanges, SourceConfig
+from .types import (
+    ArteryClass,
+    DeformationConfig,
+    DeformationRejectionConfig,
+    PowerPlaqueSamplingRanges,
+    SourceConfig,
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,28 @@ def create_plaque_collection(
         seed=seed,
     )
     return plaque_folder / f"{name}.npy", plaque_folder / f"{name}.jsonl"
+
+
+def create_deformation_collection(
+    source_root: Path,
+    name: str,
+    config: DeformationConfig,
+    rejection: DeformationRejectionConfig | None = None,
+    *,
+    seed: int,
+) -> tuple[Path, Path]:
+    """Create one named deformation collection inside a source dataset."""
+    source_root = Path(source_root)
+    source_config = get_source_config(source_root)
+    return generate_deformation_fields(
+        source_root / "deformations",
+        name,
+        source_config,
+        np.load(source_root / "empty_artery.npy", mmap_mode="r"),
+        config,
+        rejection,
+        seed=seed,
+    )
 
 
 def compose_artificial_sample(

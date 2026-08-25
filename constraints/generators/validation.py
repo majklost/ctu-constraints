@@ -1,7 +1,21 @@
-"""Cheap geometry checks used while preparing transform presets."""
+"""Geometry checks used while preparing transform presets."""
+
+from dataclasses import dataclass
 
 import numpy as np
+import torch
 from scipy.ndimage import binary_dilation
+
+from constraints.voxelmorph.utils import spatial_transform
+
+from .types import DeformationRejectionConfig
+
+
+@dataclass(frozen=True)
+class DeformationValidationResult:
+    accepted: bool
+    minimum_jacobian: float
+    foreground_margin_px: int
 
 
 def foreground_margin(labels: np.ndarray) -> int:
@@ -58,3 +72,42 @@ def deformation_support(labels: np.ndarray, field: np.ndarray) -> np.ndarray:
         raise ValueError("expected labels [H,W] and field [2,H,W]")
     radius = int(np.ceil(np.abs(displacement).max())) + 1
     return binary_dilation(labels != 0, iterations=radius)
+
+
+def validate_deformation(
+    field: np.ndarray,
+    source_labels: np.ndarray,
+    config: DeformationRejectionConfig,
+) -> DeformationValidationResult:
+    """Check topology and clipping for one backward-sampling displacement.
+
+    The Jacobian is checked on a conservative dilation of source foreground,
+    including every input location that may affect the warped artery. The
+    foreground margin is measured after nearest-neighbor label warping.
+    """
+    field = np.asarray(field, dtype=np.float32)
+    source_labels = np.asarray(source_labels)
+    if source_labels.ndim != 2 or field.shape != (2, *source_labels.shape):
+        raise ValueError("expected source_labels [H,W] and field [2,H,W]")
+
+    support = deformation_support(source_labels, field)
+    minimum_jacobian = minimum_jacobian_determinant(field, support)
+    labels_tensor = torch.from_numpy(
+        source_labels.astype(np.float32, copy=False)
+    )[None, None]
+    field_tensor = torch.from_numpy(field)
+    warped_labels = spatial_transform(
+        labels_tensor,
+        field_tensor,
+        method="nearest",
+    )[0, 0].numpy()
+    foreground_margin_px = foreground_margin(warped_labels)
+    accepted = (
+        minimum_jacobian > config.minimum_jacobian
+        and foreground_margin_px >= config.minimum_foreground_margin_px
+    )
+    return DeformationValidationResult(
+        accepted=accepted,
+        minimum_jacobian=minimum_jacobian,
+        foreground_margin_px=foreground_margin_px,
+    )

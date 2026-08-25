@@ -211,13 +211,102 @@ class NoiseConfig:
 
 @dataclass(frozen=True)
 class DeformationConfig:
-    shape: tuple[int, int]
     scales: float | int | list[float] = 14
     magnitude: float = 7.0
     integrations: int = 2
     voxsize: float = 1.0
     fractal_mode: Literal["blur", "upsample"] = "blur"
-    max_attempts: int = 1
+
+    def __post_init__(self) -> None:
+        scales = self.scales if isinstance(self.scales, list) else [self.scales]
+        try:
+            invalid_scales = not scales or any(
+                isinstance(scale, bool) or not isfinite(scale) or scale <= 0
+                for scale in scales
+            )
+        except TypeError as error:
+            raise ValueError("scales must contain positive finite numbers") from error
+        if invalid_scales:
+            raise ValueError("scales must contain positive finite numbers")
+        if (
+            isinstance(self.magnitude, bool)
+            or not isfinite(self.magnitude)
+            or self.magnitude < 0
+        ):
+            raise ValueError("magnitude must be finite and non-negative")
+        if (
+            isinstance(self.integrations, bool)
+            or not isinstance(self.integrations, int)
+            or self.integrations < 0
+        ):
+            raise ValueError("integrations must be a non-negative integer")
+        if (
+            isinstance(self.voxsize, bool)
+            or not isfinite(self.voxsize)
+            or self.voxsize <= 0
+        ):
+            raise ValueError("voxsize must be finite and positive")
+        if self.fractal_mode not in {"blur", "upsample"}:
+            raise ValueError("fractal_mode must be 'blur' or 'upsample'")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scales": self.scales,
+            "magnitude": self.magnitude,
+            "integrations": self.integrations,
+            "voxsize": self.voxsize,
+            "fractal_mode": self.fractal_mode,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        expected = {
+            "scales",
+            "magnitude",
+            "integrations",
+            "voxsize",
+            "fractal_mode",
+        }
+        if value.keys() != expected:
+            raise ValueError("invalid DeformationConfig fields")
+        try:
+            return cls(**value)
+        except TypeError as error:
+            raise ValueError("invalid DeformationConfig value") from error
+
+
+@dataclass(frozen=True)
+class DeformationRejectionConfig:
+    """Acceptance criteria for sampled deformation fields."""
+
+    minimum_jacobian: float = 0.0
+    minimum_foreground_margin_px: int = 1
+    max_attempts: int = 20
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.minimum_jacobian):
+            raise ValueError("minimum_jacobian must be finite")
+        if (
+            isinstance(self.minimum_foreground_margin_px, bool)
+            or not isinstance(self.minimum_foreground_margin_px, int)
+            or self.minimum_foreground_margin_px < 0
+        ):
+            raise ValueError(
+                "minimum_foreground_margin_px must be a non-negative integer"
+            )
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or self.max_attempts <= 0
+        ):
+            raise ValueError("max_attempts must be a positive integer")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "minimum_jacobian": self.minimum_jacobian,
+            "minimum_foreground_margin_px": self.minimum_foreground_margin_px,
+            "max_attempts": self.max_attempts,
+        }
 
 
 # REWORK (now we dont need this)

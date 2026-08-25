@@ -59,3 +59,24 @@ def test_fake_plaque_changes_target_but_keeps_plaque_appearance(tmp_path) -> Non
 
     assert torch.all(sample["target_labels"][fake_pixels] == ArteryClass.LUMEN)
     assert torch.all(sample["image"][0, fake_pixels] == 1.0)
+
+
+def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    fields = np.zeros((2, 2, 65, 65), dtype=np.float32)
+    fields[:, 1] = 2
+    np.save(root / "deformations" / "shift-left.npy", fields)
+    baseline = ComposedArtificialDataset(root, plaques=("blob",))[0]
+    dataset = ComposedArtificialDataset(
+        root,
+        plaques=("blob",),
+        deformation="shift-left",
+    )
+
+    sample = dataset[0]
+
+    torch.testing.assert_close(
+        sample["target_labels"][:, :-2],
+        baseline["target_labels"][:, 2:],
+    )
+    torch.testing.assert_close(sample["transform"], torch.from_numpy(fields[0]))

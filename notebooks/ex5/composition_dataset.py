@@ -38,6 +38,7 @@ source_root = get_data_folder() / "artificial" / "demo"
 dataset = ComposedArtificialDataset(
     source_root,
     plaques=("2blobs",),
+    deformation="default"
 )
 print(f"Loaded {len(dataset)} samples from {source_root}")
 

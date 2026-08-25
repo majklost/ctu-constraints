@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from constraints.generators.composition import PlaqueLayer
+from constraints.generators.deformation import apply_deformation
 from constraints.generators.factories import (
     compose_artificial_sample,
     get_source_config,
@@ -42,12 +43,19 @@ class ComposedArtificialDataset(PerSampleDataset):
         *,
         plaques: Sequence[str] = (),
         fake_plaques: Mapping[str, ArteryClass] | None = None,
+        deformation: str | None = None,
         class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
     ) -> None:
         self.root = Path(root)
         self.config = get_source_config(self.root)
         self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
         self._class_intensities = dict(class_intensities)
+        self._deformation_name = deformation
+        self._deformation_fields = (
+            None
+            if deformation is None
+            else self._load_deformation_collection(deformation)
+        )
 
         fake_plaques = {} if fake_plaques is None else dict(fake_plaques)
         duplicate_names = set(plaques) & fake_plaques.keys()
@@ -82,16 +90,34 @@ class ComposedArtificialDataset(PerSampleDataset):
             PlaqueLayer(name, masks[index], target_class)
             for name, (masks, target_class) in self._fake_masks.items()
         )
+        empty_artery = self._empty_artery
+        field = None
+        if self._deformation_fields is not None:
+            field = self._deformation_fields[index]
+            empty_artery = np.rint(
+                apply_deformation(empty_artery, field, method="nearest")
+            ).astype(np.uint8)
+            layers = [
+                PlaqueLayer(
+                    layer.name,
+                    apply_deformation(layer.mask, field, method="nearest") > 0.5,
+                    layer.target_class,
+                )
+                for layer in layers
+            ]
         arrays = compose_artificial_sample(
-            self._empty_artery,
+            empty_artery,
             layers,
             self._class_intensities,
         )
-        return Sample(
+        sample = Sample(
             image=torch.from_numpy(arrays.image[None]),
             target_labels=torch.from_numpy(arrays.target_labels).long(),
             sample_id=str(index),
         )
+        if field is not None:
+            sample["transform"] = torch.from_numpy(np.array(field, copy=True))
+        return sample
 
     @property
     def label_schema(self) -> LabelSchema:
@@ -109,6 +135,19 @@ class ComposedArtificialDataset(PerSampleDataset):
                 f"{expected_shape}, got {masks.shape} {masks.dtype}"
             )
         return masks
+
+    def _load_deformation_collection(self, name: str) -> np.ndarray:
+        if not name or Path(name).name != name:
+            raise ValueError("deformation name must be a filename component")
+        path = self.root / "deformations" / f"{name}.npy"
+        fields = np.load(path, mmap_mode="r")
+        expected_shape = (self.config.num_elements, 2, *self.config.image_size)
+        if fields.shape != expected_shape or fields.dtype != np.float32:
+            raise ValueError(
+                f"invalid deformation {name!r}: expected float32 "
+                f"{expected_shape}, got {fields.shape} {fields.dtype}"
+            )
+        return fields
 
     def _normalize_index(self, index: int) -> int:
         index = int(index)
