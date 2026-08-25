@@ -41,6 +41,14 @@
   "python.analysis.extraPaths": ["${workspaceFolder}"],
   "python.analysis.autoImportCompletions": true, // This helps Pylance find your 'carotide' package and libraries
   "jupytextSync.pythonExecutable": "${workspaceFolder}/.venv/bin/python",
+  "jupytextSync.syncDocuments": {
+    "onTextDocumentOpen": false,
+    "onTextDocumentSave": false,
+    "onTextDocumentClose": false,
+    "onNotebookDocumentOpen": false,
+    "onNotebookDocumentSave": true,
+    "onNotebookDocumentClose": false
+  },
   "jupytextSync.defaultFormats": {
     "py": "ipynb,py:percent"
   },
