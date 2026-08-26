@@ -12,6 +12,7 @@ from .composition import PlaqueLayer, compose_target_labels
 from .deformation import (
     apply_deformation,
     generate_deformation_fields,
+    load_deformation_fields,
     sample_valid_deformation,
 )
 from .parametrization.plaque_generators import create_empty_artery
@@ -19,6 +20,7 @@ from .rendering import (
     DEFAULT_CLASS_INTENSITIES,
     create_grayscale_image_from_label_mask,
 )
+from .rigid import generate_rigid_parameters
 from .source import (
     generate_plaque_masks_power,
     load_source_config,
@@ -30,6 +32,8 @@ from .types import (
     DeformationRejectionConfig,
     PowerPlaqueParameters,
     PowerPlaqueSamplingRanges,
+    RigidBounds,
+    RigidRejectionConfig,
     SourceConfig,
 )
 from .validation import DeformationValidationResult
@@ -173,6 +177,40 @@ def create_deformation_collection(
         rejection,
         seed=seed,
         device=device,
+    )
+
+
+def create_rigid_collection(
+    source_root: Path,
+    name: str,
+    bounds: RigidBounds,
+    rejection: RigidRejectionConfig | None = None,
+    *,
+    deformation: str | None = None,
+    seed: int,
+) -> tuple[Path, Path]:
+    """Create a source-level or deformation-dependent rigid preset."""
+    source_root = Path(source_root)
+    source_config = get_source_config(source_root)
+    parent_folder = source_root
+    fields = None
+    if deformation is not None:
+        parent_folder = source_root / "deformations" / deformation
+        fields = load_deformation_fields(
+            source_root / "deformations",
+            deformation,
+            source_config,
+        )
+    return generate_rigid_parameters(
+        parent_folder,
+        deformation,
+        name,
+        source_config,
+        np.load(source_root / "empty_artery.npy", mmap_mode="r"),
+        fields,
+        bounds,
+        rejection,
+        seed=seed,
     )
 
 

@@ -36,6 +36,7 @@ def test_create_source_initializes_only_root_artifacts(tmp_path) -> None:
     assert labels[0, 0] == ArteryClass.BACKGROUND
     assert (root / "plaques").is_dir()
     assert (root / "deformations").is_dir()
+    assert (root / "rigid").is_dir()
 
     manifest = json.loads((root / "manifest.json").read_text())
     assert load_source_config(root) == config

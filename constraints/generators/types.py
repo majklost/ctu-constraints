@@ -126,8 +126,46 @@ class RigidBounds:
     dx: FloatRange
     dy: FloatRange
 
+    def sample(self, rng: np.random.Generator) -> tuple[float, float, float]:
+        return self.angle.sample(rng), self.dx.sample(rng), self.dy.sample(rng)
+
+    def to_dict(self) -> dict[str, dict[str, float]]:
+        return {
+            name: {"minimum": value.minimum, "maximum": value.maximum}
+            for name, value in (
+                ("angle", self.angle),
+                ("dx", self.dx),
+                ("dy", self.dy),
+            )
+        }
+
+
+@dataclass(frozen=True)
+class RigidRejectionConfig:
+    minimum_foreground_margin_px: int = 1
+    max_attempts: int = 20
+
     def __post_init__(self) -> None:
-        "TODO - do checks"
+        if (
+            isinstance(self.minimum_foreground_margin_px, bool)
+            or not isinstance(self.minimum_foreground_margin_px, int)
+            or self.minimum_foreground_margin_px < 0
+        ):
+            raise ValueError(
+                "minimum_foreground_margin_px must be a non-negative integer"
+            )
+        if (
+            isinstance(self.max_attempts, bool)
+            or not isinstance(self.max_attempts, int)
+            or self.max_attempts <= 0
+        ):
+            raise ValueError("max_attempts must be a positive integer")
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "minimum_foreground_margin_px": self.minimum_foreground_margin_px,
+            "max_attempts": self.max_attempts,
+        }
 
 
 @dataclass(frozen=True)

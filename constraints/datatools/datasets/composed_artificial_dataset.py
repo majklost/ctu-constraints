@@ -12,10 +12,12 @@ from constraints.generators.deformation import (
     load_deformation_fields,
 )
 from constraints.generators.factories import (
+    ComposedSampleArrays,
     compose_artificial_sample,
     get_source_config,
 )
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
+from constraints.generators.rigid import apply_rigid, load_rigid_parameters
 from constraints.generators.types import ArteryClass
 
 from ..label_schema import LabelSchema
@@ -47,6 +49,7 @@ class ComposedArtificialDataset(PerSampleDataset):
         plaques: Sequence[str] = (),
         fake_plaques: Mapping[str, ArteryClass] | None = None,
         deformation: str | None = None,
+        rigid: str | None = None,
         class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
     ) -> None:
         self.root = Path(root)
@@ -60,6 +63,17 @@ class ComposedArtificialDataset(PerSampleDataset):
             else load_deformation_fields(
                 self.root / "deformations",
                 deformation,
+                self.config,
+            )
+        )
+        self._rigid_parameters = (
+            None
+            if rigid is None
+            else load_rigid_parameters(
+                self.root
+                if deformation is None
+                else self.root / "deformations" / deformation,
+                rigid,
                 self.config,
             )
         )
@@ -117,6 +131,23 @@ class ComposedArtificialDataset(PerSampleDataset):
             layers,
             self._class_intensities,
         )
+        rigid_parameters = None
+        if self._rigid_parameters is not None:
+            rigid_parameters = self._rigid_parameters[index]
+            arrays = ComposedSampleArrays(
+                image=apply_rigid(
+                    arrays.image,
+                    *rigid_parameters,
+                    method="linear",
+                ),
+                target_labels=np.rint(
+                    apply_rigid(
+                        arrays.target_labels,
+                        *rigid_parameters,
+                        method="nearest",
+                    )
+                ).astype(np.uint8),
+            )
         sample = Sample(
             image=torch.from_numpy(arrays.image[None]),
             target_labels=torch.from_numpy(arrays.target_labels).long(),
@@ -124,6 +155,10 @@ class ComposedArtificialDataset(PerSampleDataset):
         )
         if field is not None:
             sample["transform"] = torch.from_numpy(np.array(field, copy=True))
+        if rigid_parameters is not None:
+            sample["rigid"] = torch.from_numpy(
+                np.array(rigid_parameters, copy=True)
+            )
         return sample
 
     @property

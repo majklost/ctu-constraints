@@ -2,13 +2,17 @@ import numpy as np
 import torch
 
 from constraints.datatools.datasets import ComposedArtificialDataset
-from constraints.generators.factories import create_plaque_collection
+from constraints.generators.factories import (
+    create_plaque_collection,
+    create_rigid_collection,
+)
 from constraints.generators.source import create_source
 from constraints.generators.types import (
     ArteryClass,
     EmptyArteryConfig,
     FloatRange,
     PowerPlaqueSamplingRanges,
+    RigidBounds,
     SourceConfig,
 )
 
@@ -82,3 +86,31 @@ def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> No
         baseline["target_labels"][:, 2:],
     )
     torch.testing.assert_close(sample["transform"], torch.from_numpy(fields[0]))
+
+
+def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    create_rigid_collection(
+        root,
+        "shift-right",
+        RigidBounds(
+            angle=FloatRange.fixed(0),
+            dx=FloatRange.fixed(2),
+            dy=FloatRange.fixed(0),
+        ),
+        seed=5,
+    )
+    baseline = ComposedArtificialDataset(root, plaques=("blob",))[0]
+    dataset = ComposedArtificialDataset(
+        root,
+        plaques=("blob",),
+        rigid="shift-right",
+    )
+
+    sample = dataset[0]
+
+    torch.testing.assert_close(
+        sample["target_labels"][:, 2:],
+        baseline["target_labels"][:, :-2],
+    )
+    torch.testing.assert_close(sample["rigid"], torch.tensor([0.0, 2.0, 0.0]))

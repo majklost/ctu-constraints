@@ -47,6 +47,7 @@ def create_source(root: Path, config: SourceConfig) -> None:
     root.mkdir(parents=True)
     (root / "plaques").mkdir()
     (root / "deformations").mkdir()
+    (root / "rigid").mkdir()
     np.save(root / "empty_artery.npy", empty_artery, allow_pickle=False)
     write_json(root / "source_config.json", config.to_dict())
 

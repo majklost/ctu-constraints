@@ -10,6 +10,7 @@ class Sample(TypedDict):
     sample_id: str
     sdf: NotRequired[torch.Tensor]  # [N,H,W]
     transform: NotRequired[torch.Tensor]
+    rigid: NotRequired[torch.Tensor]  # [3]: angle radians, dx pixels, dy pixels
     template: NotRequired[torch.Tensor]  # [H, W]
     template_sdf: NotRequired[torch.Tensor]  # [N, H, W]
     template_indexes: NotRequired[list[int]]  # which template from bank are relevant
