@@ -4,7 +4,10 @@ import numpy as np
 import torch
 
 import constraints.generators.deformation as deformation_module
-from constraints.generators.deformation import apply_deformation
+from constraints.generators.deformation import (
+    apply_deformation,
+    sample_valid_deformation,
+)
 from constraints.generators.factories import create_deformation_collection
 from constraints.generators.source import create_source
 from constraints.generators.types import (
@@ -125,3 +128,38 @@ def test_apply_deformation_uses_stored_backward_sampling_convention() -> None:
 
     assert warped[3, 2] == 1
     assert warped.sum() == 1
+
+
+def test_single_deformation_sample_matches_persisted_collection(tmp_path) -> None:
+    root = tmp_path / "source"
+    source_config = SourceConfig(
+        num_elements=2,
+        image_size=(33, 33),
+        empty_artery=EmptyArteryConfig(10, 3),
+    )
+    create_source(root, source_config)
+    labels = np.load(root / "empty_artery.npy")
+    config = DeformationConfig(
+        scales=8,
+        magnitude=1,
+        integrations=2,
+        fractal_mode="upsample",
+    )
+
+    direct = sample_valid_deformation(
+        source_config,
+        labels,
+        config,
+        seed=17,
+        sample_index=1,
+    )
+    fields_path, _ = create_deformation_collection(
+        root,
+        "set",
+        config,
+        seed=17,
+    )
+
+    np.testing.assert_array_equal(direct.field, np.load(fields_path)[1])
+    assert direct.attempts >= 1
+    assert direct.validation.accepted

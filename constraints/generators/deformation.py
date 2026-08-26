@@ -74,6 +74,65 @@ def apply_deformation(
     return warped[0, 0].numpy().copy()
 
 
+def sample_valid_deformation(
+    source_config: SourceConfig,
+    source_labels: np.ndarray,
+    config: DeformationConfig,
+    rejection: DeformationRejectionConfig | None = None,
+    *,
+    seed: int,
+    sample_index: int = 0,
+) -> DeformationSample:
+    """Generate and validate one deformation without writing it.
+
+    The seed scheme is identical to persisted collections. A preview for a
+    given ``sample_index`` therefore produces the field later stored at the
+    same collection index, independently of collection length.
+    """
+    if seed < 0:
+        raise ValueError("seed must be non-negative")
+    if sample_index < 0:
+        raise ValueError("sample_index must be non-negative")
+    if rejection is None:
+        rejection = DeformationRejectionConfig()
+
+    source_labels = np.asarray(source_labels)
+    if source_labels.shape != source_config.image_size:
+        raise ValueError("source_labels must match source_config.image_size")
+
+    height, width = source_config.image_size
+    for attempt_index in range(rejection.max_attempts):
+        attempt_seed = _attempt_seed(seed, sample_index, attempt_index)
+        with torch.random.fork_rng(devices=[]):
+            torch.manual_seed(attempt_seed)
+            field = random_disp(
+                shape=(1, 1, height, width),
+                scales=config.scales,
+                magnitude=config.magnitude,
+                integrations=config.integrations,
+                voxsize=config.voxsize,
+                device=torch.device("cpu"),
+                fractal_mode=config.fractal_mode,
+            )[0]
+        field_array = field.detach().numpy().astype(np.float32, copy=False)
+        diagnostics = validate_deformation(
+            field_array,
+            source_labels,
+            rejection,
+        )
+        if diagnostics.accepted:
+            return DeformationSample(
+                field=field_array,
+                attempts=attempt_index + 1,
+                validation=diagnostics,
+            )
+
+    raise RuntimeError(
+        f"failed to sample valid deformation for sample {sample_index} "
+        f"after {rejection.max_attempts} attempts"
+    )
+
+
 def generate_deformation_fields(
     folder: Path,
     name: str,
@@ -115,36 +174,18 @@ def generate_deformation_fields(
     rejected_candidate_count = 0
     try:
         for sample_index in range(source_config.num_elements):
-            for attempt_index in range(rejection.max_attempts):
-                attempt_seed = _attempt_seed(seed, sample_index, attempt_index)
-                with torch.random.fork_rng(devices=[]):
-                    torch.manual_seed(attempt_seed)
-                    field = random_disp(
-                        shape=(1, 1, height, width),
-                        scales=config.scales,
-                        magnitude=config.magnitude,
-                        integrations=config.integrations,
-                        voxsize=config.voxsize,
-                        device=torch.device("cpu"),
-                        fractal_mode=config.fractal_mode,
-                    )[0]
-                field_array = field.detach().numpy().astype(np.float32, copy=False)
-                diagnostics = validate_deformation(
-                    field_array,
-                    source_labels,
-                    rejection,
-                )
-                if diagnostics.accepted:
-                    fields[sample_index] = field_array
-                    attempts_per_sample.append(attempt_index + 1)
-                    accepted_diagnostics.append(diagnostics)
-                    break
-                rejected_candidate_count += 1
-            else:
-                raise RuntimeError(
-                    f"failed to sample valid deformation for sample "
-                    f"{sample_index} after {rejection.max_attempts} attempts"
-                )
+            sample = sample_valid_deformation(
+                source_config,
+                source_labels,
+                config,
+                rejection,
+                seed=seed,
+                sample_index=sample_index,
+            )
+            fields[sample_index] = sample.field
+            attempts_per_sample.append(sample.attempts)
+            accepted_diagnostics.append(sample.validation)
+            rejected_candidate_count += sample.attempts - 1
         fields.flush()
         temporary_fields.replace(fields_path)
         write_json(

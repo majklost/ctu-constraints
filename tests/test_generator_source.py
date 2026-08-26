@@ -7,6 +7,7 @@ from constraints.generators.source import (
     create_source,
     generate_plaque_masks_power,
     load_source_config,
+    sample_power_plaque_mask,
 )
 from constraints.generators.types import (
     ArteryClass,
@@ -101,4 +102,22 @@ def test_plaque_sample_seed_is_independent_of_collection_length(tmp_path) -> Non
     np.testing.assert_array_equal(
         np.load(tmp_path / "short" / "set.npy")[0],
         np.load(tmp_path / "long" / "set.npy")[0],
+    )
+
+
+def test_single_plaque_sample_matches_persisted_collection(tmp_path) -> None:
+    config = SourceConfig(
+        num_elements=3,
+        image_size=(65, 65),
+        empty_artery=EmptyArteryConfig(20, 5),
+    )
+    direct = sample_power_plaque_mask(config, seed=13, sample_index=2)
+
+    generate_plaque_masks_power(tmp_path, "set", config, seed=13)
+
+    np.testing.assert_array_equal(direct.mask, np.load(tmp_path / "set.npy")[2])
+    record = json.loads((tmp_path / "set.jsonl").read_text().splitlines()[2])
+    assert record["sample_seed"] == direct.sample_seed
+    assert record["plaques"][0]["parameters"]["angle_rad"] == (
+        direct.parameters[0].angle_rad
     )

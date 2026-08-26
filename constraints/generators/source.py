@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,7 +17,21 @@ from .parametrization.plaque_generators import (
 )
 from .parametrization.plaque_samplers import sample_power_plaque_parameter_batch
 from .storage import FORMAT_NAME, FORMAT_VERSION, write_json
-from .types import ArteryClass, PowerPlaqueSamplingRanges, SourceConfig
+from .types import (
+    ArteryClass,
+    PowerPlaqueParameters,
+    PowerPlaqueSamplingRanges,
+    SourceConfig,
+)
+
+
+@dataclass(frozen=True)
+class PowerPlaqueSample:
+    """One generated plaque mask and the parameters that produced it."""
+
+    mask: np.ndarray
+    parameters: tuple[PowerPlaqueParameters, ...]
+    sample_seed: int
 
 
 def create_source(root: Path, config: SourceConfig) -> None:
@@ -68,6 +82,54 @@ def load_source_config(root: Path) -> SourceConfig:
     return SourceConfig.from_dict(value)
 
 
+def sample_power_plaque_mask(
+    config: SourceConfig,
+    ranges: PowerPlaqueSamplingRanges
+    | tuple[PowerPlaqueSamplingRanges, ...]
+    | None = None,
+    *,
+    seed: int,
+    sample_index: int = 0,
+) -> PowerPlaqueSample:
+    """Generate one reproducible power-plaque mask without writing it.
+
+    ``seed`` and ``sample_index`` use the same scheme as persisted plaque
+    collections, so a preview can be reproduced exactly during generation.
+    """
+    if config.plaque_generation_method != "power":
+        raise ValueError("source config does not select power plaque generation")
+    if seed < 0:
+        raise ValueError("seed must be non-negative")
+    if sample_index < 0:
+        raise ValueError("sample_index must be non-negative")
+    if ranges is None:
+        ranges = PowerPlaqueSamplingRanges()
+    if isinstance(ranges, tuple) and not ranges:
+        raise ValueError("at least one plaque range is required")
+
+    sample_seed = _sample_seed(seed, sample_index)
+    rng = np.random.default_rng(sample_seed)
+    plaque_count = len(ranges) if isinstance(ranges, tuple) else 1
+    parameters = sample_power_plaque_parameter_batch(
+        ranges,
+        plaque_count,
+        config.empty_artery,
+        rng,
+    )
+    plaques = tuple(
+        create_power_plaque(
+            item,
+            lumen_radius_px=config.empty_artery.lumen_radius_px,
+        )
+        for item in parameters
+    )
+    return PowerPlaqueSample(
+        mask=create_plaque_mask(plaques, config),
+        parameters=parameters,
+        sample_seed=sample_seed,
+    )
+
+
 def generate_plaque_masks_power(
     folder: Path,
     name: str,
@@ -112,29 +174,19 @@ def generate_plaque_masks_power(
     try:
         with temporary_parameters.open("w", encoding="utf-8") as stream:
             for sample_index in range(config.num_elements):
-                sample_seed = _sample_seed(seed, sample_index)
-                rng = np.random.default_rng(sample_seed)
-                plaque_count = len(ranges) if isinstance(ranges, tuple) else 1
-                parameters = sample_power_plaque_parameter_batch(
+                sample = sample_power_plaque_mask(
+                    config,
                     ranges,
-                    plaque_count,
-                    config.empty_artery,
-                    rng,
+                    seed=seed,
+                    sample_index=sample_index,
                 )
-                plaques = tuple(
-                    create_power_plaque(
-                        item,
-                        lumen_radius_px=config.empty_artery.lumen_radius_px,
-                    )
-                    for item in parameters
-                )
-                masks[sample_index] = create_plaque_mask(plaques, config)
+                masks[sample_index] = sample.mask
                 record = {
                     "sample_index": sample_index,
-                    "sample_seed": sample_seed,
+                    "sample_seed": sample.sample_seed,
                     "plaques": [
                         {"type": "power", "parameters": asdict(item)}
-                        for item in parameters
+                        for item in sample.parameters
                     ],
                 }
                 stream.write(json.dumps(record, sort_keys=True) + "\n")
