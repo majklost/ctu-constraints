@@ -65,7 +65,9 @@ def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> No
     root = _create_source_with_plaques(tmp_path)
     fields = np.zeros((2, 2, 65, 65), dtype=np.float32)
     fields[:, 1] = 2
-    np.save(root / "deformations" / "shift-left.npy", fields)
+    preset = root / "deformations" / "shift-left"
+    preset.mkdir()
+    np.save(preset / "fields.npy", fields)
     baseline = ComposedArtificialDataset(root, plaques=("blob",))[0]
     dataset = ComposedArtificialDataset(
         root,

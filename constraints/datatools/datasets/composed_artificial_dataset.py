@@ -7,7 +7,10 @@ import numpy as np
 import torch
 
 from constraints.generators.composition import PlaqueLayer
-from constraints.generators.deformation import apply_deformation
+from constraints.generators.deformation import (
+    apply_deformation,
+    load_deformation_fields,
+)
 from constraints.generators.factories import (
     compose_artificial_sample,
     get_source_config,
@@ -54,7 +57,11 @@ class ComposedArtificialDataset(PerSampleDataset):
         self._deformation_fields = (
             None
             if deformation is None
-            else self._load_deformation_collection(deformation)
+            else load_deformation_fields(
+                self.root / "deformations",
+                deformation,
+                self.config,
+            )
         )
 
         fake_plaques = {} if fake_plaques is None else dict(fake_plaques)
@@ -135,19 +142,6 @@ class ComposedArtificialDataset(PerSampleDataset):
                 f"{expected_shape}, got {masks.shape} {masks.dtype}"
             )
         return masks
-
-    def _load_deformation_collection(self, name: str) -> np.ndarray:
-        if not name or Path(name).name != name:
-            raise ValueError("deformation name must be a filename component")
-        path = self.root / "deformations" / f"{name}.npy"
-        fields = np.load(path, mmap_mode="r")
-        expected_shape = (self.config.num_elements, 2, *self.config.image_size)
-        if fields.shape != expected_shape or fields.dtype != np.float32:
-            raise ValueError(
-                f"invalid deformation {name!r}: expected float32 "
-                f"{expected_shape}, got {fields.shape} {fields.dtype}"
-            )
-        return fields
 
     def _normalize_index(self, index: int) -> int:
         index = int(index)

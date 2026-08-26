@@ -49,6 +49,8 @@ def test_deformation_collection_is_mmap_friendly_and_reproducible(tmp_path) -> N
     assert metadata["array"]["channel_order"] == ["dy", "dx"]
     assert metadata["config"] == config.to_dict()
     assert DeformationConfig.from_dict(metadata["config"]) == config
+    assert first_path == root / "deformations" / "small" / "fields.npy"
+    assert (root / "deformations" / "small" / "rigid").is_dir()
 
 
 def test_deformation_generation_does_not_change_global_torch_rng(tmp_path) -> None:

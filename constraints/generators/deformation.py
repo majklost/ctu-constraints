@@ -1,5 +1,6 @@
 """Generation of independent, named deformation-field collections."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +13,36 @@ from constraints.voxelmorph.utils import random_disp, spatial_transform
 from .storage import write_json
 from .types import DeformationConfig, DeformationRejectionConfig, SourceConfig
 from .validation import DeformationValidationResult, validate_deformation
+
+
+@dataclass(frozen=True)
+class DeformationSample:
+    """One accepted deformation field and its rejection diagnostics."""
+
+    field: NDArray[np.float32]
+    attempts: int
+    validation: DeformationValidationResult
+
+
+def load_deformation_fields(
+    folder: Path,
+    name: str,
+    source_config: SourceConfig,
+) -> np.ndarray:
+    """Load one named deformation preset."""
+    folder = Path(folder)
+    _validate_collection_name(name)
+    preset_folder = folder / name
+    if not preset_folder.is_dir():
+        raise FileNotFoundError(f"deformation preset does not exist: {name}")
+    fields = np.load(preset_folder / "fields.npy", mmap_mode="r")
+    expected_shape = (source_config.num_elements, 2, *source_config.image_size)
+    if fields.shape != expected_shape or fields.dtype != np.float32:
+        raise ValueError(
+            f"invalid deformation {name!r}: expected float32 "
+            f"{expected_shape}, got {fields.shape} {fields.dtype}"
+        )
+    return fields
 
 
 def apply_deformation(
@@ -62,12 +93,15 @@ def generate_deformation_fields(
         rejection = DeformationRejectionConfig()
 
     folder.mkdir(parents=True, exist_ok=True)
-    fields_path = folder / f"{name}.npy"
-    config_path = folder / f"{name}.json"
-    if fields_path.exists() or config_path.exists():
+    preset_folder = folder / name
+    fields_path = preset_folder / "fields.npy"
+    config_path = preset_folder / "config.json"
+    if preset_folder.exists():
         raise FileExistsError(f"deformation collection already exists: {name}")
 
-    temporary_fields = folder / f".{name}.npy.tmp"
+    preset_folder.mkdir()
+    (preset_folder / "rigid").mkdir()
+    temporary_fields = preset_folder / ".fields.npy.tmp"
     height, width = source_config.image_size
     fields = np.lib.format.open_memmap(
         temporary_fields,
@@ -132,7 +166,7 @@ def generate_deformation_fields(
                     ],
                 },
                 "array": {
-                    "relative_path": f"{name}.npy",
+                    "relative_path": "fields.npy",
                     "shape": list(fields.shape),
                     "dtype": str(fields.dtype),
                     "layout": "NCHW",
@@ -148,6 +182,8 @@ def generate_deformation_fields(
         temporary_fields.unlink(missing_ok=True)
         fields_path.unlink(missing_ok=True)
         config_path.unlink(missing_ok=True)
+        (preset_folder / "rigid").rmdir()
+        preset_folder.rmdir()
         raise
     finally:
         del fields
