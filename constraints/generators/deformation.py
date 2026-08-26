@@ -82,12 +82,15 @@ def sample_valid_deformation(
     *,
     seed: int,
     sample_index: int = 0,
+    device: torch.device | str = "cpu",
 ) -> DeformationSample:
     """Generate and validate one deformation without writing it.
 
-    The seed scheme is identical to persisted collections. A preview for a
-    given ``sample_index`` therefore produces the field later stored at the
-    same collection index, independently of collection length.
+    The seed scheme is identical to persisted collections. With the default
+    CPU device, a preview for a given ``sample_index`` therefore produces the
+    field later stored at the same collection index, independently of length.
+    CUDA uses a different random-number backend and preserves the distribution,
+    but is not expected to be bit-identical to CPU generation.
     """
     if seed < 0:
         raise ValueError("seed must be non-negative")
@@ -99,11 +102,17 @@ def sample_valid_deformation(
     source_labels = np.asarray(source_labels)
     if source_labels.shape != source_config.image_size:
         raise ValueError("source_labels must match source_config.image_size")
+    device = torch.device(device)
+    fork_devices: list[int] = []
+    if device.type == "cuda":
+        fork_devices.append(
+            torch.cuda.current_device() if device.index is None else device.index
+        )
 
     height, width = source_config.image_size
     for attempt_index in range(rejection.max_attempts):
         attempt_seed = _attempt_seed(seed, sample_index, attempt_index)
-        with torch.random.fork_rng(devices=[]):
+        with torch.random.fork_rng(devices=fork_devices):
             torch.manual_seed(attempt_seed)
             field = random_disp(
                 shape=(1, 1, height, width),
@@ -111,10 +120,12 @@ def sample_valid_deformation(
                 magnitude=config.magnitude,
                 integrations=config.integrations,
                 voxsize=config.voxsize,
-                device=torch.device("cpu"),
+                device=device,
                 fractal_mode=config.fractal_mode,
             )[0]
-        field_array = field.detach().numpy().astype(np.float32, copy=False)
+        field_array = (
+            field.detach().cpu().numpy().astype(np.float32, copy=False)
+        )
         diagnostics = validate_deformation(
             field_array,
             source_labels,
@@ -142,6 +153,7 @@ def generate_deformation_fields(
     rejection: DeformationRejectionConfig | None = None,
     *,
     seed: int,
+    device: torch.device | str = "cpu",
 ) -> tuple[Path, Path]:
     """Generate one mmap-friendly ``[N, 2, H, W]`` deformation collection."""
     folder = Path(folder)
@@ -150,6 +162,7 @@ def generate_deformation_fields(
         raise ValueError("seed must be non-negative")
     if rejection is None:
         rejection = DeformationRejectionConfig()
+    device = torch.device(device)
 
     folder.mkdir(parents=True, exist_ok=True)
     preset_folder = folder / name
@@ -181,6 +194,7 @@ def generate_deformation_fields(
                 rejection,
                 seed=seed,
                 sample_index=sample_index,
+                device=device,
             )
             fields[sample_index] = sample.field
             attempts_per_sample.append(sample.attempts)
@@ -193,6 +207,7 @@ def generate_deformation_fields(
             {
                 "name": name,
                 "seed": seed,
+                "generation_device": str(device),
                 "sample_seed_scheme": "numpy-seed-sequence-sample-attempt-v1",
                 "config": config.to_dict(),
                 "rejection": rejection.to_dict(),

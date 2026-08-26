@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
 
 from .composition import PlaqueLayer, compose_target_labels
@@ -63,6 +64,7 @@ def preview_artificial_sample(
     *,
     seed: int,
     sample_index: int = 0,
+    deformation_device: torch.device | str = "cpu",
     class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
 ) -> PreviewArtificialSample:
     """Create one directly inspectable sample without reading or writing files."""
@@ -86,6 +88,7 @@ def preview_artificial_sample(
             deformation_rejection,
             seed=seed,
             sample_index=sample_index,
+            device=deformation_device,
         )
         empty_artery = np.rint(
             apply_deformation(empty_artery, deformation.field, method="nearest")
@@ -156,6 +159,7 @@ def create_deformation_collection(
     rejection: DeformationRejectionConfig | None = None,
     *,
     seed: int,
+    device: torch.device | str = "cpu",
 ) -> tuple[Path, Path]:
     """Create one named deformation collection inside a source dataset."""
     source_root = Path(source_root)
@@ -168,6 +172,7 @@ def create_deformation_collection(
         config,
         rejection,
         seed=seed,
+        device=device,
     )
 
 

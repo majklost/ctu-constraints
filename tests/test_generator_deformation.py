@@ -51,6 +51,7 @@ def test_deformation_collection_is_mmap_friendly_and_reproducible(tmp_path) -> N
     metadata = json.loads(first_config_path.read_text())
     assert metadata["array"]["channel_order"] == ["dy", "dx"]
     assert metadata["config"] == config.to_dict()
+    assert metadata["generation_device"] == "cpu"
     assert DeformationConfig.from_dict(metadata["config"]) == config
     assert first_path == root / "deformations" / "small" / "fields.npy"
     assert (root / "deformations" / "small" / "rigid").is_dir()
