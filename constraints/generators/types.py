@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
 from math import isfinite, pi
+from pathlib import Path
 from typing import Any, Literal, Self
 
 import numpy as np
@@ -267,6 +268,57 @@ class PowerPlaqueParameters:
             raise ValueError("wall_depth_px must be non-negative")
         if self.shape_power <= 0:
             raise ValueError("shape_power must be positive")
+
+
+@dataclass(frozen=True)
+class SavedPlaque:
+    """Reference to one stored mask collection and how it should be composed."""
+
+    name: str
+    target_class: ArteryClass = ArteryClass.PLAQUE
+    appearance: AppearanceKind | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.name, str)
+            or not self.name
+            or Path(self.name).name != self.name
+        ):
+            raise ValueError("plaque collection name must be a filename component")
+        target_class = ArteryClass(self.target_class)
+        if target_class not in {
+            ArteryClass.BOUNDARY,
+            ArteryClass.LUMEN,
+            ArteryClass.PLAQUE,
+        }:
+            raise ValueError("saved plaque target must be boundary, lumen, or plaque")
+        object.__setattr__(self, "target_class", target_class)
+        if self.appearance is not None:
+            object.__setattr__(self, "appearance", AppearanceKind(self.appearance))
+
+
+@dataclass(frozen=True)
+class Recipe:
+    """Immutable selection of stored artifacts used to compose a dataset."""
+
+    plaques: tuple[SavedPlaque, ...] = ()
+    deformation: str | None = None
+    rigid: str | None = None
+
+    def __post_init__(self) -> None:
+        plaques = tuple(self.plaques)
+        if not all(isinstance(plaque, SavedPlaque) for plaque in plaques):
+            raise TypeError("recipe plaques must contain SavedPlaque instances")
+        names = [plaque.name for plaque in plaques]
+        if len(names) != len(set(names)):
+            raise ValueError("a recipe cannot contain a plaque collection twice")
+        object.__setattr__(self, "plaques", plaques)
+        for field_name in ("deformation", "rigid"):
+            name = getattr(self, field_name)
+            if name is not None and (
+                not isinstance(name, str) or not name or Path(name).name != name
+            ):
+                raise ValueError(f"{field_name} name must be a filename component")
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from constraints.datatools.datasets import ComposedArtificialDataset
@@ -8,11 +9,14 @@ from constraints.generators.factories import (
 )
 from constraints.generators.source import create_source
 from constraints.generators.types import (
+    AppearanceKind,
     ArteryClass,
     EmptyArteryConfig,
     FloatRange,
     PowerPlaqueSamplingRanges,
+    Recipe,
     RigidConfig,
+    SavedPlaque,
     SourceConfig,
 )
 
@@ -37,7 +41,7 @@ def _create_source_with_plaques(tmp_path):
 
 def test_dataset_composes_selected_real_plaque_collection(tmp_path) -> None:
     root = _create_source_with_plaques(tmp_path)
-    dataset = ComposedArtificialDataset(root, plaques=("blob",))
+    dataset = ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))
 
     sample = dataset[0]
 
@@ -53,7 +57,13 @@ def test_fake_plaque_changes_target_but_keeps_plaque_appearance(tmp_path) -> Non
     root = _create_source_with_plaques(tmp_path)
     dataset = ComposedArtificialDataset(
         root,
-        fake_plaques={"blob": ArteryClass.LUMEN},
+        plaques=(
+            SavedPlaque(
+                "blob",
+                target_class=ArteryClass.LUMEN,
+                appearance=AppearanceKind.PLAQUE,
+            ),
+        ),
     )
     masks = np.load(root / "plaques" / "blob.npy")
 
@@ -71,10 +81,10 @@ def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> No
     preset = root / "deformations" / "shift-left"
     preset.mkdir()
     np.save(preset / "fields.npy", fields)
-    baseline = ComposedArtificialDataset(root, plaques=("blob",))[0]
+    baseline = ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))[0]
     dataset = ComposedArtificialDataset(
         root,
-        plaques=("blob",),
+        plaques=(SavedPlaque("blob"),),
         deformation="shift-left",
     )
 
@@ -99,11 +109,14 @@ def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
         ),
         seed=5,
     )
-    baseline = ComposedArtificialDataset(root, plaques=("blob",))[0]
-    dataset = ComposedArtificialDataset(
-        root,
-        plaques=("blob",),
+    baseline = ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))[0]
+    recipe = Recipe(
+        plaques=(SavedPlaque("blob"),),
         rigid="shift-right",
+    )
+    dataset = ComposedArtificialDataset.from_recipe(
+        root,
+        recipe,
     )
 
     sample = dataset[0]
@@ -113,3 +126,14 @@ def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
         baseline["target_labels"][:, :-2],
     )
     torch.testing.assert_close(sample["rigid"], torch.tensor([0.0, 2.0, 0.0]))
+    assert dataset.recipe == recipe
+
+
+def test_recipe_rejects_duplicate_plaque_collections() -> None:
+    with pytest.raises(ValueError, match="cannot contain.*twice"):
+        Recipe(
+            plaques=(
+                SavedPlaque("blob"),
+                SavedPlaque("blob", target_class=ArteryClass.LUMEN),
+            )
+        )

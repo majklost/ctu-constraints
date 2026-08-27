@@ -76,7 +76,7 @@ def preview_artificial_sample(
 ) -> PreviewArtificialSample:
     """Transform and compose directly supplied Boolean plaque layers."""
     empty_artery = create_empty_artery(artery_config)
-    resolved_plaque_layers = tuple(plaque_layers)
+    plaque_layers = tuple(plaque_layers)
 
     deformation = None
     if deformation_config is not None:
@@ -88,54 +88,28 @@ def preview_artificial_sample(
             sample_index=sample_index,
             device=deformation_device,
         )
-        empty_artery = np.rint(
+    rigid_source = empty_artery
+    if deformation is not None:
+        rigid_source = np.rint(
             apply_deformation(empty_artery, deformation.field, method="nearest")
         ).astype(np.uint8)
-        resolved_plaque_layers = tuple(
-            PlaqueLayer(
-                apply_deformation(layer.mask, deformation.field, method="nearest")
-                > 0.5,
-                layer.target_class,
-                layer.appearance,
-            )
-            for layer in resolved_plaque_layers
-        )
 
-    arrays = compose_artificial_sample(
-        empty_artery,
-        resolved_plaque_layers,
-        class_intensities,
-    )
     rigid = None
     if rigid_config is not None:
         rigid = sample_valid_rigid(
-            empty_artery,
+            rigid_source,
             rigid_config,
             rigid_rejection,
             seed=seed + 2,
             sample_index=sample_index,
         )
-        arrays = ComposedSampleArrays(
-            image=apply_rigid(
-                arrays.image,
-                *rigid.parameters,
-                method="linear",
-            ),
-            target_labels=np.rint(
-                apply_rigid(
-                    arrays.target_labels,
-                    *rigid.parameters,
-                    method="nearest",
-                )
-            ).astype(np.uint8),
-            appearance_labels=np.rint(
-                apply_rigid(
-                    arrays.appearance_labels,
-                    *rigid.parameters,
-                    method="nearest",
-                )
-            ).astype(np.uint8),
-        )
+    arrays = compose_artificial_sample(
+        empty_artery,
+        plaque_layers,
+        class_intensities,
+        deformation_field=None if deformation is None else deformation.field,
+        rigid_parameters=None if rigid is None else rigid.parameters,
+    )
     return PreviewArtificialSample(
         image=arrays.image,
         target_labels=arrays.target_labels,
@@ -242,16 +216,51 @@ def compose_artificial_sample(
     empty_artery: np.ndarray,
     layers: Iterable[PlaqueLayer],
     class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
+    *,
+    deformation_field: np.ndarray | None = None,
+    rigid_parameters: np.ndarray | tuple[float, float, float] | None = None,
 ) -> ComposedSampleArrays:
-    """Compose supervision and appearance, then render the initial image."""
+    """Apply stored transforms and compose one artificial sample."""
     layers = tuple(layers)
+    if deformation_field is not None:
+        empty_artery = np.rint(
+            apply_deformation(empty_artery, deformation_field, method="nearest")
+        ).astype(np.uint8)
+        layers = tuple(
+            PlaqueLayer(
+                apply_deformation(layer.mask, deformation_field, method="nearest")
+                > 0.5,
+                layer.target_class,
+                layer.appearance,
+            )
+            for layer in layers
+        )
     label_maps = compose_label_maps(empty_artery, layers)
     image = create_grayscale_image_from_label_mask(
         label_maps.appearance_labels,
         class_intensities,
     )
-    return ComposedSampleArrays(
+    arrays = ComposedSampleArrays(
         image=image,
         target_labels=label_maps.target_labels,
         appearance_labels=label_maps.appearance_labels,
+    )
+    if rigid_parameters is None:
+        return arrays
+    return ComposedSampleArrays(
+        image=apply_rigid(arrays.image, *rigid_parameters, method="linear"),
+        target_labels=np.rint(
+            apply_rigid(
+                arrays.target_labels,
+                *rigid_parameters,
+                method="nearest",
+            )
+        ).astype(np.uint8),
+        appearance_labels=np.rint(
+            apply_rigid(
+                arrays.appearance_labels,
+                *rigid_parameters,
+                method="nearest",
+            )
+        ).astype(np.uint8),
     )

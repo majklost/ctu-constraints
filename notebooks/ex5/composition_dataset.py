@@ -31,12 +31,14 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from constraints import get_data_folder
-from constraints.datatools.datasets import ComposedArtificialDataset
+from constraints.datatools.datasets import ComposedArtificialDataset, SavedPlaque
 
 # %%
 source_root = get_data_folder() / "artificial" / "demo"
 dataset = ComposedArtificialDataset(
-    source_root, plaques=("2blobs",), deformation="validated-default"
+    source_root,
+    plaques=(SavedPlaque("2blobs"),),
+    deformation="validated-default",
 )
 print(f"Loaded {len(dataset)} samples from {source_root}")
 
@@ -78,11 +80,19 @@ Fake plaques can be selected independently and assigned their anatomical target:
 ```python
 dataset = ComposedArtificialDataset(
     source_root,
-    plaques=("2blobs",),
-    fake_plaques={
-        "floating-plaque": ArteryClass.LUMEN,
-        "wall-artifact": ArteryClass.BOUNDARY,
-    },
+    plaques=(
+        SavedPlaque("2blobs"),
+        SavedPlaque(
+            "floating-plaque",
+            target_class=ArteryClass.LUMEN,
+            appearance=AppearanceKind.PLAQUE,
+        ),
+        SavedPlaque(
+            "wall-artifact",
+            target_class=ArteryClass.BOUNDARY,
+            appearance=AppearanceKind.PLAQUE,
+        ),
+    ),
 )
 ```
 
@@ -152,9 +162,9 @@ real_parameters = plaque_range1.sample(
     wall_thickness_px=artery_config.wall_thickness_px,
     rng=rng,
 )
-fake_lumen_radius_px = artery_config.lumen_radius_px - 5
+fake_lumen_radius_px = artery_config.lumen_radius_px - 10
 fake_parameters = fake_plaque_range.sample(
-    8,
+    5,
     lumen_radius_px=fake_lumen_radius_px,
     wall_thickness_px=artery_config.wall_thickness_px,
     rng=rng,
@@ -164,7 +174,7 @@ plaque_layers = (
         create_power_plaque_mask(
             fake_parameters, artery_config, lumen_radius_px=fake_lumen_radius_px
         ),
-        ArteryClass.BOUNDARY,
+        ArteryClass.LUMEN,
         AppearanceKind.PLAQUE,
     ),
     PlaqueLayer(create_power_plaque_mask(real_parameters, artery_config)),
@@ -178,9 +188,11 @@ sample = preview_artificial_sample(
     plaque_layers,
     deformation_config=dc,
     deformation_rejection=drc,
-    rigid_config=rc,
+    # rigid_config=rc,
     seed=rn,
 )
 plt.imshow(sample.target_labels)
+plt.show()
+plt.imshow(sample.image,cmap="grey")
 
 # %%

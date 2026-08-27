@@ -6,18 +6,19 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from constraints.generators.deformation import (
-    apply_deformation,
-    load_deformation_fields,
-)
+from constraints.generators.deformation import load_deformation_fields
 from constraints.generators.factories import (
-    ComposedSampleArrays,
     compose_artificial_sample,
     get_source_config,
 )
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
-from constraints.generators.rigid import apply_rigid, load_rigid_parameters
-from constraints.generators.types import AppearanceKind, ArteryClass, PlaqueLayer
+from constraints.generators.rigid import load_rigid_parameters
+from constraints.generators.types import (
+    AppearanceKind,
+    PlaqueLayer,
+    Recipe,
+    SavedPlaque,
+)
 
 from ..label_schema import LabelSchema
 from .base_dataset import PerSampleDataset
@@ -35,67 +36,65 @@ _LABEL_SCHEMA = LabelSchema.from_lists(
 
 
 class ComposedArtificialDataset(PerSampleDataset):
-    """Compose selected plaque collections lazily for each source sample.
-
-    ``plaques`` contains names of real-plaque collections. ``fake_plaques``
-    maps collection names to the anatomical class they imitate in the target.
-    """
+    """Compose an ordered selection of stored artifacts lazily."""
 
     def __init__(
         self,
         root: Path,
         *,
-        plaques: Sequence[str] = (),
-        fake_plaques: Mapping[str, ArteryClass] | None = None,
+        plaques: Sequence[SavedPlaque] = (),
         deformation: str | None = None,
         rigid: str | None = None,
         class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
     ) -> None:
         self.root = Path(root)
+        self.recipe = Recipe(tuple(plaques), deformation, rigid)
         self.config = get_source_config(self.root)
         self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
         self._class_intensities = dict(class_intensities)
-        self._deformation_name = deformation
         self._deformation_fields = (
             None
-            if deformation is None
+            if self.recipe.deformation is None
             else load_deformation_fields(
                 self.root / "deformations",
-                deformation,
+                self.recipe.deformation,
                 self.config,
             )
         )
         self._rigid_parameters = (
             None
-            if rigid is None
+            if self.recipe.rigid is None
             else load_rigid_parameters(
                 self.root
-                if deformation is None
-                else self.root / "deformations" / deformation,
-                rigid,
+                if self.recipe.deformation is None
+                else self.root / "deformations" / self.recipe.deformation,
+                self.recipe.rigid,
                 self.config,
             )
         )
+        self._plaque_masks = tuple(
+            (plaque, self._load_plaque_collection(plaque.name))
+            for plaque in self.recipe.plaques
+        )
 
-        fake_plaques = {} if fake_plaques is None else dict(fake_plaques)
-        duplicate_names = set(plaques) & fake_plaques.keys()
-        if duplicate_names:
-            raise ValueError(
-                f"collections cannot be both real and fake: {sorted(duplicate_names)}"
-            )
-
-        self._real_masks = {
-            name: self._load_plaque_collection(name) for name in plaques
-        }
-        self._fake_masks: dict[str, tuple[np.ndarray, ArteryClass]] = {}
-        for name, target_class in fake_plaques.items():
-            target_class = ArteryClass(target_class)
-            if target_class not in {ArteryClass.BOUNDARY, ArteryClass.LUMEN}:
-                raise ValueError("fake plaques must resolve to boundary or lumen")
-            self._fake_masks[name] = (
-                self._load_plaque_collection(name),
-                target_class,
-            )
+    @classmethod
+    def from_recipe(
+        cls,
+        root: Path,
+        recipe: Recipe,
+        *,
+        class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
+    ) -> "ComposedArtificialDataset":
+        """Load a dataset from an explicit artifact-selection recipe."""
+        if not isinstance(recipe, Recipe):
+            raise TypeError("recipe must be a Recipe instance")
+        return cls(
+            root,
+            plaques=recipe.plaques,
+            deformation=recipe.deformation,
+            rigid=recipe.rigid,
+            class_intensities=class_intensities,
+        )
 
     def __len__(self) -> int:
         return self.config.num_elements
@@ -105,59 +104,26 @@ class ComposedArtificialDataset(PerSampleDataset):
         layers = [
             PlaqueLayer(
                 masks[index],
-                target_class,
-                AppearanceKind.PLAQUE,
+                plaque.target_class,
+                plaque.appearance,
             )
-            for masks, target_class in self._fake_masks.values()
+            for plaque, masks in self._plaque_masks
         ]
-        layers.extend(
-            PlaqueLayer(masks[index], ArteryClass.PLAQUE)
-            for masks in self._real_masks.values()
+        field = (
+            None
+            if self._deformation_fields is None
+            else self._deformation_fields[index]
         )
-        empty_artery = self._empty_artery
-        field = None
-        if self._deformation_fields is not None:
-            field = self._deformation_fields[index]
-            empty_artery = np.rint(
-                apply_deformation(empty_artery, field, method="nearest")
-            ).astype(np.uint8)
-            layers = [
-                PlaqueLayer(
-                    apply_deformation(layer.mask, field, method="nearest") > 0.5,
-                    layer.target_class,
-                    layer.appearance,
-                )
-                for layer in layers
-            ]
+        rigid_parameters = (
+            None if self._rigid_parameters is None else self._rigid_parameters[index]
+        )
         arrays = compose_artificial_sample(
-            empty_artery,
+            self._empty_artery,
             layers,
             self._class_intensities,
+            deformation_field=field,
+            rigid_parameters=rigid_parameters,
         )
-        rigid_parameters = None
-        if self._rigid_parameters is not None:
-            rigid_parameters = self._rigid_parameters[index]
-            arrays = ComposedSampleArrays(
-                image=apply_rigid(
-                    arrays.image,
-                    *rigid_parameters,
-                    method="linear",
-                ),
-                target_labels=np.rint(
-                    apply_rigid(
-                        arrays.target_labels,
-                        *rigid_parameters,
-                        method="nearest",
-                    )
-                ).astype(np.uint8),
-                appearance_labels=np.rint(
-                    apply_rigid(
-                        arrays.appearance_labels,
-                        *rigid_parameters,
-                        method="nearest",
-                    )
-                ).astype(np.uint8),
-            )
         sample = Sample(
             image=torch.from_numpy(arrays.image[None]),
             target_labels=torch.from_numpy(arrays.target_labels).long(),

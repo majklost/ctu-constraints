@@ -35,6 +35,7 @@ from constraints.generators.types import (
     FloatRange,
     PowerPlaqueSamplingRanges,
     RigidConfig,
+    SavedPlaque,
     SourceConfig,
 )
 from constraints.utils import signed_distance_kornia, signed_distance_scipy
@@ -428,14 +429,15 @@ def main() -> None:
             "pass --prepare-demo to create one"
         )
 
+    saved_plaques = tuple(SavedPlaque(name) for name in args.plaque)
     geometry_dataset = ComposedArtificialDataset(
         args.source_root,
-        plaques=tuple(args.plaque),
+        plaques=saved_plaques,
         deformation=args.deformation,
     )
     dataset = ComposedArtificialDataset(
         args.source_root,
-        plaques=tuple(args.plaque),
+        plaques=saved_plaques,
         deformation=args.deformation,
         rigid=args.rigid,
     )

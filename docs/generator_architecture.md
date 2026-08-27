@@ -12,7 +12,7 @@ source root
           └── dependent rigid presets    │
                                          ▼
                          ComposedArtificialDataset
-                            compose → deform → rigid
+                            deform → compose → rigid
                                       │
                                       ▼
                               image + target labels
@@ -23,8 +23,11 @@ source root
 ### Configuration and pure geometry
 
 - `generators/types.py` contains shared configuration, parameter, and runtime
-  layer dataclasses. `PowerPlaqueSamplingRanges.sample()` resolves any number
-  of independent parameter sets from one range configuration.
+  layer dataclasses. `SavedPlaque` gives one stored Boolean mask collection its
+  target and appearance meanings, while `Recipe` is the immutable ordered
+  selection of plaques, deformation, and rigid preset.
+  `PowerPlaqueSamplingRanges.sample()` resolves any number of independent
+  parameter sets from one range configuration.
 - `generators/parametrization/` rasterizes self-contained empty-artery configs
   and converts tuples of plaque parameters into Boolean union masks.
 - `generators/composition.py` overlays independent Boolean plaque masks onto
@@ -58,8 +61,9 @@ whole child subtree therefore cannot invalidate a sibling.
   source root and delegates to the relevant producer; generation algorithms do
   not belong here.
 - `datatools/datasets/composed_artificial_dataset.py` is a read-only consumer.
-  For an index it loads selected plaque masks, applies the selected deformation,
-  composes targets and grayscale image, then applies the selected rigid preset.
+  It can be constructed from a `Recipe`. For an index it loads the selected
+  plaque masks, applies the selected deformation, composes targets and
+  grayscale image, then applies the selected rigid preset.
 - `scripts/create_*.py` only parse command-line arguments and call the facade.
 - `generators/deprecated/` and
   `scripts/create_artificial_dataset.py` belong to the old fully materialized
