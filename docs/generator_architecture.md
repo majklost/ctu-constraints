@@ -24,10 +24,14 @@ source root
 
 - `generators/types.py` contains shared configuration, parameter, and runtime
   layer dataclasses. `SavedPlaque` gives one stored Boolean mask collection its
-  target and appearance meanings, while `Recipe` is the immutable ordered
-  selection of plaques, deformation, and rigid preset.
-  `PowerPlaqueSamplingRanges.sample()` resolves any number of independent
-  parameter sets from one range configuration.
+  target and appearance meanings. `PowerPlaqueSamplingRanges.sample()` resolves
+  any number of independent parameter sets from one range configuration.
+- `generators/recipes.py` defines the immutable `Recipe`: the ordered plaques,
+  deformation, rigid preset, and appearance intensities. It owns the strict,
+  versioned JSON round trip used for experiment provenance.
+- `generators/sdf_cache.py` defines—but does not yet materialize—the versioned
+  identity, configuration, digest, and directory contract for pre-rigid SDF
+  caches.
 - `generators/parametrization/` rasterizes self-contained empty-artery configs
   and converts tuples of plaque parameters into Boolean union masks.
 - `generators/composition.py` overlays independent Boolean plaque masks onto
@@ -100,10 +104,18 @@ load empty artery and selected masks
 ```
 
 The planned SDF cache belongs after composition and deformation but before
-rigid transformation. Consequently, its identity depends on the source,
-selected plaques and fake-plaque targets, deformation, class-channel order, and
-SDF parameters. It does not depend on rigid motion, grayscale intensity, or
-image-only noise.
+rigid transformation. `SDFCacheIdentity` is an explicit projection rather than
+a hash of the complete recipe: it includes the source ID, ordered plaque names
+and target classes, deformation, composition/application contract versions,
+class-channel order, and SDF parameters. It excludes rigid motion, plaque
+appearance, and grayscale intensity. Adding an unrelated recipe field therefore
+does not invalidate the cache; changing an SDF-relevant contract is deliberate
+and versioned.
+
+The proposed cache directory is
+`derived/sdf-v<identity-version>-<sha256>/`. The digest is calculated from
+canonical JSON, while the future cache manifest should retain the full identity
+payload so a directory is always explainable without reversing its name.
 
 Generation and cache preparation happen outside `Dataset.__getitem__`.
 `__getitem__` stays deterministic, read-only, and free of rejection sampling or

@@ -11,12 +11,14 @@ from constraints.generators.factories import (
     compose_artificial_sample,
     get_source_config,
 )
+from constraints.generators.recipes import Recipe
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.rigid import load_rigid_parameters
+from constraints.generators.sdf_cache import SDFCacheConfig, SDFCacheIdentity
+from constraints.generators.storage import read_manifest
 from constraints.generators.types import (
     AppearanceKind,
     PlaqueLayer,
-    Recipe,
     SavedPlaque,
 )
 
@@ -48,10 +50,15 @@ class ComposedArtificialDataset(PerSampleDataset):
         class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
     ) -> None:
         self.root = Path(root)
-        self.recipe = Recipe(tuple(plaques), deformation, rigid)
+        self.recipe = Recipe(
+            tuple(plaques),
+            deformation,
+            rigid,
+            class_intensities,
+        )
         self.config = get_source_config(self.root)
         self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
-        self._class_intensities = dict(class_intensities)
+        self._class_intensities = self.recipe.class_intensities
         self._deformation_fields = (
             None
             if self.recipe.deformation is None
@@ -82,8 +89,6 @@ class ComposedArtificialDataset(PerSampleDataset):
         cls,
         root: Path,
         recipe: Recipe,
-        *,
-        class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
     ) -> "ComposedArtificialDataset":
         """Load a dataset from an explicit artifact-selection recipe."""
         if not isinstance(recipe, Recipe):
@@ -93,7 +98,7 @@ class ComposedArtificialDataset(PerSampleDataset):
             plaques=recipe.plaques,
             deformation=recipe.deformation,
             rigid=recipe.rigid,
-            class_intensities=class_intensities,
+            class_intensities=recipe.class_intensities,
         )
 
     def __len__(self) -> int:
@@ -138,6 +143,17 @@ class ComposedArtificialDataset(PerSampleDataset):
     @property
     def label_schema(self) -> LabelSchema:
         return _LABEL_SCHEMA
+
+    def sdf_cache_identity(
+        self,
+        config: SDFCacheConfig | None = None,
+    ) -> SDFCacheIdentity:
+        """Describe the pre-rigid SDF cache shared by compatible recipes."""
+        manifest = read_manifest(self.root)
+        dataset_id = manifest.get("dataset_id")
+        if not isinstance(dataset_id, str) or not dataset_id:
+            raise ValueError("source manifest has no dataset_id")
+        return SDFCacheIdentity.from_recipe(dataset_id, self.recipe, config)
 
     def _load_plaque_collection(self, name: str) -> np.ndarray:
         if not name or Path(name).name != name:

@@ -298,30 +298,6 @@ class SavedPlaque:
 
 
 @dataclass(frozen=True)
-class Recipe:
-    """Immutable selection of stored artifacts used to compose a dataset."""
-
-    plaques: tuple[SavedPlaque, ...] = ()
-    deformation: str | None = None
-    rigid: str | None = None
-
-    def __post_init__(self) -> None:
-        plaques = tuple(self.plaques)
-        if not all(isinstance(plaque, SavedPlaque) for plaque in plaques):
-            raise TypeError("recipe plaques must contain SavedPlaque instances")
-        names = [plaque.name for plaque in plaques]
-        if len(names) != len(set(names)):
-            raise ValueError("a recipe cannot contain a plaque collection twice")
-        object.__setattr__(self, "plaques", plaques)
-        for field_name in ("deformation", "rigid"):
-            name = getattr(self, field_name)
-            if name is not None and (
-                not isinstance(name, str) or not name or Path(name).name != name
-            ):
-                raise ValueError(f"{field_name} name must be a filename component")
-
-
-@dataclass(frozen=True)
 class PlaqueLayer:
     """One plaque-like mask with independent target and visual meanings."""
 

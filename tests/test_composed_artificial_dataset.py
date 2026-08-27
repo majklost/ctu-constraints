@@ -1,12 +1,15 @@
+import json
+
 import numpy as np
 import pytest
 import torch
 
-from constraints.datatools.datasets import ComposedArtificialDataset
+from constraints.datatools.datasets import ComposedArtificialDataset, Recipe
 from constraints.generators.factories import (
     create_plaque_collection,
     create_rigid_collection,
 )
+from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.source import create_source
 from constraints.generators.types import (
     AppearanceKind,
@@ -14,7 +17,6 @@ from constraints.generators.types import (
     EmptyArteryConfig,
     FloatRange,
     PowerPlaqueSamplingRanges,
-    Recipe,
     RigidConfig,
     SavedPlaque,
     SourceConfig,
@@ -72,6 +74,27 @@ def test_fake_plaque_changes_target_but_keeps_plaque_appearance(tmp_path) -> Non
 
     assert torch.all(sample["target_labels"][fake_pixels] == ArteryClass.LUMEN)
     assert torch.all(sample["image"][0, fake_pixels] == 1.0)
+
+
+def test_dataset_uses_class_intensities_from_recipe(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    recipe = Recipe(
+        plaques=(SavedPlaque("blob"),),
+        class_intensities={
+            **DEFAULT_CLASS_INTENSITIES,
+            AppearanceKind.PLAQUE: 0.8,
+        },
+    )
+    masks = np.load(root / "plaques" / "blob.npy")
+
+    dataset = ComposedArtificialDataset.from_recipe(root, recipe)
+    sample = dataset[0]
+
+    assert torch.all(sample["image"][0, torch.from_numpy(masks[0])] == 0.8)
+
+    identity = dataset.sdf_cache_identity()
+    source_id = json.loads((root / "manifest.json").read_text())["dataset_id"]
+    assert identity.source_dataset_id == source_id
 
 
 def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> None:

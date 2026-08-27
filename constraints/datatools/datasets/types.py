@@ -3,6 +3,8 @@ from typing import Literal, NotRequired, TypedDict
 
 import torch
 
+SDFMode = Literal["kornia", "scipy"]
+
 
 class Sample(TypedDict):
     image: torch.Tensor  # [C, H, W]

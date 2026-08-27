@@ -249,58 +249,56 @@ missing indices and atomically rewrite the final JSONL in index order.
 
 ### 5.3 Derived recipe identity
 
-Normalize a recipe to canonical JSON with sorted keys and no filesystem-specific
-values, then calculate a SHA-256 hash. The recipe hash must cover every choice
-that can change target labels or SDF values, including:
+Do not hash the complete dataset recipe for a derived cache. Each cache type
+defines an explicit, versioned identity projection containing only inputs that
+can change its values. The current pre-rigid SDF projection includes the source
+`dataset_id`, ordered plaque collection names and target classes, deformation,
+composition and deformation-application contract versions, foreground-channel
+order, and SDF implementation settings.
 
-- source `dataset_id`;
-- inclusion of real and fake plaque categories;
-- fake-plaque target class;
-- deformation preset and manifest hash;
-- label composition priority;
-- deformation interpolation and discretization policy;
-- SDF implementation and its parameters;
-- rigid preset when the cached SDF is recomputed after rigid transformation.
-
-Grayscale intensity and image-only noise do not belong in a pre-rigid SDF cache
-key.
+It deliberately excludes plaque appearance, class intensities, and rigid
+motion. Therefore adding an unrelated field to `Recipe` does not invalidate SDF
+caches. Adding a new SDF-relevant input requires deliberately extending and
+versioning `SDFCacheIdentity`.
 
 ### 5.4 Dataset recipe contract
 
-Represent a recipe as a frozen dataclass in code and JSON in manifests. Version
-1 has this logical structure (exact Python class names may differ):
+`Recipe` is a frozen dataclass in code and has a strict JSON representation for
+experiment provenance. Version 1 has this structure:
 
 ```json
 {
+  "format_name": "composed-artificial-recipe",
   "format_version": 1,
-  "source_dataset_id": "uuid",
-  "plaques": {
-    "include_real": true,
-    "include_fake": true,
-    "fake_target": "boundary",
-    "priority": ["artery", "fake", "real"]
-  },
-  "deformation": {"preset": "small_local"},
-  "rigid": {"preset": "easy"},
-  "grayscale": {
+  "plaques": [
+    {
+      "name": "real-plaques",
+      "target_class": "plaque",
+      "appearance": null
+    },
+    {
+      "name": "fake-shadow",
+      "target_class": "lumen",
+      "appearance": "plaque"
+    }
+  ],
+  "deformation": "small-local",
+  "rigid": "easy",
+  "class_intensities": {
     "background": 0.0,
-    "boundary": 0.2,
-    "lumen": 0.4,
-    "plaque": 0.7,
-    "fake_plaque": 0.7
-  },
-  "sdf": {"implementation": "scipy", "policy": "transform_cached"},
-  "noise": {"presets": ["speckle_default"], "mode": "fixed"}
+    "boundary": 0.65,
+    "lumen": 0.25,
+    "plaque": 1.0
+  }
 }
 ```
 
-Omitting deformation or rigid motion is represented by `{"preset": null}` and
-means identity. Paths are supplied separately when constructing a dataset and
-are excluded from recipe hashing. Dataset initialization resolves preset names
-to manifests, verifies their parent identities, and includes the resolved
-manifest hashes in the effective recipe hash. Unknown fields, unknown class
-names, missing intensities for an enabled synthesis class, non-Boolean plaque
-inclusion flags, and incompatible SDF policies are initialization errors.
+Omitting deformation or rigid motion is represented by `null` and means
+identity. The source path is supplied separately to
+`ComposedArtificialDataset.from_recipe()`. Unknown fields, versions, class
+names, and missing intensities for enabled appearances are initialization
+errors. Frequently used recipes may be declared in code, but every experiment
+should save the resolved JSON recipe alongside its other provenance.
 
 ## 6. Raw anatomy generation
 

@@ -10,9 +10,8 @@ from constraints.datatools.datasets.types import TemplateAssets
 from ...utils import signed_distance_kornia, signed_distance_scipy
 from ..label_schema import LabelSchema
 from .base_dataset import PerSampleDataset
-from .types import Sample
+from .types import Sample, SDFMode
 
-SDFMode = Literal["kornia", "scipy"]
 BAD_INDICES_FILENAME = "bad_indices.csv"
 _ArtificialMaskLabel = ["background", "boundary", "lumen", "plaque"]
 _ArtificialMaskColor = [
