@@ -1,36 +1,55 @@
 import numpy as np
 import pytest
 
-from constraints.generators.composition import PlaqueLayer, compose_target_labels
-from constraints.generators.factories import (
-    PreviewPlaqueLayer,
-    preview_artificial_sample,
-)
-from constraints.generators.parametrization.plaque_generators import (
-    create_empty_artery,
-)
-from constraints.generators.source import sample_power_plaque_mask
+from constraints.generators.factories import preview_artificial_sample
+from constraints.generators.parametrization import create_power_plaque_mask
 from constraints.generators.types import (
     ArteryClass,
     DeformationConfig,
     EmptyArteryConfig,
     FloatRange,
+    PlaqueLayer,
     PowerPlaqueSamplingRanges,
-    RigidBounds,
+    RigidConfig,
     RigidRejectionConfig,
-    SourceConfig,
 )
 
 
-def test_preview_sample_requires_no_storage_and_returns_resolved_values() -> None:
-    source_config = SourceConfig(
-        num_elements=10,
-        image_size=(33, 33),
-        empty_artery=EmptyArteryConfig(10, 3),
+def _sample_mask(
+    artery_config: EmptyArteryConfig,
+    ranges: PowerPlaqueSamplingRanges,
+    num: int,
+    *,
+    seed: int,
+    lumen_radius_px: float | None = None,
+) -> np.ndarray:
+    if lumen_radius_px is None:
+        lumen_radius_px = artery_config.lumen_radius_px
+    parameters = ranges.sample(
+        num,
+        lumen_radius_px=lumen_radius_px,
+        wall_thickness_px=artery_config.wall_thickness_px,
+        rng=np.random.default_rng(seed),
+    )
+    return create_power_plaque_mask(
+        parameters,
+        artery_config,
+        lumen_radius_px=lumen_radius_px,
+    )
+
+
+def test_preview_sample_requires_no_storage() -> None:
+    artery_config = EmptyArteryConfig(10, 3, (33, 33))
+    plaque_mask = _sample_mask(
+        artery_config,
+        PowerPlaqueSamplingRanges(),
+        1,
+        seed=23,
     )
 
     sample = preview_artificial_sample(
-        source_config,
+        artery_config,
+        (PlaqueLayer(plaque_mask),),
         deformation_config=DeformationConfig(
             scales=8,
             magnitude=0,
@@ -41,82 +60,71 @@ def test_preview_sample_requires_no_storage_and_returns_resolved_values() -> Non
         sample_index=4,
     )
 
-    assert sample.image.shape == source_config.image_size
+    assert sample.image.shape == artery_config.image_size
     assert sample.image.dtype == np.float32
-    assert sample.target_labels.shape == source_config.image_size
+    assert sample.target_labels.shape == artery_config.image_size
     assert sample.target_labels.dtype == np.uint8
     assert ArteryClass.PLAQUE in sample.target_labels
-    assert len(sample.plaque_parameters) == 1
-    assert sample.plaque_parameters_by_layer == {"preview": sample.plaque_parameters}
     assert sample.deformation_field is not None
-    assert sample.deformation_field.shape == (2, *source_config.image_size)
+    assert sample.deformation_field.shape == (2, *artery_config.image_size)
     assert sample.deformation_validation is not None
     assert sample.deformation_validation.accepted
     assert sample.rigid_parameters is None
 
 
-def test_preview_sample_accepts_real_and_fake_plaque_layers() -> None:
-    source_config = SourceConfig(
-        num_elements=10,
-        image_size=(33, 33),
-        empty_artery=EmptyArteryConfig(10, 3),
-    )
-    real_ranges = PowerPlaqueSamplingRanges(
-        angle_rad=FloatRange.fixed(0),
-        angular_width_rad=FloatRange.fixed(0.4),
+def test_one_range_can_create_multiple_plaques_in_one_preview_layer() -> None:
+    artery_config = EmptyArteryConfig(20, 5, (65, 65))
+    ranges = PowerPlaqueSamplingRanges(
+        angular_width_rad=FloatRange.fixed(0.25),
         inward_depth_fraction=FloatRange.fixed(0.2),
         wall_depth_fraction=FloatRange.fixed(0.2),
-        shape_power=FloatRange.fixed(0.5),
     )
-    fake_ranges = PowerPlaqueSamplingRanges(
-        angle_rad=FloatRange.fixed(np.pi),
-        angular_width_rad=FloatRange.fixed(0.4),
-        inward_depth_fraction=FloatRange.fixed(0.2),
-        wall_depth_fraction=FloatRange.fixed(0.2),
-        shape_power=FloatRange.fixed(0.5),
+    parameters = ranges.sample(
+        8,
+        lumen_radius_px=artery_config.lumen_radius_px,
+        wall_thickness_px=artery_config.wall_thickness_px,
+        rng=np.random.default_rng(8),
     )
+    mask = create_power_plaque_mask(parameters, artery_config)
 
     sample = preview_artificial_sample(
-        source_config,
+        artery_config,
+        (PlaqueLayer(mask, ArteryClass.PLAQUE),),
         seed=23,
-        sample_index=4,
-        plaque_layers=(
-            PreviewPlaqueLayer("real", real_ranges),
-            PreviewPlaqueLayer("fake", fake_ranges, ArteryClass.LUMEN),
-        ),
     )
 
-    real = sample_power_plaque_mask(source_config, real_ranges, seed=23, sample_index=4)
-    fake = sample_power_plaque_mask(source_config, fake_ranges, seed=24, sample_index=4)
-    expected = compose_target_labels(
-        create_empty_artery(
-            source_config.empty_artery,
-            source_config.image_size,
-        ),
+    assert len(parameters) == 8
+    np.testing.assert_array_equal(
+        sample.target_labels[mask],
+        ArteryClass.PLAQUE,
+    )
+
+
+def test_preview_accepts_ordered_real_and_fake_plaque_layers() -> None:
+    artery_config = EmptyArteryConfig(10, 3, (33, 33))
+    overlap = np.zeros(artery_config.image_size, dtype=bool)
+    overlap[16, 16] = True
+
+    sample = preview_artificial_sample(
+        artery_config,
         (
-            PlaqueLayer("real", real.mask, ArteryClass.PLAQUE),
-            PlaqueLayer("fake", fake.mask, ArteryClass.LUMEN),
+            PlaqueLayer(overlap, ArteryClass.PLAQUE),
+            PlaqueLayer(overlap, ArteryClass.LUMEN),
         ),
+        seed=23,
     )
 
-    np.testing.assert_array_equal(sample.target_labels, expected)
-    assert sample.plaque_parameters_by_layer == {
-        "real": real.parameters,
-        "fake": fake.parameters,
-    }
+    assert sample.target_labels[16, 16] == ArteryClass.LUMEN
+    assert sample.image[16, 16] == 1.0
 
 
 def test_preview_sample_accepts_and_applies_rigid_configuration() -> None:
-    source_config = SourceConfig(
-        num_elements=10,
-        image_size=(33, 33),
-        empty_artery=EmptyArteryConfig(10, 3),
-    )
-    baseline = preview_artificial_sample(source_config, seed=23, sample_index=4)
+    artery_config = EmptyArteryConfig(10, 3, (33, 33))
+    baseline = preview_artificial_sample(artery_config, seed=23, sample_index=4)
 
     sample = preview_artificial_sample(
-        source_config,
-        rigid_config=RigidBounds(
+        artery_config,
+        rigid_config=RigidConfig(
             angle=FloatRange.fixed(0),
             dx=FloatRange.fixed(2),
             dy=FloatRange.fixed(-1),
@@ -136,16 +144,12 @@ def test_preview_sample_accepts_and_applies_rigid_configuration() -> None:
 
 
 def test_preview_sample_applies_rigid_rejection_configuration() -> None:
-    source_config = SourceConfig(
-        num_elements=1,
-        image_size=(33, 33),
-        empty_artery=EmptyArteryConfig(10, 3),
-    )
+    artery_config = EmptyArteryConfig(10, 3, (33, 33))
 
     with pytest.raises(RuntimeError, match="failed to sample valid rigid"):
         preview_artificial_sample(
-            source_config,
-            rigid_config=RigidBounds(
+            artery_config,
+            rigid_config=RigidConfig(
                 angle=FloatRange.fixed(0),
                 dx=FloatRange.fixed(20),
                 dy=FloatRange.fixed(0),

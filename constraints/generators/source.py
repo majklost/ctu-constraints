@@ -12,10 +12,8 @@ import numpy as np
 
 from .parametrization.plaque_generators import (
     create_empty_artery,
-    create_plaque_mask,
-    create_power_plaque,
+    create_power_plaque_mask,
 )
-from .parametrization.plaque_samplers import sample_power_plaque_parameter_batch
 from .storage import FORMAT_NAME, FORMAT_VERSION, write_json
 from .types import (
     ArteryClass,
@@ -41,7 +39,7 @@ def create_source(root: Path, config: SourceConfig) -> None:
     accidentally acquire a new identity.
     """
     root = Path(root)
-    empty_artery = create_empty_artery(config.empty_artery, config.image_size)
+    empty_artery = create_empty_artery(config.empty_artery)
     provenance = _git_provenance()
 
     root.mkdir(parents=True)
@@ -64,7 +62,7 @@ def create_source(root: Path, config: SourceConfig) -> None:
                 "relative_path": "empty_artery.npy",
                 "shape": list(empty_artery.shape),
                 "dtype": str(empty_artery.dtype),
-            }
+            },
         },
         **provenance,
     }
@@ -97,8 +95,6 @@ def sample_power_plaque_mask(
     ``seed`` and ``sample_index`` use the same scheme as persisted plaque
     collections, so a preview can be reproduced exactly during generation.
     """
-    if config.plaque_generation_method != "power":
-        raise ValueError("source config does not select power plaque generation")
     if seed < 0:
         raise ValueError("seed must be non-negative")
     if sample_index < 0:
@@ -110,22 +106,19 @@ def sample_power_plaque_mask(
 
     sample_seed = _sample_seed(seed, sample_index)
     rng = np.random.default_rng(sample_seed)
-    plaque_count = len(ranges) if isinstance(ranges, tuple) else 1
-    parameters = sample_power_plaque_parameter_batch(
-        ranges,
-        plaque_count,
-        config.empty_artery,
-        rng,
-    )
-    plaques = tuple(
-        create_power_plaque(
-            item,
+    ranges_per_plaque = ranges if isinstance(ranges, tuple) else (ranges,)
+    parameters = tuple(
+        parameter
+        for item in ranges_per_plaque
+        for parameter in item.sample(
+            1,
             lumen_radius_px=config.empty_artery.lumen_radius_px,
+            wall_thickness_px=config.empty_artery.wall_thickness_px,
+            rng=rng,
         )
-        for item in parameters
     )
     return PowerPlaqueSample(
-        mask=create_plaque_mask(plaques, config),
+        mask=create_power_plaque_mask(parameters, config.empty_artery),
         parameters=parameters,
         sample_seed=sample_seed,
     )
@@ -149,8 +142,6 @@ def generate_plaque_masks_power(
     """
     folder = Path(folder)
     _validate_artifact_name(name)
-    if config.plaque_generation_method != "power":
-        raise ValueError("source config does not select power plaque generation")
     if seed < 0:
         raise ValueError("seed must be non-negative")
     if ranges is None:
@@ -170,7 +161,7 @@ def generate_plaque_masks_power(
         temporary_masks,
         mode="w+",
         dtype=np.bool_,
-        shape=(config.num_elements, *config.image_size),
+        shape=(config.num_elements, *config.empty_artery.image_size),
     )
     try:
         with temporary_parameters.open("w", encoding="utf-8") as stream:

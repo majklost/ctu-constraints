@@ -3,12 +3,13 @@ from typing import Literal
 
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
 from torch.utils.data import Dataset
 
-from ..datatools.datasets import ARTIFICIAL_MASK_NUM_CLASSES
-from ..voxelmorph.utils import random_disp, spatial_transform
+from ...voxelmorph.utils import random_disp, spatial_transform
 from .utils import get_standard_mask
+
+ARTIFICIAL_MASK_NUM_CLASSES = 4
 
 
 @dataclass

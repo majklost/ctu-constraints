@@ -10,21 +10,20 @@ from ..types import (
     EmptyArteryConfig,
     FloatArray,
     PowerPlaqueParameters,
-    SourceConfig,
 )
 
 RadialBoundary = Callable[[FloatArray], FloatArray | float]
 
 
 @dataclass(frozen=True)
-class PlaqueSpec:
+class _PlaqueSpec:
     """A resolved plaque described by two radial boundary functions.
 
     Both functions receive the wrapped angular displacement from ``angle_rad``
     in radians and return absolute radii in pixels. They must support NumPy
     arrays, or return a scalar that can be broadcast to the input shape.
 
-    ``PlaqueSpec`` is deliberately a runtime rendering object. Persist the
+    ``_PlaqueSpec`` is deliberately a runtime rendering object. Persist the
     serializable parameters used by a plaque factory rather than attempting to
     serialize arbitrary callables.
     """
@@ -57,36 +56,47 @@ class _PowerRadialBoundary:
 
 
 def create_empty_artery(
-    emp: EmptyArteryConfig,
-    image_size: tuple[int, int] = (256, 256),
+    config: EmptyArteryConfig,
 ) -> NDArray[np.uint8]:
     """Rasterize a centered artery label map without plaques."""
-    height, width = image_size
-    if height <= 0 or width <= 0:
-        raise ValueError("image_size dimensions must be positive")
-
-    outer_radius = emp.lumen_radius_px + emp.wall_thickness_px
-    if outer_radius > (min(image_size) - 1) / 2:
-        raise ValueError("empty artery must fit completely inside the image")
-
-    radius, _ = _polar_grid(image_size)
-    labels = np.full(image_size, ArteryClass.BACKGROUND, dtype=np.uint8)
+    outer_radius = config.lumen_radius_px + config.wall_thickness_px
+    radius, _ = _polar_grid(config.image_size)
+    labels = np.full(
+        config.image_size,
+        ArteryClass.BACKGROUND,
+        dtype=np.uint8,
+    )
     labels[radius <= outer_radius] = ArteryClass.BOUNDARY
-    labels[radius <= emp.lumen_radius_px] = ArteryClass.LUMEN
+    labels[radius <= config.lumen_radius_px] = ArteryClass.LUMEN
     return labels
 
 
-def create_plaque_mask(
-    plaque_specs: tuple[PlaqueSpec, ...], source_conf: SourceConfig
+def create_power_plaque_mask(
+    parameters: tuple[PowerPlaqueParameters, ...],
+    artery_config: EmptyArteryConfig,
+    *,
+    lumen_radius_px: float | None = None,
 ) -> NDArray[np.bool_]:
-    """Rasterize the union of resolved plaques for one source sample."""
-    radius, angle = _polar_grid(source_conf.image_size)
-    combined = np.zeros(source_conf.image_size, dtype=bool)
-    outer_artery_radius = (
-        source_conf.empty_artery.lumen_radius_px
-        + source_conf.empty_artery.wall_thickness_px
+    """Resolve power parameters and rasterize their union as one Boolean mask."""
+    if lumen_radius_px is None:
+        lumen_radius_px = artery_config.lumen_radius_px
+    plaque_specs = tuple(
+        create_power_plaque(item, lumen_radius_px) for item in parameters
     )
-    has_wall = source_conf.empty_artery.wall_thickness_px > 0
+    return _create_plaque_mask(plaque_specs, artery_config)
+
+
+def _create_plaque_mask(
+    plaque_specs: tuple[_PlaqueSpec, ...],
+    artery_config: EmptyArteryConfig,
+) -> NDArray[np.bool_]:
+    """Rasterize the union of internal plaque specifications."""
+    radius, angle = _polar_grid(artery_config.image_size)
+    combined = np.zeros(artery_config.image_size, dtype=bool)
+    outer_artery_radius = (
+        artery_config.lumen_radius_px + artery_config.wall_thickness_px
+    )
+    has_wall = artery_config.wall_thickness_px > 0
 
     for plaque in plaque_specs:
         delta = np.arctan2(
@@ -112,10 +122,8 @@ def create_plaque_mask(
             )
 
         supported_radii = radius[support]
-        plaque_mask = np.zeros(source_conf.image_size, dtype=bool)
-        plaque_mask[support] = (supported_radii >= inner) & (
-            supported_radii <= outer
-        )
+        plaque_mask = np.zeros(artery_config.image_size, dtype=bool)
+        plaque_mask[support] = (supported_radii >= inner) & (supported_radii <= outer)
         combined |= plaque_mask
 
     return combined
@@ -123,12 +131,12 @@ def create_plaque_mask(
 
 def create_power_plaque(
     parameters: PowerPlaqueParameters, lumen_radius_px: float
-) -> PlaqueSpec:
+) -> _PlaqueSpec:
     """Turn serializable parameters into a callable runtime plaque spec."""
     if not isfinite(lumen_radius_px) or lumen_radius_px <= 0:
         raise ValueError("lumen_radius_px must be finite and positive")
 
-    return PlaqueSpec(
+    return _PlaqueSpec(
         angle_rad=parameters.angle_rad,
         angular_width_rad=parameters.angular_width_rad,
         inner_radius=_PowerRadialBoundary(

@@ -37,7 +37,11 @@ def load_deformation_fields(
     if not preset_folder.is_dir():
         raise FileNotFoundError(f"deformation preset does not exist: {name}")
     fields = np.load(preset_folder / "fields.npy", mmap_mode="r")
-    expected_shape = (source_config.num_elements, 2, *source_config.image_size)
+    expected_shape = (
+        source_config.num_elements,
+        2,
+        *source_config.empty_artery.image_size,
+    )
     if fields.shape != expected_shape or fields.dtype != np.float32:
         raise ValueError(
             f"invalid deformation {name!r}: expected float32 "
@@ -62,9 +66,9 @@ def apply_deformation(
     if not np.isfinite(field).all():
         raise ValueError("field contains non-finite values")
 
-    values_tensor = torch.from_numpy(
-        np.array(values, dtype=np.float32, copy=True)
-    )[None, None]
+    values_tensor = torch.from_numpy(np.array(values, dtype=np.float32, copy=True))[
+        None, None
+    ]
     field_tensor = torch.from_numpy(np.array(field, dtype=np.float32, copy=True))
     with torch.no_grad():
         warped = spatial_transform(
@@ -76,7 +80,6 @@ def apply_deformation(
 
 
 def sample_valid_deformation(
-    source_config: SourceConfig,
     source_labels: np.ndarray,
     config: DeformationConfig,
     rejection: DeformationRejectionConfig | None = None,
@@ -101,8 +104,8 @@ def sample_valid_deformation(
         rejection = DeformationRejectionConfig()
 
     source_labels = np.asarray(source_labels)
-    if source_labels.shape != source_config.image_size:
-        raise ValueError("source_labels must match source_config.image_size")
+    if source_labels.ndim != 2:
+        raise ValueError("source_labels must have shape [H, W]")
     device = resolve_compute_device(device)
     fork_devices: list[int] = []
     if device.type == "cuda":
@@ -110,7 +113,7 @@ def sample_valid_deformation(
             torch.cuda.current_device() if device.index is None else device.index
         )
 
-    height, width = source_config.image_size
+    height, width = source_labels.shape
     for attempt_index in range(rejection.max_attempts):
         attempt_seed = _attempt_seed(seed, sample_index, attempt_index)
         if device.type == "mps":
@@ -126,9 +129,7 @@ def sample_valid_deformation(
             with torch.random.fork_rng(devices=fork_devices):
                 torch.manual_seed(attempt_seed)
                 field = _random_field(config, height, width, device)
-        field_array = (
-            field.detach().cpu().numpy().astype(np.float32, copy=False)
-        )
+        field_array = field.detach().cpu().numpy().astype(np.float32, copy=False)
         diagnostics = validate_deformation(
             field_array,
             source_labels,
@@ -177,7 +178,7 @@ def generate_deformation_fields(
     preset_folder.mkdir()
     (preset_folder / "rigid").mkdir()
     temporary_fields = preset_folder / ".fields.npy.tmp"
-    height, width = source_config.image_size
+    height, width = source_config.empty_artery.image_size
     fields = np.lib.format.open_memmap(
         temporary_fields,
         mode="w+",
@@ -191,7 +192,6 @@ def generate_deformation_fields(
     try:
         for sample_index in range(source_config.num_elements):
             sample = sample_valid_deformation(
-                source_config,
                 source_labels,
                 config,
                 rejection,
@@ -231,9 +231,7 @@ def generate_deformation_fields(
                     "layout": "NCHW",
                     "channel_order": ["dy", "dx"],
                     "units": "pixels",
-                    "sampling_convention": (
-                        "output(x) = input(x + displacement(x))"
-                    ),
+                    "sampling_convention": ("output(x) = input(x + displacement(x))"),
                 },
             },
         )
@@ -254,9 +252,7 @@ def _attempt_seed(
     sample_index: int,
     attempt_index: int,
 ) -> int:
-    sequence = np.random.SeedSequence(
-        [collection_seed, sample_index, attempt_index]
-    )
+    sequence = np.random.SeedSequence([collection_seed, sample_index, attempt_index])
     return int(sequence.generate_state(1, dtype=np.uint64)[0])
 
 

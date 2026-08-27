@@ -22,8 +22,7 @@ def test_create_source_initializes_only_root_artifacts(tmp_path) -> None:
     root = tmp_path / "source"
     config = SourceConfig(
         num_elements=3,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
 
     create_source(root, config)
@@ -60,8 +59,7 @@ def test_generate_power_plaque_collection_writes_masks_and_parameters(
 ) -> None:
     config = SourceConfig(
         num_elements=3,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
     ranges = PowerPlaqueSamplingRanges(
         angle_rad=FloatRange.fixed(0),
@@ -88,13 +86,11 @@ def test_generate_power_plaque_collection_writes_masks_and_parameters(
 def test_plaque_sample_seed_is_independent_of_collection_length(tmp_path) -> None:
     short = SourceConfig(
         num_elements=1,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
     long = SourceConfig(
         num_elements=2,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
 
     generate_plaque_masks_power(tmp_path / "short", "set", short, seed=11)
@@ -109,8 +105,7 @@ def test_plaque_sample_seed_is_independent_of_collection_length(tmp_path) -> Non
 def test_single_plaque_sample_matches_persisted_collection(tmp_path) -> None:
     config = SourceConfig(
         num_elements=3,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
     direct = sample_power_plaque_mask(config, seed=13, sample_index=2)
 

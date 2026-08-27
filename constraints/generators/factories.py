@@ -1,7 +1,7 @@
 """Convenient orchestration used by generation scripts and datasets."""
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from constraints.devices import DeviceSelection
 
-from .composition import PlaqueLayer, compose_target_labels
+from .composition import compose_target_labels
 from .deformation import (
     apply_deformation,
     generate_deformation_fields,
@@ -25,15 +25,15 @@ from .rigid import apply_rigid, generate_rigid_parameters, sample_valid_rigid
 from .source import (
     generate_plaque_masks_power,
     load_source_config,
-    sample_power_plaque_mask,
 )
 from .types import (
     ArteryClass,
     DeformationConfig,
     DeformationRejectionConfig,
-    PowerPlaqueParameters,
+    EmptyArteryConfig,
+    PlaqueLayer,
     PowerPlaqueSamplingRanges,
-    RigidBounds,
+    RigidConfig,
     RigidRejectionConfig,
     SourceConfig,
 )
@@ -49,101 +49,36 @@ class ComposedSampleArrays:
 
 
 @dataclass(frozen=True)
-class PreviewPlaqueLayer:
-    """Sampling configuration for one named plaque layer in a preview."""
-
-    name: str
-    ranges: PowerPlaqueSamplingRanges | tuple[PowerPlaqueSamplingRanges, ...]
-    target_class: ArteryClass = ArteryClass.PLAQUE
-
-    def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("preview plaque layer name must not be empty")
-        target_class = ArteryClass(self.target_class)
-        if target_class not in {
-            ArteryClass.BOUNDARY,
-            ArteryClass.LUMEN,
-            ArteryClass.PLAQUE,
-        }:
-            raise ValueError(
-                "preview plaque layers must resolve to boundary, lumen, or plaque"
-            )
-        object.__setattr__(self, "target_class", target_class)
-
-
-@dataclass(frozen=True)
 class PreviewArtificialSample:
     """Storage-free sample plus the random parameters used to create it."""
 
     image: NDArray[np.float32]
     target_labels: NDArray[np.uint8]
-    plaque_parameters: tuple[PowerPlaqueParameters, ...]
     deformation_field: NDArray[np.float32] | None
     deformation_validation: DeformationValidationResult | None
     rigid_parameters: NDArray[np.float32] | None = None
-    plaque_parameters_by_layer: Mapping[str, tuple[PowerPlaqueParameters, ...]] = field(
-        default_factory=dict
-    )
 
 
 def preview_artificial_sample(
-    source_config: SourceConfig,
-    plaque_ranges: PowerPlaqueSamplingRanges
-    | tuple[PowerPlaqueSamplingRanges, ...]
-    | None = None,
+    artery_config: EmptyArteryConfig,
+    plaque_layers: Iterable[PlaqueLayer] = (),
     deformation_config: DeformationConfig | None = None,
     deformation_rejection: DeformationRejectionConfig | None = None,
-    rigid_config: RigidBounds | None = None,
+    rigid_config: RigidConfig | None = None,
     rigid_rejection: RigidRejectionConfig | None = None,
     *,
     seed: int,
-    plaque_layers: Iterable[PreviewPlaqueLayer] | None = None,
     sample_index: int = 0,
     deformation_device: DeviceSelection = "auto",
     class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
 ) -> PreviewArtificialSample:
-    """Create one directly inspectable sample without reading or writing files.
-
-    ``plaque_ranges`` is shorthand for one real-plaque layer. Use
-    ``plaque_layers`` to preview any combination of real and fake plaques.
-    """
-    empty_artery = create_empty_artery(
-        source_config.empty_artery,
-        source_config.image_size,
-    )
-    if plaque_layers is None:
-        resolved_plaque_layers = (
-            PreviewPlaqueLayer(
-                "preview",
-                PowerPlaqueSamplingRanges() if plaque_ranges is None else plaque_ranges,
-            ),
-        )
-    else:
-        if plaque_ranges is not None:
-            raise ValueError("plaque_ranges and plaque_layers are mutually exclusive")
-        resolved_plaque_layers = tuple(plaque_layers)
-        names = [layer.name for layer in resolved_plaque_layers]
-        if len(names) != len(set(names)):
-            raise ValueError("preview plaque layer names must be unique")
-
-    sampled_plaque_layers: list[PlaqueLayer] = []
-    parameters_by_layer: dict[str, tuple[PowerPlaqueParameters, ...]] = {}
-    for layer_index, layer in enumerate(resolved_plaque_layers):
-        plaque = sample_power_plaque_mask(
-            source_config,
-            layer.ranges,
-            seed=seed + layer_index,
-            sample_index=sample_index,
-        )
-        sampled_plaque_layers.append(
-            PlaqueLayer(layer.name, plaque.mask, layer.target_class)
-        )
-        parameters_by_layer[layer.name] = plaque.parameters
+    """Transform and compose directly supplied Boolean plaque layers."""
+    empty_artery = create_empty_artery(artery_config)
+    resolved_plaque_layers = tuple(plaque_layers)
 
     deformation = None
     if deformation_config is not None:
         deformation = sample_valid_deformation(
-            source_config,
             empty_artery,
             deformation_config,
             deformation_rejection,
@@ -154,25 +89,23 @@ def preview_artificial_sample(
         empty_artery = np.rint(
             apply_deformation(empty_artery, deformation.field, method="nearest")
         ).astype(np.uint8)
-        sampled_plaque_layers = [
+        resolved_plaque_layers = tuple(
             PlaqueLayer(
-                layer.name,
                 apply_deformation(layer.mask, deformation.field, method="nearest")
                 > 0.5,
                 layer.target_class,
             )
-            for layer in sampled_plaque_layers
-        ]
+            for layer in resolved_plaque_layers
+        )
 
     arrays = compose_artificial_sample(
         empty_artery,
-        sampled_plaque_layers,
+        resolved_plaque_layers,
         class_intensities,
     )
     rigid = None
     if rigid_config is not None:
         rigid = sample_valid_rigid(
-            source_config,
             empty_artery,
             rigid_config,
             rigid_rejection,
@@ -196,17 +129,11 @@ def preview_artificial_sample(
     return PreviewArtificialSample(
         image=arrays.image,
         target_labels=arrays.target_labels,
-        plaque_parameters=tuple(
-            parameter
-            for parameters in parameters_by_layer.values()
-            for parameter in parameters
-        ),
         deformation_field=None if deformation is None else deformation.field,
         deformation_validation=(
             None if deformation is None else deformation.validation
         ),
         rigid_parameters=None if rigid is None else rigid.parameters,
-        plaque_parameters_by_layer=parameters_by_layer,
     )
 
 
@@ -231,11 +158,6 @@ def create_plaque_collection(
     """
     source_root = Path(source_root)
     config = get_source_config(source_root)
-    if config.plaque_generation_method != "power":
-        raise ValueError(
-            f"unsupported plaque generation method: {config.plaque_generation_method}"
-        )
-
     plaque_folder = source_root / "plaques"
     generate_plaque_masks_power(
         plaque_folder,
@@ -274,7 +196,7 @@ def create_deformation_collection(
 def create_rigid_collection(
     source_root: Path,
     name: str,
-    bounds: RigidBounds,
+    config: RigidConfig,
     rejection: RigidRejectionConfig | None = None,
     *,
     deformation: str | None = None,
@@ -299,7 +221,7 @@ def create_rigid_collection(
         source_config,
         np.load(source_root / "empty_artery.npy", mmap_mode="r"),
         fields,
-        bounds,
+        config,
         rejection,
         seed=seed,
     )

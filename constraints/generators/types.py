@@ -7,7 +7,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
-PlaqueGenerationMethod = Literal["power"]
 
 
 class ArteryClass(IntEnum):
@@ -21,60 +20,46 @@ class ArteryClass(IntEnum):
 class EmptyArteryConfig:
     lumen_radius_px: float = 73.0
     wall_thickness_px: float = 12.0
+    image_size: tuple[int, int] = (256, 256)
 
     def __post_init__(self) -> None:
         if not isfinite(self.lumen_radius_px) or self.lumen_radius_px <= 0:
             raise ValueError("lumen_radius_px must be finite and positive")
         if not isfinite(self.wall_thickness_px) or self.wall_thickness_px < 0:
             raise ValueError("wall_thickness_px must be finite and non-negative")
+        if len(self.image_size) != 2 or any(size <= 0 for size in self.image_size):
+            raise ValueError("image_size must contain two positive dimensions")
+        maximum_radius = (min(self.image_size) - 1) / 2
+        if self.lumen_radius_px + self.wall_thickness_px > maximum_radius:
+            raise ValueError("empty artery must fit completely inside the image")
 
 
 @dataclass(frozen=True)
 class SourceConfig:
-    """
-    Minimal information to create a new dataset
-    """
+    """Dataset-level configuration for a collection of artery samples."""
 
     num_elements: int
-    image_size: tuple[int, int] = (256, 256)
     empty_artery: EmptyArteryConfig = field(default_factory=EmptyArteryConfig)
-    plaque_generation_method: PlaqueGenerationMethod = "power"
 
     def __post_init__(self) -> None:
         if self.num_elements <= 0:
             raise ValueError("num_elements must be positive")
-        if self.plaque_generation_method != "power":
-            raise ValueError("unsupported plaque_generation_method")
-        if len(self.image_size) != 2 or any(size <= 0 for size in self.image_size):
-            raise ValueError("image_size must contain two positive dimensions")
-        maximum_radius = (min(self.image_size) - 1) / 2
-        outer_radius = (
-            self.empty_artery.lumen_radius_px + self.empty_artery.wall_thickness_px
-        )
-        if outer_radius > maximum_radius:
-            raise ValueError("empty artery must fit completely inside the image")
 
     def to_dict(self) -> dict[str, Any]:
         """Return the stable JSON representation used by source datasets."""
         return {
             "num_elements": self.num_elements,
-            "image_size": list(self.image_size),
             "empty_artery": {
+                "image_size": list(self.empty_artery.image_size),
                 "lumen_radius_px": self.empty_artery.lumen_radius_px,
                 "wall_thickness_px": self.empty_artery.wall_thickness_px,
             },
-            "plaque_generation_method": self.plaque_generation_method,
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Self:
         """Load and validate a source configuration from decoded JSON."""
-        expected = {
-            "num_elements",
-            "image_size",
-            "empty_artery",
-            "plaque_generation_method",
-        }
+        expected = {"num_elements", "empty_artery"}
         unknown = value.keys() - expected
         missing = expected - value.keys()
         if unknown or missing:
@@ -86,11 +71,11 @@ class SourceConfig:
         if not isinstance(empty_artery, dict):
             raise ValueError("empty_artery must be an object")
         try:
+            empty_artery = dict(empty_artery)
+            empty_artery["image_size"] = tuple(empty_artery["image_size"])
             return cls(
                 num_elements=value["num_elements"],
-                image_size=tuple(value["image_size"]),
                 empty_artery=EmptyArteryConfig(**empty_artery),
-                plaque_generation_method=value["plaque_generation_method"],
             )
         except (TypeError, KeyError) as error:
             raise ValueError("invalid SourceConfig value") from error
@@ -120,7 +105,7 @@ class FloatRange:
 
 
 @dataclass(frozen=True)
-class RigidBounds:
+class RigidConfig:
     angle: FloatRange = FloatRange(-np.pi, np.pi)
     dx: FloatRange = FloatRange(-0.5, 0.5)
     dy: FloatRange = FloatRange(-0.5, 0.5)
@@ -203,6 +188,37 @@ class PowerPlaqueSamplingRanges:
         if self.shape_power.minimum <= 0:
             raise ValueError("shape_power must be positive")
 
+    def sample(
+        self,
+        num: int,
+        *,
+        lumen_radius_px: float,
+        wall_thickness_px: float,
+        rng: np.random.Generator,
+    ) -> tuple["PowerPlaqueParameters", ...]:
+        """Sample ``num`` resolved parameter sets from these ranges."""
+        if isinstance(num, bool) or not isinstance(num, int) or num < 0:
+            raise ValueError("num must be a non-negative integer")
+        if not isfinite(lumen_radius_px) or lumen_radius_px <= 0:
+            raise ValueError("lumen_radius_px must be finite and positive")
+        if not isfinite(wall_thickness_px) or wall_thickness_px < 0:
+            raise ValueError("wall_thickness_px must be finite and non-negative")
+
+        return tuple(
+            PowerPlaqueParameters(
+                angle_rad=self.angle_rad.sample(rng),
+                angular_width_rad=self.angular_width_rad.sample(rng),
+                inward_depth_px=(
+                    self.inward_depth_fraction.sample(rng) * lumen_radius_px
+                ),
+                wall_depth_px=(
+                    self.wall_depth_fraction.sample(rng) * wall_thickness_px
+                ),
+                shape_power=self.shape_power.sample(rng),
+            )
+            for _ in range(num)
+        )
+
 
 @dataclass(frozen=True)
 class PowerPlaqueParameters:
@@ -237,6 +253,28 @@ class PowerPlaqueParameters:
             raise ValueError("wall_depth_px must be non-negative")
         if self.shape_power <= 0:
             raise ValueError("shape_power must be positive")
+
+
+@dataclass(frozen=True)
+class PlaqueLayer:
+    """One binary plaque mask and its anatomical class in the target."""
+
+    mask: NDArray[np.bool_]
+    target_class: ArteryClass = ArteryClass.PLAQUE
+
+    def __post_init__(self) -> None:
+        mask = np.asarray(self.mask)
+        if mask.ndim != 2:
+            raise ValueError("plaque layer mask must have shape [H, W]")
+        target_class = ArteryClass(self.target_class)
+        if target_class not in {
+            ArteryClass.BOUNDARY,
+            ArteryClass.LUMEN,
+            ArteryClass.PLAQUE,
+        }:
+            raise ValueError("plaque layer target must be boundary, lumen, or plaque")
+        object.__setattr__(self, "mask", mask.astype(bool, copy=False))
+        object.__setattr__(self, "target_class", target_class)
 
 
 @dataclass(frozen=True)

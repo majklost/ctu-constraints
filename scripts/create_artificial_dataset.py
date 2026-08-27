@@ -14,7 +14,7 @@ from constraints.datatools.datasets import (
     ARTIFICIAL_MASK_NUM_CLASSES,
     write_bad_indices,
 )
-from constraints.generators.deprecated_generators import (
+from constraints.generators.deprecated.generators import (
     NO_RIGID,
     ROT_ONLY,
     SMALL,

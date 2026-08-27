@@ -238,7 +238,7 @@ per requested sample in sample-index order. Each record contains:
 - validation result and any expected fallback information.
 
 For the current implementation, `type` is `"power"` and `parameters` is the
-JSON representation of `PowerPlaqueParameters`. Never serialize `PlaqueSpec`,
+JSON representation of `PowerPlaqueParameters`. Never serialize `_PlaqueSpec`,
 because it contains runtime callables.
 
 JSONL is used because plaque count is variable. It must be written by one
@@ -754,7 +754,7 @@ scripts/materialize_artificial_dataset.py
     complete recipe materialization
 ```
 
-Do not add new behavior to `deprecated_generators.py`. Use it only as a reference
+Do not add new behavior to `generators/deprecated/`. Use it only as a reference
 until compatibility is no longer needed.
 
 ## 17. Implementation sequence

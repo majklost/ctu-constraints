@@ -22,13 +22,14 @@ source root
 
 ### Configuration and pure geometry
 
-- `generators/types.py` contains validated, serializable configuration and
-  parameter dataclasses. It does not perform storage or orchestration.
-- `generators/parametrization/` samples plaque parameters and rasterizes empty
-  arteries and plaques.
-- `generators/composition.py` overlays independent plaque masks onto the empty
-  artery. Fake plaques resolve to boundary or lumen targets; real plaques win
-  over fake plaques at overlaps.
+- `generators/types.py` contains shared configuration, parameter, and runtime
+  layer dataclasses. `PowerPlaqueSamplingRanges.sample()` resolves any number
+  of independent parameter sets from one range configuration.
+- `generators/parametrization/` rasterizes self-contained empty-artery configs
+  and converts tuples of plaque parameters into Boolean union masks.
+- `generators/composition.py` overlays independent Boolean plaque masks onto
+  the empty artery in the exact order supplied. Later layers win at overlaps,
+  so precedence is explicit at each call site.
 - `generators/rendering.py` maps target class IDs to grayscale intensities.
 - `generators/validation.py` checks topology, foreground margins, and transform
   acceptance.
@@ -59,7 +60,7 @@ whole child subtree therefore cannot invalidate a sibling.
   For an index it loads selected plaque masks, applies the selected deformation,
   composes targets and grayscale image, then applies the selected rigid preset.
 - `scripts/create_*.py` only parse command-line arguments and call the facade.
-- `generators/deprecated_generators.py` and
+- `generators/deprecated/` and
   `scripts/create_artificial_dataset.py` belong to the old fully materialized
   path. New composable behavior should not be added there.
 

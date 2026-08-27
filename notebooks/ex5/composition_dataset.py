@@ -36,9 +36,7 @@ from constraints.datatools.datasets import ComposedArtificialDataset
 # %%
 source_root = get_data_folder() / "artificial" / "demo"
 dataset = ComposedArtificialDataset(
-    source_root,
-    plaques=("2blobs",),
-    deformation="validated-default"
+    source_root, plaques=("2blobs",), deformation="validated-default"
 )
 print(f"Loaded {len(dataset)} samples from {source_root}")
 
@@ -97,24 +95,90 @@ configured class in `target_labels`.
 
 # %%
 from constraints.generators.factories import preview_artificial_sample
-from constraints.generators.types import SourceConfig,PowerPlaqueSamplingRanges,DeformationConfig,DeformationRejectionConfig,RigidBounds,RigidRejectionConfig,FloatRange
+from constraints.generators.parametrization import create_power_plaque_mask
+from constraints.generators.types import (
+    SourceConfig,
+    PowerPlaqueSamplingRanges,
+    DeformationConfig,
+    DeformationRejectionConfig,
+    RigidConfig,
+    RigidRejectionConfig,
+    FloatRange,
+    PlaqueLayer,
+    ArteryClass,
+)
 from matplotlib import pyplot as plt
 import numpy as np
 
 # %%
-sc  = SourceConfig(1)
-plaque_range1 = PowerPlaqueSamplingRanges(angle_rad=FloatRange(-np.pi/3,-np.pi/10),angular_width_rad=FloatRange.fixed(np.pi/5),inward_depth_fraction=FloatRange(0.2,0.3),shape_power=FloatRange.fixed(0.5),wall_depth_fraction=FloatRange.fixed(0))
-plaque_range2 = PowerPlaqueSamplingRanges(angle_rad=FloatRange(np.pi/10,np.pi/3),angular_width_rad=FloatRange.fixed(np.pi/5),inward_depth_fraction=FloatRange(0.2,0.3),shape_power=FloatRange.fixed(0.5),wall_depth_fraction=FloatRange.fixed(0))
+sc = SourceConfig(1)
+plaque_range1 = PowerPlaqueSamplingRanges(
+    angle_rad=FloatRange(-np.pi / 3, -np.pi / 10),
+    angular_width_rad=FloatRange.fixed(np.pi / 5),
+    inward_depth_fraction=FloatRange(0.2, 0.3),
+    shape_power=FloatRange.fixed(0.5),
+    wall_depth_fraction=FloatRange.fixed(0),
+)
+plaque_range2 = PowerPlaqueSamplingRanges(
+    angle_rad=FloatRange(np.pi / 10, np.pi / 3),
+    angular_width_rad=FloatRange.fixed(np.pi / 5),
+    inward_depth_fraction=FloatRange(0.2, 0.3),
+    shape_power=FloatRange.fixed(0.5),
+    wall_depth_fraction=FloatRange.fixed(0),
+)
 
-ppsr = (plaque_range1,plaque_range2)
+fake_plaque_range = PowerPlaqueSamplingRanges(
+    inward_depth_fraction=FloatRange(0.12, 0.15),
+    shape_power=FloatRange.fixed(2),
+    wall_depth_fraction=FloatRange.fixed(0.1),
+)
+
+
 dc = DeformationConfig()
 drc = DeformationRejectionConfig()
-rb = RigidBounds()
+rc = RigidConfig()
+
+rng = np.random.default_rng(25)
+artery_config = sc.empty_artery
+real_parameters = plaque_range1.sample(
+    1,
+    lumen_radius_px=artery_config.lumen_radius_px,
+    wall_thickness_px=artery_config.wall_thickness_px,
+    rng=rng,
+) + plaque_range2.sample(
+    1,
+    lumen_radius_px=artery_config.lumen_radius_px,
+    wall_thickness_px=artery_config.wall_thickness_px,
+    rng=rng,
+)
+fake_lumen_radius_px = artery_config.lumen_radius_px - 5
+fake_parameters = fake_plaque_range.sample(
+    8,
+    lumen_radius_px=fake_lumen_radius_px,
+    wall_thickness_px=artery_config.wall_thickness_px,
+    rng=rng,
+)
+plaque_layers = (
+    PlaqueLayer(
+        create_power_plaque_mask(
+            fake_parameters, artery_config, lumen_radius_px=fake_lumen_radius_px
+        ),
+        ArteryClass.LUMEN,
+    ),
+    PlaqueLayer(create_power_plaque_mask(real_parameters, artery_config)),
+)
 
 
 # %%
-rn = np.random.randint(0,1000)
-sample = preview_artificial_sample(sc,ppsr,dc,drc,seed=rn)
+rn = np.random.randint(0, 1000)
+sample = preview_artificial_sample(
+    artery_config,
+    plaque_layers,
+    deformation_config=dc,
+    deformation_rejection=drc,
+    rigid_config=rc,
+    seed=rn,
+)
 plt.imshow(sample.target_labels)
 
 # %%

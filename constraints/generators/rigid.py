@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 
 from .deformation import apply_deformation
 from .storage import write_json
-from .types import RigidBounds, RigidRejectionConfig, SourceConfig
+from .types import RigidConfig, RigidRejectionConfig, SourceConfig
 from .validation import foreground_margin
 
 
@@ -74,12 +74,8 @@ def apply_rigid(
     sine = float(np.sin(angle_rad))
     x_in = cosine * x - sine * y + (width - 1) / 2
     y_in = sine * x + cosine * y + (height - 1) / 2
-    x_normalized = (
-        2 * x_in / (width - 1) - 1 if width > 1 else torch.zeros_like(x_in)
-    )
-    y_normalized = (
-        2 * y_in / (height - 1) - 1 if height > 1 else torch.zeros_like(y_in)
-    )
+    x_normalized = 2 * x_in / (width - 1) - 1 if width > 1 else torch.zeros_like(x_in)
+    y_normalized = 2 * y_in / (height - 1) - 1 if height > 1 else torch.zeros_like(y_in)
     grid = torch.stack((x_normalized, y_normalized), dim=-1)[None]
     image = torch.from_numpy(np.array(values, dtype=np.float32, copy=True))[None, None]
     with torch.no_grad():
@@ -94,9 +90,8 @@ def apply_rigid(
 
 
 def sample_valid_rigid(
-    source_config: SourceConfig,
     source_labels: np.ndarray,
-    bounds: RigidBounds,
+    config: RigidConfig,
     rejection: RigidRejectionConfig | None = None,
     *,
     seed: int,
@@ -116,14 +111,12 @@ def sample_valid_rigid(
         rejection = RigidRejectionConfig()
 
     source_labels = np.asarray(source_labels)
-    if source_labels.shape != source_config.image_size:
-        raise ValueError("source_labels must match source_config.image_size")
+    if source_labels.ndim != 2:
+        raise ValueError("source_labels must have shape [H, W]")
 
     for attempt_index in range(rejection.max_attempts):
-        rng = np.random.default_rng(
-            _attempt_seed(seed, sample_index, attempt_index)
-        )
-        candidate = bounds.sample(rng)
+        rng = np.random.default_rng(_attempt_seed(seed, sample_index, attempt_index))
+        candidate = config.sample(rng)
         rigid_labels = apply_rigid(
             source_labels,
             *candidate,
@@ -150,7 +143,7 @@ def generate_rigid_parameters(
     source_config: SourceConfig,
     source_labels: np.ndarray,
     deformation_fields: np.ndarray | None,
-    bounds: RigidBounds,
+    config: RigidConfig,
     rejection: RigidRejectionConfig | None = None,
     *,
     seed: int,
@@ -195,9 +188,8 @@ def generate_rigid_parameters(
                 ).astype(np.uint8)
 
             sample = sample_valid_rigid(
-                source_config,
                 deformed_labels,
-                bounds,
+                config,
                 rejection,
                 seed=seed,
                 sample_index=sample_index,
@@ -216,7 +208,7 @@ def generate_rigid_parameters(
                 "parent_deformation": parent_deformation,
                 "seed": seed,
                 "sample_seed_scheme": "numpy-seed-sequence-sample-attempt-v1",
-                "bounds": bounds.to_dict(),
+                "config": config.to_dict(),
                 "rejection": rejection.to_dict(),
                 "diagnostics": {
                     "rejected_candidate_count": rejected_candidate_count,

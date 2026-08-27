@@ -18,8 +18,7 @@ def test_factory_creates_collection_from_source_root(tmp_path) -> None:
     root = tmp_path / "source"
     config = SourceConfig(
         num_elements=2,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
     create_source(root, config)
 

@@ -12,7 +12,7 @@ from constraints.generators.types import (
     EmptyArteryConfig,
     FloatRange,
     PowerPlaqueSamplingRanges,
-    RigidBounds,
+    RigidConfig,
     SourceConfig,
 )
 
@@ -21,8 +21,7 @@ def _create_source_with_plaques(tmp_path):
     root = tmp_path / "source"
     config = SourceConfig(
         num_elements=2,
-        image_size=(65, 65),
-        empty_artery=EmptyArteryConfig(20, 5),
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
     )
     create_source(root, config)
     ranges = PowerPlaqueSamplingRanges(
@@ -93,7 +92,7 @@ def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
     create_rigid_collection(
         root,
         "shift-right",
-        RigidBounds(
+        RigidConfig(
             angle=FloatRange.fixed(0),
             dx=FloatRange.fixed(2),
             dy=FloatRange.fixed(0),

@@ -2,7 +2,7 @@ import numpy as np
 
 from constraints.generators.factories import preview_artificial_sample
 from constraints.generators.rigid import apply_rigid
-from constraints.generators.types import EmptyArteryConfig, SourceConfig
+from constraints.generators.types import EmptyArteryConfig
 from constraints.utils import signed_distance_scipy
 
 
@@ -12,17 +12,11 @@ def _foreground_channels(labels: np.ndarray) -> np.ndarray:
 
 def test_rigidly_transformed_sdf_approximates_strict_recomputation() -> None:
     sample = preview_artificial_sample(
-        SourceConfig(
-            num_elements=1,
-            image_size=(65, 65),
-            empty_artery=EmptyArteryConfig(20, 5),
-        ),
+        EmptyArteryConfig(20, 5, (65, 65)),
         seed=31,
     )
     parameters = (0.15, 3.0, -2.0)
-    sdf_before = signed_distance_scipy(
-        _foreground_channels(sample.target_labels)
-    )
+    sdf_before = signed_distance_scipy(_foreground_channels(sample.target_labels))
     rigid_labels = np.rint(
         apply_rigid(sample.target_labels, *parameters, method="nearest")
     ).astype(np.uint8)

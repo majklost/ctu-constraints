@@ -9,7 +9,7 @@ from constraints.generators.source import create_source
 from constraints.generators.types import (
     EmptyArteryConfig,
     FloatRange,
-    RigidBounds,
+    RigidConfig,
     RigidRejectionConfig,
     SourceConfig,
 )
@@ -21,8 +21,7 @@ def _source_root(tmp_path):
         root,
         SourceConfig(
             num_elements=2,
-            image_size=(33, 33),
-            empty_artery=EmptyArteryConfig(10, 3),
+            empty_artery=EmptyArteryConfig(10, 3, (33, 33)),
         ),
     )
     return root
@@ -50,7 +49,7 @@ def test_positive_rigid_angle_rotates_content_counter_clockwise() -> None:
 
 def test_rigid_collection_can_live_at_source_level(tmp_path) -> None:
     root = _source_root(tmp_path)
-    bounds = RigidBounds(
+    config = RigidConfig(
         angle=FloatRange.fixed(0),
         dx=FloatRange.fixed(1),
         dy=FloatRange.fixed(0),
@@ -59,7 +58,7 @@ def test_rigid_collection_can_live_at_source_level(tmp_path) -> None:
     parameters_path, config_path = create_rigid_collection(
         root,
         "small",
-        bounds,
+        config,
         seed=4,
     )
 
@@ -85,7 +84,7 @@ def test_rigid_collection_can_depend_on_a_deformation(tmp_path) -> None:
     parameters_path, config_path = create_rigid_collection(
         root,
         "small",
-        RigidBounds(
+        RigidConfig(
             angle=FloatRange.fixed(0),
             dx=FloatRange.fixed(0),
             dy=FloatRange.fixed(0),
@@ -101,7 +100,7 @@ def test_rigid_collection_can_depend_on_a_deformation(tmp_path) -> None:
 
 def test_rigid_collection_rejects_clipped_foreground(tmp_path) -> None:
     root = _source_root(tmp_path)
-    bounds = RigidBounds(
+    config = RigidConfig(
         angle=FloatRange.fixed(0),
         dx=FloatRange.fixed(40),
         dy=FloatRange.fixed(0),
@@ -111,7 +110,7 @@ def test_rigid_collection_rejects_clipped_foreground(tmp_path) -> None:
         create_rigid_collection(
             root,
             "invalid",
-            bounds,
+            config,
             RigidRejectionConfig(max_attempts=2),
             seed=4,
         )

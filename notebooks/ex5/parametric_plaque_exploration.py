@@ -465,14 +465,14 @@ plt.show()
 
 # %% [markdown]
 # A fully custom plaque can use arbitrary vectorized boundary functions instead
-# of the power-profile factory. Such a `PlaqueSpec` is a runtime object; save the
+# of the power-profile factory. Such a `_PlaqueSpec` is a runtime object; save the
 # parameters or recipe used to construct its functions rather than attempting
 # to serialize the callables themselves.
 
 
 # %%
 # Sampling plaque
-from constraints.generators.parametrization.plaque_samplers import sample_power_plaque_parameters, PowerPlaqueSamplingRanges
+from constraints.generators.types import PowerPlaqueSamplingRanges
 
 
 # %%
@@ -482,11 +482,7 @@ rng= np.random.default_rng(25)
 # %%
 
 # %%
-from constraints.generators.parametrization.plaque_samplers import sample_power_plaque_parameter_batch
-
-
-
-params =sample_power_plaque_parameter_batch(power_sample_range,3,lumen_radius_px=LUMEN_RADIUS_PX,wall_thickness_px=WALL_THICKNESS_PX,rng=rng)
+params = power_sample_range.sample(3, lumen_radius_px=LUMEN_RADIUS_PX, wall_thickness_px=WALL_THICKNESS_PX, rng=rng)
 plaques = map(lambda x: create_power_plaque(x,LUMEN_RADIUS_PX),params)
 
 label_map = create_artery_label_mask(

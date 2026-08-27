@@ -6,7 +6,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from constraints.generators.composition import PlaqueLayer
 from constraints.generators.deformation import (
     apply_deformation,
     load_deformation_fields,
@@ -18,7 +17,7 @@ from constraints.generators.factories import (
 )
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.rigid import apply_rigid, load_rigid_parameters
-from constraints.generators.types import ArteryClass
+from constraints.generators.types import ArteryClass, PlaqueLayer
 
 from ..label_schema import LabelSchema
 from .base_dataset import PerSampleDataset
@@ -104,12 +103,12 @@ class ComposedArtificialDataset(PerSampleDataset):
     def __getitem__(self, index: int) -> Sample:
         index = self._normalize_index(index)
         layers = [
-            PlaqueLayer(name, masks[index], ArteryClass.PLAQUE)
-            for name, masks in self._real_masks.items()
+            PlaqueLayer(masks[index], target_class)
+            for masks, target_class in self._fake_masks.values()
         ]
         layers.extend(
-            PlaqueLayer(name, masks[index], target_class)
-            for name, (masks, target_class) in self._fake_masks.items()
+            PlaqueLayer(masks[index], ArteryClass.PLAQUE)
+            for masks in self._real_masks.values()
         )
         empty_artery = self._empty_artery
         field = None
@@ -120,7 +119,6 @@ class ComposedArtificialDataset(PerSampleDataset):
             ).astype(np.uint8)
             layers = [
                 PlaqueLayer(
-                    layer.name,
                     apply_deformation(layer.mask, field, method="nearest") > 0.5,
                     layer.target_class,
                 )
@@ -156,9 +154,7 @@ class ComposedArtificialDataset(PerSampleDataset):
         if field is not None:
             sample["transform"] = torch.from_numpy(np.array(field, copy=True))
         if rigid_parameters is not None:
-            sample["rigid"] = torch.from_numpy(
-                np.array(rigid_parameters, copy=True)
-            )
+            sample["rigid"] = torch.from_numpy(np.array(rigid_parameters, copy=True))
         return sample
 
     @property
@@ -170,7 +166,10 @@ class ComposedArtificialDataset(PerSampleDataset):
             raise ValueError("plaque collection name must be a filename component")
         path = self.root / "plaques" / f"{name}.npy"
         masks = np.load(path, mmap_mode="r")
-        expected_shape = (self.config.num_elements, *self.config.image_size)
+        expected_shape = (
+            self.config.num_elements,
+            *self.config.empty_artery.image_size,
+        )
         if masks.shape != expected_shape or masks.dtype != np.bool_:
             raise ValueError(
                 f"invalid plaque collection {name!r}: expected Boolean "

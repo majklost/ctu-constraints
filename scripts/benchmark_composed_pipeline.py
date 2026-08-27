@@ -34,7 +34,7 @@ from constraints.generators.types import (
     DeformationRejectionConfig,
     FloatRange,
     PowerPlaqueSamplingRanges,
-    RigidBounds,
+    RigidConfig,
     SourceConfig,
 )
 from constraints.utils import signed_distance_kornia, signed_distance_scipy
@@ -106,7 +106,7 @@ def _prepare_demo_dataset(
     create_rigid_collection(
         root,
         "small",
-        RigidBounds(
+        RigidConfig(
             angle=FloatRange(-0.1, 0.1),
             dx=FloatRange(-5.0, 5.0),
             dy=FloatRange(-5.0, 5.0),
@@ -320,7 +320,6 @@ def _benchmark_deformation(
     args: Namespace,
     cuda_device: torch.device | None,
 ) -> list[dict[str, Any]]:
-    source_config = get_source_config(root)
     source_labels = np.load(root / "empty_artery.npy", mmap_mode="r")
     config, rejection = _load_deformation_settings(root, deformation_name)
     devices = [torch.device("cpu")]
@@ -333,7 +332,6 @@ def _benchmark_deformation(
         attempts = 0
         for sample_index in range(args.deformation_samples):
             sample = sample_valid_deformation(
-                source_config,
                 source_labels,
                 config,
                 rejection,
@@ -350,9 +348,7 @@ def _benchmark_deformation(
                 "samples": args.deformation_samples,
                 "attempts": attempts,
                 "seconds": elapsed,
-                "milliseconds_per_sample": (
-                    1000 * elapsed / args.deformation_samples
-                ),
+                "milliseconds_per_sample": (1000 * elapsed / args.deformation_samples),
                 "config": config.to_dict(),
             }
         )
@@ -411,9 +407,7 @@ def main() -> None:
         if args.plaque and args.plaque != ["2blobs"]:
             parser.error("--prepare-demo only provides --plaque 2blobs")
         if args.deformation not in {None, "validated-default"}:
-            parser.error(
-                "--prepare-demo only provides --deformation validated-default"
-            )
+            parser.error("--prepare-demo only provides --deformation validated-default")
         if args.rigid not in {None, "small"}:
             parser.error("--prepare-demo only provides --rigid small")
         try:

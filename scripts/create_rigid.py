@@ -6,7 +6,7 @@ from pathlib import Path
 from constraints.generators.factories import create_rigid_collection
 from constraints.generators.types import (
     FloatRange,
-    RigidBounds,
+    RigidConfig,
     RigidRejectionConfig,
 )
 
@@ -30,7 +30,7 @@ def main() -> None:
     create_rigid_collection(
         args.source_root,
         args.name,
-        RigidBounds(
+        RigidConfig(
             angle=FloatRange(args.angle_min, args.angle_max),
             dx=FloatRange(args.dx_min, args.dx_max),
             dy=FloatRange(args.dy_min, args.dy_max),
