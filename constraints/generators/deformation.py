@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 
+from constraints.devices import DeviceSelection, resolve_compute_device
 from constraints.voxelmorph.utils import random_disp, spatial_transform
 
 from .storage import write_json
@@ -82,15 +83,15 @@ def sample_valid_deformation(
     *,
     seed: int,
     sample_index: int = 0,
-    device: torch.device | str = "cpu",
+    device: DeviceSelection = "auto",
 ) -> DeformationSample:
     """Generate and validate one deformation without writing it.
 
-    The seed scheme is identical to persisted collections. With the default
+    The seed scheme is identical to persisted collections. With an explicit
     CPU device, a preview for a given ``sample_index`` therefore produces the
     field later stored at the same collection index, independently of length.
-    CUDA uses a different random-number backend and preserves the distribution,
-    but is not expected to be bit-identical to CPU generation.
+    Accelerator backends preserve the distribution but are not expected to be
+    bit-identical to CPU generation. ``"auto"`` prefers CUDA, MPS, then CPU.
     """
     if seed < 0:
         raise ValueError("seed must be non-negative")
@@ -102,7 +103,7 @@ def sample_valid_deformation(
     source_labels = np.asarray(source_labels)
     if source_labels.shape != source_config.image_size:
         raise ValueError("source_labels must match source_config.image_size")
-    device = torch.device(device)
+    device = resolve_compute_device(device)
     fork_devices: list[int] = []
     if device.type == "cuda":
         fork_devices.append(
@@ -112,17 +113,19 @@ def sample_valid_deformation(
     height, width = source_config.image_size
     for attempt_index in range(rejection.max_attempts):
         attempt_seed = _attempt_seed(seed, sample_index, attempt_index)
-        with torch.random.fork_rng(devices=fork_devices):
-            torch.manual_seed(attempt_seed)
-            field = random_disp(
-                shape=(1, 1, height, width),
-                scales=config.scales,
-                magnitude=config.magnitude,
-                integrations=config.integrations,
-                voxsize=config.voxsize,
-                device=device,
-                fractal_mode=config.fractal_mode,
-            )[0]
+        if device.type == "mps":
+            cpu_rng_state = torch.random.get_rng_state()
+            mps_rng_state = torch.mps.get_rng_state()
+            try:
+                torch.manual_seed(attempt_seed)
+                field = _random_field(config, height, width, device)
+            finally:
+                torch.random.set_rng_state(cpu_rng_state)
+                torch.mps.set_rng_state(mps_rng_state)
+        else:
+            with torch.random.fork_rng(devices=fork_devices):
+                torch.manual_seed(attempt_seed)
+                field = _random_field(config, height, width, device)
         field_array = (
             field.detach().cpu().numpy().astype(np.float32, copy=False)
         )
@@ -153,7 +156,7 @@ def generate_deformation_fields(
     rejection: DeformationRejectionConfig | None = None,
     *,
     seed: int,
-    device: torch.device | str = "cpu",
+    device: DeviceSelection = "auto",
 ) -> tuple[Path, Path]:
     """Generate one mmap-friendly ``[N, 2, H, W]`` deformation collection."""
     folder = Path(folder)
@@ -162,7 +165,7 @@ def generate_deformation_fields(
         raise ValueError("seed must be non-negative")
     if rejection is None:
         rejection = DeformationRejectionConfig()
-    device = torch.device(device)
+    device = resolve_compute_device(device)
 
     folder.mkdir(parents=True, exist_ok=True)
     preset_folder = folder / name
@@ -255,6 +258,23 @@ def _attempt_seed(
         [collection_seed, sample_index, attempt_index]
     )
     return int(sequence.generate_state(1, dtype=np.uint64)[0])
+
+
+def _random_field(
+    config: DeformationConfig,
+    height: int,
+    width: int,
+    device: torch.device,
+) -> torch.Tensor:
+    return random_disp(
+        shape=(1, 1, height, width),
+        scales=config.scales,
+        magnitude=config.magnitude,
+        integrations=config.integrations,
+        voxsize=config.voxsize,
+        device=device,
+        fractal_mode=config.fractal_mode,
+    )[0]
 
 
 def _validate_collection_name(name: str) -> None:

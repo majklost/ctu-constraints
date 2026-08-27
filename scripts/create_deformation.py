@@ -3,8 +3,6 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-import torch
-
 from constraints.generators.factories import create_deformation_collection
 from constraints.generators.types import (
     DeformationConfig,
@@ -29,7 +27,12 @@ def parse_args():
     parser.add_argument("--minimum-jacobian", type=float, default=0.0)
     parser.add_argument("--minimum-foreground-margin", type=int, default=1)
     parser.add_argument("--max-attempts", type=int, default=20)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda", "mps"),
+        default="auto",
+        help="generation device; auto prefers CUDA, then MPS, then CPU",
+    )
     return parser.parse_args()
 
 
@@ -52,7 +55,7 @@ def main() -> None:
             max_attempts=args.max_attempts,
         ),
         seed=args.seed,
-        device=torch.device(args.device),
+        device=args.device,
     )
 
 

@@ -1,5 +1,6 @@
 """Pixel-coordinate rigid transforms and parent-scoped presets."""
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -11,6 +12,15 @@ from .deformation import apply_deformation
 from .storage import write_json
 from .types import RigidBounds, RigidRejectionConfig, SourceConfig
 from .validation import foreground_margin
+
+
+@dataclass(frozen=True)
+class RigidSample:
+    """One accepted rigid transform and its rejection diagnostics."""
+
+    parameters: NDArray[np.float32]
+    attempts: int
+    foreground_margin_px: int
 
 
 def load_rigid_parameters(
@@ -83,6 +93,56 @@ def apply_rigid(
     return warped[0, 0].numpy().copy()
 
 
+def sample_valid_rigid(
+    source_config: SourceConfig,
+    source_labels: np.ndarray,
+    bounds: RigidBounds,
+    rejection: RigidRejectionConfig | None = None,
+    *,
+    seed: int,
+    sample_index: int = 0,
+) -> RigidSample:
+    """Sample and validate one rigid transform without writing it.
+
+    The seed scheme is identical to persisted rigid collections, so a preview
+    for a given ``sample_index`` produces the parameters later stored at that
+    collection index.
+    """
+    if seed < 0:
+        raise ValueError("seed must be non-negative")
+    if sample_index < 0:
+        raise ValueError("sample_index must be non-negative")
+    if rejection is None:
+        rejection = RigidRejectionConfig()
+
+    source_labels = np.asarray(source_labels)
+    if source_labels.shape != source_config.image_size:
+        raise ValueError("source_labels must match source_config.image_size")
+
+    for attempt_index in range(rejection.max_attempts):
+        rng = np.random.default_rng(
+            _attempt_seed(seed, sample_index, attempt_index)
+        )
+        candidate = bounds.sample(rng)
+        rigid_labels = apply_rigid(
+            source_labels,
+            *candidate,
+            method="nearest",
+        )
+        margin = foreground_margin(rigid_labels)
+        if margin >= rejection.minimum_foreground_margin_px:
+            return RigidSample(
+                parameters=np.asarray(candidate, dtype=np.float32),
+                attempts=attempt_index + 1,
+                foreground_margin_px=margin,
+            )
+
+    raise RuntimeError(
+        f"failed to sample valid rigid parameters for sample {sample_index} "
+        f"after {rejection.max_attempts} attempts"
+    )
+
+
 def generate_rigid_parameters(
     parent_folder: Path,
     parent_deformation: str | None,
@@ -134,28 +194,18 @@ def generate_rigid_parameters(
                     )
                 ).astype(np.uint8)
 
-            for attempt_index in range(rejection.max_attempts):
-                rng = np.random.default_rng(
-                    _attempt_seed(seed, sample_index, attempt_index)
-                )
-                candidate = bounds.sample(rng)
-                rigid_labels = apply_rigid(
-                    deformed_labels,
-                    *candidate,
-                    method="nearest",
-                )
-                margin = foreground_margin(rigid_labels)
-                if margin >= rejection.minimum_foreground_margin_px:
-                    parameters[sample_index] = candidate
-                    attempts_per_sample.append(attempt_index + 1)
-                    accepted_margins.append(margin)
-                    break
-                rejected_candidate_count += 1
-            else:
-                raise RuntimeError(
-                    f"failed to sample valid rigid parameters for sample "
-                    f"{sample_index} after {rejection.max_attempts} attempts"
-                )
+            sample = sample_valid_rigid(
+                source_config,
+                deformed_labels,
+                bounds,
+                rejection,
+                seed=seed,
+                sample_index=sample_index,
+            )
+            parameters[sample_index] = sample.parameters
+            attempts_per_sample.append(sample.attempts)
+            accepted_margins.append(sample.foreground_margin_px)
+            rejected_candidate_count += sample.attempts - 1
 
         parameters.flush()
         temporary_parameters.replace(parameters_path)

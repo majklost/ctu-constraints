@@ -49,8 +49,7 @@ class SourceConfig:
             raise ValueError("image_size must contain two positive dimensions")
         maximum_radius = (min(self.image_size) - 1) / 2
         outer_radius = (
-            self.empty_artery.lumen_radius_px
-            + self.empty_artery.wall_thickness_px
+            self.empty_artery.lumen_radius_px + self.empty_artery.wall_thickness_px
         )
         if outer_radius > maximum_radius:
             raise ValueError("empty artery must fit completely inside the image")
@@ -122,9 +121,9 @@ class FloatRange:
 
 @dataclass(frozen=True)
 class RigidBounds:
-    angle: FloatRange
-    dx: FloatRange
-    dy: FloatRange
+    angle: FloatRange = FloatRange(-np.pi, np.pi)
+    dx: FloatRange = FloatRange(-0.5, 0.5)
+    dy: FloatRange = FloatRange(-0.5, 0.5)
 
     def sample(self, rng: np.random.Generator) -> tuple[float, float, float]:
         return self.angle.sample(rng), self.dx.sample(rng), self.dy.sample(rng)

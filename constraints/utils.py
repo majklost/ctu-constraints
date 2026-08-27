@@ -10,6 +10,7 @@ import torch
 from kornia.contrib import distance_transform as kornia_distance_transform
 from scipy import ndimage
 
+from .devices import DeviceSelection, resolve_compute_device
 from .types import RigidParams
 
 
@@ -155,6 +156,8 @@ def signed_distance_scipy(
 
 def signed_distance_kornia(
     mask: np.ndarray | torch.Tensor,
+    *,
+    device: DeviceSelection = "auto",
 ) -> np.ndarray | torch.Tensor:
     """
     Computes the signed distance field using Kornia's distance transform.
@@ -163,6 +166,8 @@ def signed_distance_kornia(
         mask: np.ndarray of shape (H, W, C) or torch.Tensor of shape
             (B, C, H, W) / (C, H, W).
             Interpreted as boolean where True/1 = foreground, False/0 = background.
+        device: Compute device. ``"auto"`` prefers CUDA, then MPS, then CPU.
+            Tensor results are returned to the input tensor's original device.
 
     Returns:
         sdf: Signed distance field matching the input type and shape.
@@ -177,10 +182,19 @@ def signed_distance_kornia(
                 f"{mask.ndim}D"
             )
 
-        device = mask.device
+        output_device = mask.device
+        auto_device = device is None or device == "auto"
+        compute_device = (
+            output_device
+            if auto_device and output_device.type in {"cuda", "mps"}
+            else resolve_compute_device(device)
+        )
         original_shape = mask.shape
 
-        torch_mask = mask.detach().to(dtype=torch.float32)
+        torch_mask = mask.detach().to(
+            device=compute_device,
+            dtype=torch.float32,
+        )
 
         if mask.ndim == 3:
             torch_mask = torch_mask.unsqueeze(0)
@@ -192,7 +206,7 @@ def signed_distance_kornia(
         if mask.ndim == 3:
             sdf = sdf.squeeze(0)
 
-        return sdf.to(device=device).reshape(original_shape)
+        return sdf.to(device=output_device).reshape(original_shape)
 
     elif isinstance(mask, np.ndarray):
         if mask.ndim != 3:
@@ -201,11 +215,17 @@ def signed_distance_kornia(
             )
 
         np_mask = mask.astype(np.float32)
-        torch_mask = torch.from_numpy(np_mask).permute(2, 0, 1).unsqueeze(0)
+        compute_device = resolve_compute_device(device)
+        torch_mask = (
+            torch.from_numpy(np_mask)
+            .permute(2, 0, 1)
+            .unsqueeze(0)
+            .to(compute_device)
+        )
         outside = kornia_distance_transform(torch_mask)
         inside = kornia_distance_transform(1.0 - torch_mask)
         sdf = outside - inside
-        sdf = sdf.squeeze(0).permute(1, 2, 0).numpy()
+        sdf = sdf.squeeze(0).permute(1, 2, 0).cpu().numpy()
         return sdf.astype(np.float32)
 
     else:
@@ -268,13 +288,13 @@ def mat2inv(mat: torch.Tensor) -> torch.Tensor:
     if squeeze:
         mat = mat.unsqueeze(0)
 
-    A = mat[:, :, :2]  # (N, 2, 2)
+    linear = mat[:, :, :2]  # (N, 2, 2)
     t = mat[:, :, 2:3]  # (N, 2, 1)
 
-    A_inv = torch.linalg.inv(A)  # (N, 2, 2)
-    t_inv = -A_inv @ t  # (N, 2, 1)
+    linear_inverse = torch.linalg.inv(linear)  # (N, 2, 2)
+    t_inv = -linear_inverse @ t  # (N, 2, 1)
 
-    inv_mat = torch.cat([A_inv, t_inv], dim=2)  # (N, 2, 3)
+    inv_mat = torch.cat([linear_inverse, t_inv], dim=2)  # (N, 2, 3)
 
     if squeeze:
         inv_mat = inv_mat.squeeze(0)

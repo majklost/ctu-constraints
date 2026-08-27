@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 import constraints.generators.deformation as deformation_module
+from constraints.devices import resolve_compute_device
 from constraints.generators.deformation import (
     apply_deformation,
     sample_valid_deformation,
@@ -51,7 +52,7 @@ def test_deformation_collection_is_mmap_friendly_and_reproducible(tmp_path) -> N
     metadata = json.loads(first_config_path.read_text())
     assert metadata["array"]["channel_order"] == ["dy", "dx"]
     assert metadata["config"] == config.to_dict()
-    assert metadata["generation_device"] == "cpu"
+    assert metadata["generation_device"] == str(resolve_compute_device())
     assert DeformationConfig.from_dict(metadata["config"]) == config
     assert first_path == root / "deformations" / "small" / "fields.npy"
     assert (root / "deformations" / "small" / "rigid").is_dir()

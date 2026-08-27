@@ -19,6 +19,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from constraints.datatools.datasets import ComposedArtificialDataset
+from constraints.devices import resolve_compute_device
 from constraints.generators.deformation import sample_valid_deformation
 from constraints.generators.factories import (
     create_deformation_collection,
@@ -216,7 +217,7 @@ def _benchmark_sdf(
             torch.device("cpu"),
         ),
         "kornia_cpu": _time_sdf(
-            signed_distance_kornia,
+            lambda mask: signed_distance_kornia(mask, device="cpu"),
             batch,
             args.sdf_repeats,
             torch.device("cpu"),
@@ -224,7 +225,7 @@ def _benchmark_sdf(
     }
     if cuda_device is not None:
         results["kornia_cuda"] = _time_sdf(
-            signed_distance_kornia,
+            lambda mask: signed_distance_kornia(mask, device=cuda_device),
             batch.to(cuda_device),
             args.sdf_repeats,
             cuda_device,
@@ -240,9 +241,11 @@ def _compute_sdf(
     if implementation == "scipy":
         result = signed_distance_scipy(foreground)
     elif cuda_device is None:
-        result = signed_distance_kornia(foreground)
+        result = signed_distance_kornia(foreground, device="cpu")
     else:
-        result = signed_distance_kornia(foreground.to(cuda_device)).cpu()
+        result = signed_distance_kornia(
+            foreground.to(cuda_device), device=cuda_device
+        ).cpu()
     return result.numpy()
 
 
@@ -371,7 +374,7 @@ def main() -> None:
     parser.add_argument("--prepare-samples", type=int, default=20)
     parser.add_argument(
         "--prepare-device",
-        choices=("auto", "cpu", "cuda"),
+        choices=("auto", "cpu", "cuda", "mps"),
         default="auto",
     )
     parser.add_argument("--plaque", action="append", default=[])
@@ -413,14 +416,10 @@ def main() -> None:
             )
         if args.rigid not in {None, "small"}:
             parser.error("--prepare-demo only provides --rigid small")
-        if args.prepare_device == "cuda" and cuda_device is None:
-            parser.error("--prepare-device cuda requested but CUDA is unavailable")
-        prepare_device = (
-            cuda_device
-            if args.prepare_device == "cuda"
-            or (args.prepare_device == "auto" and cuda_device is not None)
-            else torch.device("cpu")
-        )
+        try:
+            prepare_device = resolve_compute_device(args.prepare_device)
+        except RuntimeError as error:
+            parser.error(str(error))
         _prepare_demo_dataset(
             args.source_root,
             args.prepare_samples,

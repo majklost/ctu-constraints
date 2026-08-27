@@ -24,12 +24,6 @@ class PlaqueLayer:
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("plaque layer name must not be empty")
-        if self.target_class not in {
-            ArteryClass.BOUNDARY,
-            ArteryClass.LUMEN,
-            ArteryClass.PLAQUE,
-        }:
-            raise ValueError("plaque target must be boundary, lumen, or plaque")
 
 
 def compose_target_labels(
