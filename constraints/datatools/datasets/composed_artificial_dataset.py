@@ -9,6 +9,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
+from constraints.datatools.datasets.artery_common_types import (
+    ArtificialMaskColor,
+    ArtificialMaskLabel,
+)
 from constraints.generators.deformation import load_deformation_fields
 from constraints.generators.factories import (
     compose_artificial_sample,
@@ -31,15 +35,15 @@ from .types import Sample
 if TYPE_CHECKING:
     from constraints.generators.sdf_cache import SDFCacheConfig, SDFCacheIdentity
 
-_LABEL_SCHEMA = LabelSchema.from_lists(
-    names=["background", "boundary", "lumen", "plaque"],
-    colors=[
-        (0.0, 0.0, 0.0),
-        (0.9, 0.1, 0.1),
-        (0.1, 0.7, 0.1),
-        (0.1, 0.35, 0.95),
-    ],
-)
+# _LABEL_SCHEMA = LabelSchema.from_lists(
+#     names=["background", "boundary", "lumen", "plaque"],
+#     colors=[
+#         (0.0, 0.0, 0.0),
+#         (0.9, 0.1, 0.1),
+#         (0.1, 0.7, 0.1),
+#         (0.1, 0.35, 0.95),
+#     ],
+# )
 
 
 class ComposedArtificialDataset(PerSampleDataset):
@@ -147,7 +151,9 @@ class ComposedArtificialDataset(PerSampleDataset):
 
     @property
     def label_schema(self) -> LabelSchema:
-        return _LABEL_SCHEMA
+        return LabelSchema.from_lists(
+            names=ArtificialMaskLabel, colors=ArtificialMaskColor
+        )
 
     def sdf_cache_identity(
         self,

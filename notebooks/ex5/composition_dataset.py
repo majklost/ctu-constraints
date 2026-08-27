@@ -34,33 +34,27 @@ from constraints import get_data_folder
 from constraints.datatools.datasets import ComposedArtificialDataset, SavedPlaque
 
 # %%
-source_root = get_data_folder() / "artificial" / "demo"
-dataset = ComposedArtificialDataset(
-    source_root,
-    plaques=(SavedPlaque("2blobs"),),
-    deformation="validated-default",
-)
+from constraints.generators.recipes import Recipe
+
+
+source_root = get_data_folder() / "artificial" / "test"
+dataset = ComposedArtificialDataset.from_recipe(source_root,Recipe.load_json(source_root/"recipes/default.json"))
 print(f"Loaded {len(dataset)} samples from {source_root}")
 
 # %%
-label_cmap = ListedColormap(
-    [
-        "black",  # background
-        "firebrick",  # boundary
-        "seagreen",  # lumen
-        "royalblue",  # plaque
-    ]
-)
+
 
 sample_indices = range(6)
 fig, axes = plt.subplots(len(sample_indices), 2, figsize=(8, 18))
+
+cmap = ListedColormap([dataset.label_schema.colors[i] for i in sorted(dataset.label_schema.colors)])
 for row, sample_index in enumerate(sample_indices):
     sample = dataset[sample_index]
     axes[row, 0].imshow(sample["image"].squeeze(), cmap="gray", vmin=0, vmax=1)
     axes[row, 0].set_title(f"Sample {sample_index}: image")
     axes[row, 1].imshow(
         sample["target_labels"],
-        cmap=label_cmap,
+        cmap=cmap,
         vmin=0,
         vmax=3,
         interpolation="nearest",

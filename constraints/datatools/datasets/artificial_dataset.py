@@ -5,6 +5,10 @@ from typing import get_args
 import numpy as np
 import torch
 
+from constraints.datatools.datasets.artery_common_types import (
+    ArtificialMaskColor,
+    ArtificialMaskLabel,
+)
 from constraints.datatools.datasets.types import TemplateAssets
 
 from ...utils import signed_distance_kornia, signed_distance_scipy
@@ -13,13 +17,6 @@ from .base_dataset import PerSampleDataset
 from .types import Sample, SDFMode
 
 BAD_INDICES_FILENAME = "bad_indices.csv"
-_ArtificialMaskLabel = ["background", "boundary", "lumen", "plaque"]
-_ArtificialMaskColor = [
-    (0.0, 0.0, 0.0),  # background
-    (0.90, 0.10, 0.10),  # red
-    (0.10, 0.70, 0.10),  # green
-    (0.10, 0.35, 0.95),
-]
 
 
 def _load_valid_indices(
@@ -126,7 +123,7 @@ class CachedArtificialDataset(PerSampleDataset):
 
     def _create_label_schema(self) -> LabelSchema:
         return LabelSchema.from_lists(
-            names=_ArtificialMaskLabel, colors=_ArtificialMaskColor
+            names=ArtificialMaskLabel, colors=ArtificialMaskColor
         )
 
     def _mask_to_label_map(self, mask: torch.Tensor) -> torch.Tensor:
