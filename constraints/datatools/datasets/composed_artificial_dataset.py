@@ -1,7 +1,10 @@
 """Lazy composition of independently stored artificial source layers."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -14,7 +17,6 @@ from constraints.generators.factories import (
 from constraints.generators.recipes import Recipe
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.rigid import load_rigid_parameters
-from constraints.generators.sdf_cache import SDFCacheConfig, SDFCacheIdentity
 from constraints.generators.storage import read_manifest
 from constraints.generators.types import (
     AppearanceKind,
@@ -25,6 +27,9 @@ from constraints.generators.types import (
 from ..label_schema import LabelSchema
 from .base_dataset import PerSampleDataset
 from .types import Sample
+
+if TYPE_CHECKING:
+    from constraints.generators.sdf_cache import SDFCacheConfig, SDFCacheIdentity
 
 _LABEL_SCHEMA = LabelSchema.from_lists(
     names=["background", "boundary", "lumen", "plaque"],
@@ -89,7 +94,7 @@ class ComposedArtificialDataset(PerSampleDataset):
         cls,
         root: Path,
         recipe: Recipe,
-    ) -> "ComposedArtificialDataset":
+    ) -> ComposedArtificialDataset:
         """Load a dataset from an explicit artifact-selection recipe."""
         if not isinstance(recipe, Recipe):
             raise TypeError("recipe must be a Recipe instance")
@@ -149,6 +154,8 @@ class ComposedArtificialDataset(PerSampleDataset):
         config: SDFCacheConfig | None = None,
     ) -> SDFCacheIdentity:
         """Describe the pre-rigid SDF cache shared by compatible recipes."""
+        from constraints.generators.sdf_cache import SDFCacheIdentity
+
         manifest = read_manifest(self.root)
         dataset_id = manifest.get("dataset_id")
         if not isinstance(dataset_id, str) or not dataset_id:

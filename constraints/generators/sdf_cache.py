@@ -2,11 +2,20 @@
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Protocol
+
+import numpy as np
+import torch
+
+from constraints.datatools.datasets.types import SDFMode
+from constraints.devices import DeviceSelection
+from constraints.utils import signed_distance_kornia, signed_distance_scipy
 
 from .recipes import Recipe
+from .storage import write_json
 from .types import ArteryClass
 
 SDF_CACHE_IDENTITY_VERSION = 1
@@ -18,7 +27,7 @@ SDF_CACHE_ARRAY_FILENAME = "sdf.npy"
 class SDFCacheConfig:
     """Settings that determine the values and channels in a cached SDF."""
 
-    implementation: Literal["scipy_edt"] = "scipy_edt"
+    mode: SDFMode = "scipy"
     foreground_classes: tuple[ArteryClass, ...] = (
         ArteryClass.BOUNDARY,
         ArteryClass.LUMEN,
@@ -26,8 +35,8 @@ class SDFCacheConfig:
     )
 
     def __post_init__(self) -> None:
-        if self.implementation != "scipy_edt":
-            raise ValueError("unsupported SDF implementation")
+        if self.mode not in ("kornia", "scipy"):
+            raise ValueError("unsupported SDF mode")
         classes = tuple(ArteryClass(value) for value in self.foreground_classes)
         if not classes or ArteryClass.BACKGROUND in classes:
             raise ValueError(
@@ -39,7 +48,7 @@ class SDFCacheConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "implementation": self.implementation,
+            "mode": self.mode,
             "implementation_version": 1,
             "foreground_classes": [
                 artery_class.name.lower() for artery_class in self.foreground_classes
@@ -135,3 +144,124 @@ class SDFCacheIdentity:
     def cache_directory(self, source_root: Path) -> Path:
         """Return the proposed location without creating it."""
         return Path(source_root) / "derived" / self.directory_name
+
+
+class _PreRigidTargetDataset(Protocol):
+    """Minimal dataset surface needed to materialize an SDF cache."""
+
+    root: Path
+    recipe: Recipe
+
+    def __len__(self) -> int: ...
+
+    def __getitem__(self, index: int) -> Mapping[str, Any]: ...
+
+    def sdf_cache_identity(
+        self, config: SDFCacheConfig | None = None
+    ) -> SDFCacheIdentity: ...
+
+
+def create_sdf_cache(
+    dataset: _PreRigidTargetDataset,
+    config: SDFCacheConfig | None = None,
+    *,
+    batch_size: int = 16,
+    device: DeviceSelection = "auto",
+) -> tuple[Path, Path]:
+    """Materialize one content-addressed pre-rigid SDF cache.
+
+    The supplied dataset must not apply a rigid transform. SDF computation is
+    delegated to the established utility selected by :class:`SDFMode`.
+    """
+    if dataset.recipe.rigid is not None:
+        raise ValueError("pre-rigid SDF caching requires a recipe without rigid")
+    if (
+        isinstance(batch_size, bool)
+        or not isinstance(batch_size, int)
+        or batch_size <= 0
+    ):
+        raise ValueError("batch_size must be a positive integer")
+    config = SDFCacheConfig() if config is None else config
+    identity = dataset.sdf_cache_identity(config)
+    cache_folder = identity.cache_directory(dataset.root)
+    if cache_folder.exists():
+        raise FileExistsError(f"SDF cache already exists: {cache_folder}")
+
+    num_elements = len(dataset)
+    if num_elements <= 0:
+        raise ValueError("cannot cache an empty dataset")
+    first_labels = _target_labels_array(dataset[0])
+    height, width = first_labels.shape
+    num_channels = len(config.foreground_classes)
+    array_path = cache_folder / SDF_CACHE_ARRAY_FILENAME
+    manifest_path = cache_folder / SDF_CACHE_MANIFEST_FILENAME
+    temporary_array = cache_folder / f".{SDF_CACHE_ARRAY_FILENAME}.tmp"
+
+    cache_folder.mkdir(parents=True)
+    values = np.lib.format.open_memmap(
+        temporary_array,
+        mode="w+",
+        dtype=np.float32,
+        shape=(num_elements, num_channels, height, width),
+    )
+    try:
+        for start in range(0, num_elements, batch_size):
+            stop = min(start + batch_size, num_elements)
+            labels = torch.stack(
+                [
+                    torch.from_numpy(first_labels)
+                    if index == 0
+                    else torch.from_numpy(_target_labels_array(dataset[index]))
+                    for index in range(start, stop)
+                ]
+            )
+            foreground = torch.stack(
+                tuple(
+                    labels == int(artery_class)
+                    for artery_class in config.foreground_classes
+                ),
+                dim=1,
+            )
+            if config.mode == "scipy":
+                sdf = signed_distance_scipy(foreground)
+            else:
+                sdf = signed_distance_kornia(foreground, device=device)
+            values[start:stop] = sdf.detach().cpu().numpy()
+
+        values.flush()
+        temporary_array.replace(array_path)
+        write_json(
+            manifest_path,
+            {
+                "format_name": "composed-artificial-sdf-cache",
+                "format_version": 1,
+                "status": "complete",
+                "cache_key": identity.digest,
+                "identity": identity.to_dict(),
+                "array": {
+                    "relative_path": SDF_CACHE_ARRAY_FILENAME,
+                    "shape": list(values.shape),
+                    "dtype": str(values.dtype),
+                    "layout": "NCHW",
+                },
+            },
+        )
+    except BaseException:
+        temporary_array.unlink(missing_ok=True)
+        array_path.unlink(missing_ok=True)
+        manifest_path.unlink(missing_ok=True)
+        cache_folder.rmdir()
+        raise
+    finally:
+        del values
+    return array_path, manifest_path
+
+
+def _target_labels_array(sample: Mapping[str, Any]) -> np.ndarray:
+    labels = sample["target_labels"]
+    if isinstance(labels, torch.Tensor):
+        labels = labels.detach().cpu().numpy()
+    labels = np.asarray(labels)
+    if labels.ndim != 2:
+        raise ValueError("target_labels must have shape [H, W]")
+    return np.array(labels, dtype=np.uint8, copy=True)

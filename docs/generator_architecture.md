@@ -29,9 +29,10 @@ source root
 - `generators/recipes.py` defines the immutable `Recipe`: the ordered plaques,
   deformation, rigid preset, and appearance intensities. It owns the strict,
   versioned JSON round trip used for experiment provenance.
-- `generators/sdf_cache.py` defines—but does not yet materialize—the versioned
-  identity, configuration, digest, and directory contract for pre-rigid SDF
-  caches.
+- `generators/sdf_cache.py` defines the versioned identity, configuration,
+  digest, and directory contract for pre-rigid SDF caches. Cache generation
+  dispatches through `signed_distance_scipy` or `signed_distance_kornia`
+  according to the shared dataset `SDFMode`.
 - `generators/parametrization/` rasterizes self-contained empty-artery configs
   and converts tuples of plaque parameters into Boolean union masks.
 - `generators/composition.py` overlays independent Boolean plaque masks onto
@@ -69,6 +70,10 @@ whole child subtree therefore cannot invalidate a sibling.
   plaque masks, applies the selected deformation, composes targets and
   grayscale image, then applies the selected rigid preset.
 - `scripts/create_*.py` only parse command-line arguments and call the facade.
+- `scripts/prepare_composed_artificial_dataset.py` prepares the first large
+  source configuration end-to-end, including recipe JSON, deterministic split
+  CSVs, and an optional content-addressed SDF cache. It can reuse completed
+  artifact boundaries when rerun with the same preparation definition.
 - `generators/deprecated/` and
   `scripts/create_artificial_dataset.py` belong to the old fully materialized
   path. New composable behavior should not be added there.
@@ -103,8 +108,8 @@ load empty artery and selected masks
     → apply rigid transformation
 ```
 
-The planned SDF cache belongs after composition and deformation but before
-rigid transformation. `SDFCacheIdentity` is an explicit projection rather than
+The SDF cache belongs after composition and deformation but before rigid
+transformation. `SDFCacheIdentity` is an explicit projection rather than
 a hash of the complete recipe: it includes the source ID, ordered plaque names
 and target classes, deformation, composition/application contract versions,
 class-channel order, and SDF parameters. It excludes rigid motion, plaque
@@ -112,10 +117,10 @@ appearance, and grayscale intensity. Adding an unrelated recipe field therefore
 does not invalidate the cache; changing an SDF-relevant contract is deliberate
 and versioned.
 
-The proposed cache directory is
+The cache directory is
 `derived/sdf-v<identity-version>-<sha256>/`. The digest is calculated from
-canonical JSON, while the future cache manifest should retain the full identity
-payload so a directory is always explainable without reversing its name.
+canonical JSON, while its manifest retains the full identity payload so a
+directory is always explainable without reversing its name.
 
 Generation and cache preparation happen outside `Dataset.__getitem__`.
 `__getitem__` stays deterministic, read-only, and free of rejection sampling or

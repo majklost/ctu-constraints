@@ -117,3 +117,37 @@ def test_single_plaque_sample_matches_persisted_collection(tmp_path) -> None:
     assert record["plaques"][0]["parameters"]["angle_rad"] == (
         direct.parameters[0].angle_rad
     )
+
+
+def test_plaque_collection_can_use_an_inner_lumen_radius(tmp_path) -> None:
+    config = SourceConfig(
+        num_elements=1,
+        empty_artery=EmptyArteryConfig(20, 5, (65, 65)),
+    )
+    ranges = PowerPlaqueSamplingRanges(
+        angle_rad=FloatRange.fixed(0),
+        angular_width_rad=FloatRange.fixed(0.5),
+        inward_depth_fraction=FloatRange.fixed(0.2),
+        wall_depth_fraction=FloatRange.fixed(0.1),
+        shape_power=FloatRange.fixed(2),
+    )
+
+    direct = sample_power_plaque_mask(
+        config,
+        ranges,
+        seed=19,
+        lumen_radius_px=15,
+    )
+    generate_plaque_masks_power(
+        tmp_path,
+        "inner",
+        config,
+        ranges,
+        seed=19,
+        lumen_radius_px=15,
+    )
+
+    np.testing.assert_array_equal(direct.mask, np.load(tmp_path / "inner.npy")[0])
+    assert direct.parameters[0].inward_depth_px == 3
+    record = json.loads((tmp_path / "inner.jsonl").read_text())
+    assert record["lumen_radius_px"] == 15

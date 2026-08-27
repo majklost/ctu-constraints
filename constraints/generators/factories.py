@@ -135,6 +135,7 @@ def create_plaque_collection(
     | None = None,
     *,
     seed: int,
+    lumen_radius_px: float | None = None,
 ) -> tuple[Path, Path]:
     """Create a named plaque collection inside an existing source dataset.
 
@@ -150,6 +151,7 @@ def create_plaque_collection(
         config,
         ranges,
         seed=seed,
+        lumen_radius_px=lumen_radius_px,
     )
     return plaque_folder / f"{name}.npy", plaque_folder / f"{name}.jsonl"
 

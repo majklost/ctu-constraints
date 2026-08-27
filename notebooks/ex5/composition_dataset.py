@@ -122,6 +122,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 # %%
+rn = np.random.randint(0, 1000)
 sc = SourceConfig(1)
 plaque_range1 = PowerPlaqueSamplingRanges(
     angle_rad=FloatRange(-np.pi / 3, -np.pi / 10),
@@ -149,7 +150,7 @@ dc = DeformationConfig()
 drc = DeformationRejectionConfig()
 rc = RigidConfig()
 
-rng = np.random.default_rng(25)
+rng = np.random.default_rng(rn)
 artery_config = sc.empty_artery
 real_parameters = plaque_range1.sample(
     1,
@@ -162,7 +163,7 @@ real_parameters = plaque_range1.sample(
     wall_thickness_px=artery_config.wall_thickness_px,
     rng=rng,
 )
-fake_lumen_radius_px = artery_config.lumen_radius_px - 10
+fake_lumen_radius_px = artery_config.lumen_radius_px - 5
 fake_parameters = fake_plaque_range.sample(
     5,
     lumen_radius_px=fake_lumen_radius_px,
@@ -180,9 +181,6 @@ plaque_layers = (
     PlaqueLayer(create_power_plaque_mask(real_parameters, artery_config)),
 )
 
-
-# %%
-rn = np.random.randint(0, 1000)
 sample = preview_artificial_sample(
     artery_config,
     plaque_layers,
@@ -194,5 +192,8 @@ sample = preview_artificial_sample(
 plt.imshow(sample.target_labels)
 plt.show()
 plt.imshow(sample.image,cmap="grey")
+
+
+# %%
 
 # %%

@@ -1,6 +1,6 @@
 import csv
 from pathlib import Path
-from typing import Literal
+from typing import get_args
 
 import numpy as np
 import torch
@@ -44,7 +44,8 @@ def _load_valid_indices(
     )
     if invalid_indices:
         raise ValueError(
-            f"{bad_indices_path} contains indices outside [0, {num_samples}): {invalid_indices}"
+            f"{bad_indices_path} contains indices outside [0, {num_samples}): "
+            f"{invalid_indices}"
         )
 
     valid_mask = np.ones(num_samples, dtype=bool)
@@ -80,7 +81,7 @@ class CachedArtificialDataset(PerSampleDataset):
             if bad_indices_fname
             else np.arange(len(self._images))
         )
-        if sdf_mode not in set(SDFMode.__args__):
+        if sdf_mode not in get_args(SDFMode):
             raise ValueError(f"Unknown sdf_mode: {sdf_mode}")
         self._sdf_mode = sdf_mode
         self._label_schema = self._create_label_schema()

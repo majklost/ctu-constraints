@@ -89,11 +89,13 @@ def sample_power_plaque_mask(
     *,
     seed: int,
     sample_index: int = 0,
+    lumen_radius_px: float | None = None,
 ) -> PowerPlaqueSample:
     """Generate one reproducible power-plaque mask without writing it.
 
     ``seed`` and ``sample_index`` use the same scheme as persisted plaque
     collections, so a preview can be reproduced exactly during generation.
+    ``lumen_radius_px`` may place plaque-like artifacts on an inner radius.
     """
     if seed < 0:
         raise ValueError("seed must be non-negative")
@@ -103,6 +105,8 @@ def sample_power_plaque_mask(
         ranges = PowerPlaqueSamplingRanges()
     if isinstance(ranges, tuple) and not ranges:
         raise ValueError("at least one plaque range is required")
+    if lumen_radius_px is None:
+        lumen_radius_px = config.empty_artery.lumen_radius_px
 
     sample_seed = _sample_seed(seed, sample_index)
     rng = np.random.default_rng(sample_seed)
@@ -112,13 +116,17 @@ def sample_power_plaque_mask(
         for item in ranges_per_plaque
         for parameter in item.sample(
             1,
-            lumen_radius_px=config.empty_artery.lumen_radius_px,
+            lumen_radius_px=lumen_radius_px,
             wall_thickness_px=config.empty_artery.wall_thickness_px,
             rng=rng,
         )
     )
     return PowerPlaqueSample(
-        mask=create_power_plaque_mask(parameters, config.empty_artery),
+        mask=create_power_plaque_mask(
+            parameters,
+            config.empty_artery,
+            lumen_radius_px=lumen_radius_px,
+        ),
         parameters=parameters,
         sample_seed=sample_seed,
     )
@@ -133,12 +141,14 @@ def generate_plaque_masks_power(
     | None = None,
     *,
     seed: int,
+    lumen_radius_px: float | None = None,
 ) -> None:
     """Generate a named, reproducible collection of power-plaque union masks.
 
     A single range creates one plaque in every mask. A tuple creates one plaque
     per range and stores their union while retaining every resolved parameter in
-    the paired JSONL record.
+    the paired JSONL record. ``lumen_radius_px`` controls both fractional depth
+    resolution and the radius around which the plaques are rasterized.
     """
     folder = Path(folder)
     _validate_artifact_name(name)
@@ -171,11 +181,17 @@ def generate_plaque_masks_power(
                     ranges,
                     seed=seed,
                     sample_index=sample_index,
+                    lumen_radius_px=lumen_radius_px,
                 )
                 masks[sample_index] = sample.mask
                 record = {
                     "sample_index": sample_index,
                     "sample_seed": sample.sample_seed,
+                    "lumen_radius_px": (
+                        config.empty_artery.lumen_radius_px
+                        if lumen_radius_px is None
+                        else lumen_radius_px
+                    ),
                     "plaques": [
                         {"type": "power", "parameters": asdict(item)}
                         for item in sample.parameters
