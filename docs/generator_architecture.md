@@ -28,9 +28,10 @@ source root
 - `generators/parametrization/` rasterizes self-contained empty-artery configs
   and converts tuples of plaque parameters into Boolean union masks.
 - `generators/composition.py` overlays independent Boolean plaque masks onto
-  the empty artery in the exact order supplied. Later layers win at overlaps,
-  so precedence is explicit at each call site.
-- `generators/rendering.py` maps target class IDs to grayscale intensities.
+  target and appearance maps in the exact order supplied. Later layers win at
+  overlaps, so precedence is explicit at each call site. A layer's appearance
+  defaults to its target class but may be overridden for plaque-like artifacts.
+- `generators/rendering.py` maps appearance IDs to grayscale intensities.
 - `generators/validation.py` checks topology, foreground margins, and transform
   acceptance.
 

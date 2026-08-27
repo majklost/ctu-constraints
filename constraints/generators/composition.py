@@ -1,17 +1,27 @@
 """Pure ordered composition of independently stored anatomy layers."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .types import PlaqueLayer
 
 
-def compose_target_labels(
+@dataclass(frozen=True)
+class ComposedLabelMaps:
+    """Supervision and visual-material maps resolved from ordered layers."""
+
+    target_labels: NDArray[np.uint8]
+    appearance_labels: NDArray[np.uint8]
+
+
+def compose_label_maps(
     empty_artery: np.ndarray,
     layers: Iterable[PlaqueLayer],
-) -> np.ndarray:
-    """Overlay layers in input order and return standard class IDs 0--3."""
+) -> ComposedLabelMaps:
+    """Overlay target and appearance values in the exact input order."""
     artery = np.asarray(empty_artery)
     if artery.ndim != 2:
         raise ValueError("empty_artery must have shape [H, W]")
@@ -23,7 +33,12 @@ def compose_target_labels(
         if np.asarray(layer.mask).shape != artery.shape:
             raise ValueError(f"plaque layer {layer_index} does not match artery shape")
 
-    output = artery.astype(np.uint8, copy=True)
+    target_labels = artery.astype(np.uint8, copy=True)
+    appearance_labels = artery.astype(np.uint8, copy=True)
     for layer in resolved_layers:
-        output[layer.mask] = layer.target_class
-    return output
+        target_labels[layer.mask] = layer.target_class
+        appearance_labels[layer.mask] = layer.resolved_appearance
+    return ComposedLabelMaps(
+        target_labels=target_labels,
+        appearance_labels=appearance_labels,
+    )

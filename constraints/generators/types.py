@@ -16,6 +16,20 @@ class ArteryClass(IntEnum):
     PLAQUE = 3
 
 
+class AppearanceKind(IntEnum):
+    """Kinds of visual material used to synthesize an input image.
+
+    Anatomical values intentionally match :class:`ArteryClass`, allowing an
+    artery label map to serve as its default appearance map.
+    """
+
+    BACKGROUND = ArteryClass.BACKGROUND.value
+    BOUNDARY = ArteryClass.BOUNDARY.value
+    LUMEN = ArteryClass.LUMEN.value
+    PLAQUE = ArteryClass.PLAQUE.value
+    SHADOW = 4
+
+
 @dataclass(frozen=True)
 class EmptyArteryConfig:
     lumen_radius_px: float = 73.0
@@ -257,10 +271,11 @@ class PowerPlaqueParameters:
 
 @dataclass(frozen=True)
 class PlaqueLayer:
-    """One binary plaque mask and its anatomical class in the target."""
+    """One plaque-like mask with independent target and visual meanings."""
 
     mask: NDArray[np.bool_]
     target_class: ArteryClass = ArteryClass.PLAQUE
+    appearance: AppearanceKind | None = None
 
     def __post_init__(self) -> None:
         mask = np.asarray(self.mask)
@@ -275,6 +290,19 @@ class PlaqueLayer:
             raise ValueError("plaque layer target must be boundary, lumen, or plaque")
         object.__setattr__(self, "mask", mask.astype(bool, copy=False))
         object.__setattr__(self, "target_class", target_class)
+        if self.appearance is not None:
+            object.__setattr__(
+                self,
+                "appearance",
+                AppearanceKind(self.appearance),
+            )
+
+    @property
+    def resolved_appearance(self) -> AppearanceKind:
+        """Use the target class as appearance when no override is supplied."""
+        if self.appearance is not None:
+            return self.appearance
+        return AppearanceKind(self.target_class.value)
 
 
 @dataclass(frozen=True)

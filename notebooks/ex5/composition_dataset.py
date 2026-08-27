@@ -97,6 +97,7 @@ configured class in `target_labels`.
 from constraints.generators.factories import preview_artificial_sample
 from constraints.generators.parametrization import create_power_plaque_mask
 from constraints.generators.types import (
+    AppearanceKind,
     SourceConfig,
     PowerPlaqueSamplingRanges,
     DeformationConfig,
@@ -163,7 +164,8 @@ plaque_layers = (
         create_power_plaque_mask(
             fake_parameters, artery_config, lumen_radius_px=fake_lumen_radius_px
         ),
-        ArteryClass.LUMEN,
+        ArteryClass.BOUNDARY,
+        AppearanceKind.PLAQUE,
     ),
     PlaqueLayer(create_power_plaque_mask(real_parameters, artery_config)),
 )

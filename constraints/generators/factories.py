@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from constraints.devices import DeviceSelection
 
-from .composition import compose_target_labels
+from .composition import compose_label_maps
 from .deformation import (
     apply_deformation,
     generate_deformation_fields,
@@ -27,7 +27,7 @@ from .source import (
     load_source_config,
 )
 from .types import (
-    ArteryClass,
+    AppearanceKind,
     DeformationConfig,
     DeformationRejectionConfig,
     EmptyArteryConfig,
@@ -46,6 +46,7 @@ class ComposedSampleArrays:
 
     image: NDArray[np.float32]
     target_labels: NDArray[np.uint8]
+    appearance_labels: NDArray[np.uint8]
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class PreviewArtificialSample:
 
     image: NDArray[np.float32]
     target_labels: NDArray[np.uint8]
+    appearance_labels: NDArray[np.uint8]
     deformation_field: NDArray[np.float32] | None
     deformation_validation: DeformationValidationResult | None
     rigid_parameters: NDArray[np.float32] | None = None
@@ -70,7 +72,7 @@ def preview_artificial_sample(
     seed: int,
     sample_index: int = 0,
     deformation_device: DeviceSelection = "auto",
-    class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
+    class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
 ) -> PreviewArtificialSample:
     """Transform and compose directly supplied Boolean plaque layers."""
     empty_artery = create_empty_artery(artery_config)
@@ -94,6 +96,7 @@ def preview_artificial_sample(
                 apply_deformation(layer.mask, deformation.field, method="nearest")
                 > 0.5,
                 layer.target_class,
+                layer.appearance,
             )
             for layer in resolved_plaque_layers
         )
@@ -125,10 +128,18 @@ def preview_artificial_sample(
                     method="nearest",
                 )
             ).astype(np.uint8),
+            appearance_labels=np.rint(
+                apply_rigid(
+                    arrays.appearance_labels,
+                    *rigid.parameters,
+                    method="nearest",
+                )
+            ).astype(np.uint8),
         )
     return PreviewArtificialSample(
         image=arrays.image,
         target_labels=arrays.target_labels,
+        appearance_labels=arrays.appearance_labels,
         deformation_field=None if deformation is None else deformation.field,
         deformation_validation=(
             None if deformation is None else deformation.validation
@@ -230,21 +241,17 @@ def create_rigid_collection(
 def compose_artificial_sample(
     empty_artery: np.ndarray,
     layers: Iterable[PlaqueLayer],
-    class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
+    class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
 ) -> ComposedSampleArrays:
-    """Compose target anatomy and its initial grayscale image.
-
-    Fake plaque layers resolve to their configured anatomical target, but are
-    rendered with plaque intensity. Later pipeline stages may add deformation,
-    rigid movement, or image-only noise around this operation.
-    """
+    """Compose supervision and appearance, then render the initial image."""
     layers = tuple(layers)
-    target_labels = compose_target_labels(empty_artery, layers)
+    label_maps = compose_label_maps(empty_artery, layers)
     image = create_grayscale_image_from_label_mask(
-        target_labels,
+        label_maps.appearance_labels,
         class_intensities,
     )
-    plaque_intensity = float(class_intensities[ArteryClass.PLAQUE])
-    for layer in layers:
-        image[np.asarray(layer.mask, dtype=bool)] = plaque_intensity
-    return ComposedSampleArrays(image=image, target_labels=target_labels)
+    return ComposedSampleArrays(
+        image=image,
+        target_labels=label_maps.target_labels,
+        appearance_labels=label_maps.appearance_labels,
+    )

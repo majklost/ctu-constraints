@@ -17,7 +17,7 @@ from constraints.generators.factories import (
 )
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.rigid import apply_rigid, load_rigid_parameters
-from constraints.generators.types import ArteryClass, PlaqueLayer
+from constraints.generators.types import AppearanceKind, ArteryClass, PlaqueLayer
 
 from ..label_schema import LabelSchema
 from .base_dataset import PerSampleDataset
@@ -49,7 +49,7 @@ class ComposedArtificialDataset(PerSampleDataset):
         fake_plaques: Mapping[str, ArteryClass] | None = None,
         deformation: str | None = None,
         rigid: str | None = None,
-        class_intensities: Mapping[ArteryClass, float] = DEFAULT_CLASS_INTENSITIES,
+        class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
     ) -> None:
         self.root = Path(root)
         self.config = get_source_config(self.root)
@@ -103,7 +103,11 @@ class ComposedArtificialDataset(PerSampleDataset):
     def __getitem__(self, index: int) -> Sample:
         index = self._normalize_index(index)
         layers = [
-            PlaqueLayer(masks[index], target_class)
+            PlaqueLayer(
+                masks[index],
+                target_class,
+                AppearanceKind.PLAQUE,
+            )
             for masks, target_class in self._fake_masks.values()
         ]
         layers.extend(
@@ -121,6 +125,7 @@ class ComposedArtificialDataset(PerSampleDataset):
                 PlaqueLayer(
                     apply_deformation(layer.mask, field, method="nearest") > 0.5,
                     layer.target_class,
+                    layer.appearance,
                 )
                 for layer in layers
             ]
@@ -141,6 +146,13 @@ class ComposedArtificialDataset(PerSampleDataset):
                 target_labels=np.rint(
                     apply_rigid(
                         arrays.target_labels,
+                        *rigid_parameters,
+                        method="nearest",
+                    )
+                ).astype(np.uint8),
+                appearance_labels=np.rint(
+                    apply_rigid(
+                        arrays.appearance_labels,
                         *rigid_parameters,
                         method="nearest",
                     )

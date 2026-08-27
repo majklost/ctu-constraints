@@ -3,7 +3,9 @@ import pytest
 
 from constraints.generators.factories import preview_artificial_sample
 from constraints.generators.parametrization import create_power_plaque_mask
+from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.types import (
+    AppearanceKind,
     ArteryClass,
     DeformationConfig,
     EmptyArteryConfig,
@@ -64,6 +66,7 @@ def test_preview_sample_requires_no_storage() -> None:
     assert sample.image.dtype == np.float32
     assert sample.target_labels.shape == artery_config.image_size
     assert sample.target_labels.dtype == np.uint8
+    assert sample.appearance_labels.dtype == np.uint8
     assert ArteryClass.PLAQUE in sample.target_labels
     assert sample.deformation_field is not None
     assert sample.deformation_field.shape == (2, *artery_config.image_size)
@@ -109,13 +112,42 @@ def test_preview_accepts_ordered_real_and_fake_plaque_layers() -> None:
         artery_config,
         (
             PlaqueLayer(overlap, ArteryClass.PLAQUE),
-            PlaqueLayer(overlap, ArteryClass.LUMEN),
+            PlaqueLayer(
+                overlap,
+                ArteryClass.LUMEN,
+                AppearanceKind.PLAQUE,
+            ),
         ),
         seed=23,
     )
 
     assert sample.target_labels[16, 16] == ArteryClass.LUMEN
+    assert sample.appearance_labels[16, 16] == AppearanceKind.PLAQUE
     assert sample.image[16, 16] == 1.0
+
+
+def test_preview_renders_non_anatomical_appearance_kind() -> None:
+    artery_config = EmptyArteryConfig(10, 3, (33, 33))
+    shadow = np.zeros(artery_config.image_size, dtype=bool)
+    shadow[16, 16] = True
+    intensities = {**DEFAULT_CLASS_INTENSITIES, AppearanceKind.SHADOW: 0.05}
+
+    sample = preview_artificial_sample(
+        artery_config,
+        (
+            PlaqueLayer(
+                shadow,
+                ArteryClass.LUMEN,
+                AppearanceKind.SHADOW,
+            ),
+        ),
+        seed=23,
+        class_intensities=intensities,
+    )
+
+    assert sample.target_labels[16, 16] == ArteryClass.LUMEN
+    assert sample.appearance_labels[16, 16] == AppearanceKind.SHADOW
+    assert sample.image[16, 16] == pytest.approx(0.05)
 
 
 def test_preview_sample_accepts_and_applies_rigid_configuration() -> None:
