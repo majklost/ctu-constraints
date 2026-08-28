@@ -69,26 +69,27 @@ class ComposedArtificialDataset(PerSampleDataset):
             class_intensities=class_intensities,
             noise=noise,
         )
+        self.recipe.require_resolved()
         self.config = get_source_config(self.root)
         self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
         self._class_intensities = self.recipe.class_intensities
         self._deformation_fields = (
             None
-            if self.recipe.deformation is None
+            if self.recipe.deformation_name is None
             else load_deformation_fields(
                 self.root / "deformations",
-                self.recipe.deformation,
+                self.recipe.deformation_name,
                 self.config,
             )
         )
         self._rigid_parameters = (
             None
-            if self.recipe.rigid is None
+            if self.recipe.rigid_name is None
             else load_rigid_parameters(
                 self.root
-                if self.recipe.deformation is None
-                else self.root / "deformations" / self.recipe.deformation,
-                self.recipe.rigid,
+                if self.recipe.deformation_name is None
+                else self.root / "deformations" / self.recipe.deformation_name,
+                self.recipe.rigid_name,
                 self.config,
             )
         )
@@ -109,7 +110,7 @@ class ComposedArtificialDataset(PerSampleDataset):
         """Load a dataset from an explicit artifact-selection recipe."""
         if not isinstance(recipe, Recipe):
             raise TypeError("recipe must be a Recipe instance")
-        return cls(
+        dataset = cls(
             root,
             plaques=recipe.plaques,
             deformation=recipe.deformation,
@@ -118,6 +119,8 @@ class ComposedArtificialDataset(PerSampleDataset):
             noise=recipe.noise,
             sample_list=sample_list,
         )
+        dataset.recipe = recipe
+        return dataset
 
     def __len__(self) -> int:
         return len(self._sample_list)

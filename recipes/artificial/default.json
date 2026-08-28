@@ -1,0 +1,97 @@
+{
+  "class_intensities": {
+    "background": 0.0,
+    "boundary": 0.65,
+    "lumen": 0.25,
+    "plaque": 1.0
+  },
+  "deformation": {
+    "backup": {
+      "config": {
+        "fractal_mode": "blur",
+        "integrations": 2,
+        "magnitude": 7.0,
+        "scales": 14,
+        "voxsize": 1.0
+      },
+      "rejection": {
+        "max_attempts": 20,
+        "minimum_foreground_margin_px": 1,
+        "minimum_jacobian": 0.0
+      },
+      "seed": 27
+    },
+    "name": "default"
+  },
+  "format_name": "composed-artificial-recipe",
+  "format_version": 3,
+  "noise": null,
+  "plaques": [
+    {
+      "appearance": "plaque",
+      "backup": {
+        "lumen_radius_px": null,
+        "ranges": [
+          {
+            "count": 5,
+            "sampling": {
+              "angle_rad": {"maximum": 3.141592653589793, "minimum": -3.141592653589793},
+              "angular_width_rad": {"maximum": 1.0471975511965976, "minimum": 0.2617993877991494},
+              "inward_depth_fraction": {"maximum": 0.15, "minimum": 0.12},
+              "offset_px_lumen": {"maximum": -10, "minimum": -10},
+              "shape_power": {"maximum": 2, "minimum": 2},
+              "wall_depth_fraction": {"maximum": 0.1, "minimum": 0.1}
+            }
+          }
+        ],
+        "seed": 26,
+        "type": "power"
+      },
+      "name": "five-fake-plaques",
+      "target_class": "lumen"
+    },
+    {
+      "appearance": null,
+      "backup": {
+        "lumen_radius_px": null,
+        "ranges": [
+          {
+            "count": 1,
+            "sampling": {
+              "angle_rad": {"maximum": -0.3141592653589793, "minimum": -1.0471975511965976},
+              "angular_width_rad": {"maximum": 0.6283185307179586, "minimum": 0.6283185307179586},
+              "inward_depth_fraction": {"maximum": 0.3, "minimum": 0.2},
+              "offset_px_lumen": {"maximum": 0, "minimum": 0},
+              "shape_power": {"maximum": 0.5, "minimum": 0.5},
+              "wall_depth_fraction": {"maximum": 0, "minimum": 0}
+            }
+          },
+          {
+            "count": 1,
+            "sampling": {
+              "angle_rad": {"maximum": 1.0471975511965976, "minimum": 0.3141592653589793},
+              "angular_width_rad": {"maximum": 0.6283185307179586, "minimum": 0.6283185307179586},
+              "inward_depth_fraction": {"maximum": 0.3, "minimum": 0.2},
+              "offset_px_lumen": {"maximum": 0, "minimum": 0},
+              "shape_power": {"maximum": 0.5, "minimum": 0.5},
+              "wall_depth_fraction": {"maximum": 0, "minimum": 0}
+            }
+          }
+        ],
+        "seed": 25,
+        "type": "power"
+      },
+      "name": "two-real-plaques",
+      "target_class": "plaque"
+    }
+  ],
+  "rigid": null,
+  "sdf_cache": {
+    "dtype": "float32",
+    "foreground_classes": ["boundary", "lumen", "plaque"],
+    "implementation_version": 1,
+    "mode": "scipy",
+    "sign_convention": "negative_inside"
+  },
+  "source": "artificial/samples5000"
+}

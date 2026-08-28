@@ -6,7 +6,7 @@ from constraints.generators.types import FloatRange, PowerPlaqueSamplingRanges
 
 
 def create_fake_similar():
-    FOLDER = get_data_folder() / "artificial" / "samples5000"
+    folder = get_data_folder() / "artificial" / "samples5000"
 
     fake_plaque_range = PowerPlaqueSamplingRanges(
         angle_rad=FloatRange(np.pi / 3, 2 * np.pi - 2 * np.pi / 3),
@@ -18,9 +18,9 @@ def create_fake_similar():
     )
 
     create_plaque_collection(
-        FOLDER,
+        folder,
         "FloatingFakeSimilarTwoPlaque",
-        fake_plaque_range,
+        (fake_plaque_range,) * 2,
         seed=53,
     )
 

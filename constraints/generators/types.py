@@ -2,12 +2,15 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from math import isfinite, pi
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 import numpy as np
 from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
+
+if TYPE_CHECKING:
+    from .recipe_backups import PowerPlaqueBackup
 
 
 class ArteryClass(IntEnum):
@@ -118,6 +121,18 @@ class FloatRange:
     def fixed(cls, number: float) -> Self:
         return cls(minimum=number, maximum=number)
 
+    def to_dict(self) -> dict[str, float]:
+        return {"minimum": self.minimum, "maximum": self.maximum}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        if not isinstance(value, dict) or value.keys() != {"minimum", "maximum"}:
+            raise ValueError("invalid FloatRange fields")
+        try:
+            return cls(minimum=value["minimum"], maximum=value["maximum"])
+        except TypeError as error:
+            raise ValueError("invalid FloatRange value") from error
+
 
 @dataclass(frozen=True)
 class RigidConfig:
@@ -137,6 +152,12 @@ class RigidConfig:
                 ("dy", self.dy),
             )
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        if not isinstance(value, dict) or value.keys() != {"angle", "dx", "dy"}:
+            raise ValueError("invalid RigidConfig fields")
+        return cls(**{name: FloatRange.from_dict(value[name]) for name in value})
 
 
 @dataclass(frozen=True)
@@ -165,6 +186,16 @@ class RigidRejectionConfig:
             "minimum_foreground_margin_px": self.minimum_foreground_margin_px,
             "max_attempts": self.max_attempts,
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        expected = {"minimum_foreground_margin_px", "max_attempts"}
+        if not isinstance(value, dict) or value.keys() != expected:
+            raise ValueError("invalid RigidRejectionConfig fields")
+        try:
+            return cls(**value)
+        except TypeError as error:
+            raise ValueError("invalid RigidRejectionConfig value") from error
 
 
 @dataclass(frozen=True)
@@ -238,6 +269,34 @@ class PowerPlaqueSamplingRanges:
             for _ in range(num)
         )
 
+    def to_dict(self) -> dict[str, dict[str, float]]:
+        return {
+            name: value.to_dict()
+            for name, value in (
+                ("angle_rad", self.angle_rad),
+                ("angular_width_rad", self.angular_width_rad),
+                ("inward_depth_fraction", self.inward_depth_fraction),
+                ("wall_depth_fraction", self.wall_depth_fraction),
+                ("shape_power", self.shape_power),
+                ("offset_px_lumen", self.offset_px_lumen),
+            )
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        legacy = {
+            "angle_rad",
+            "angular_width_rad",
+            "inward_depth_fraction",
+            "wall_depth_fraction",
+            "shape_power",
+        }
+        expected = legacy | {"offset_px_lumen"}
+        if not isinstance(value, dict) or value.keys() not in (legacy, expected):
+            raise ValueError("invalid PowerPlaqueSamplingRanges fields")
+        fields = {name: FloatRange.from_dict(item) for name, item in value.items()}
+        return cls(**fields)
+
 
 @dataclass(frozen=True)
 class PowerPlaqueParameters:
@@ -282,17 +341,25 @@ class PowerPlaqueParameters:
 class SavedPlaque:
     """Reference to one stored mask collection and how it should be composed."""
 
-    name: str
+    name: str | None = None
     target_class: ArteryClass = ArteryClass.PLAQUE
     appearance: AppearanceKind | None = None
+    backup: "PowerPlaqueBackup | None" = None
 
     def __post_init__(self) -> None:
-        if (
+        if self.name is not None and (
             not isinstance(self.name, str)
             or not self.name
             or Path(self.name).name != self.name
         ):
             raise ValueError("plaque collection name must be a filename component")
+        if self.name is None and self.backup is None:
+            raise ValueError("saved plaque requires a name or backup")
+        if self.backup is not None:
+            from .recipe_backups import PowerPlaqueBackup
+
+            if not isinstance(self.backup, PowerPlaqueBackup):
+                raise TypeError("plaque backup must be a PowerPlaqueBackup")
         target_class = ArteryClass(self.target_class)
         if target_class not in {
             ArteryClass.BOUNDARY,
@@ -512,6 +579,20 @@ class DeformationRejectionConfig:
             "minimum_foreground_margin_px": self.minimum_foreground_margin_px,
             "max_attempts": self.max_attempts,
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        expected = {
+            "minimum_jacobian",
+            "minimum_foreground_margin_px",
+            "max_attempts",
+        }
+        if not isinstance(value, dict) or value.keys() != expected:
+            raise ValueError("invalid DeformationRejectionConfig fields")
+        try:
+            return cls(**value)
+        except TypeError as error:
+            raise ValueError("invalid DeformationRejectionConfig value") from error
 
 
 # REWORK (now we dont need this)

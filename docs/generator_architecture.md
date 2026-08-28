@@ -26,9 +26,11 @@ source root
   layer dataclasses. `SavedPlaque` gives one stored Boolean mask collection its
   target and appearance meanings. `PowerPlaqueSamplingRanges.sample()` resolves
   any number of independent parameter sets from one range configuration.
-- `generators/recipes.py` defines the immutable `Recipe`: the ordered plaques,
-  deformation, rigid preset, and appearance intensities. It owns the strict,
-  versioned JSON round trip used for experiment provenance.
+- `generators/recipes.py` defines the immutable `Recipe`: source, ordered
+  plaques, deformation, rigid preset, rendering/noise, and optional SDF cache.
+  Named artifacts may carry typed generation backups, allowing the same strict,
+  versioned JSON to validate or recreate them on another machine. The complete
+  notebook-to-cluster flow is documented in [recipe_workflow.md](recipe_workflow.md).
 - `generators/sdf_cache.py` defines the versioned identity, configuration,
   digest, and directory contract for pre-rigid SDF caches. Cache generation
   dispatches through `signed_distance_scipy` or `signed_distance_kornia`
@@ -65,11 +67,17 @@ whole child subtree therefore cannot invalidate a sibling.
 - `generators/factories.py` is the small script-facing facade. It resolves a
   source root and delegates to the relevant producer; generation algorithms do
   not belong here.
+- `generators/recipe_preview.py` resolves backup-only artifacts in memory for
+  fast notebook iteration. `generators/recipe_ensure.py` performs a complete
+  read-only preflight before it creates, reuses, or explicitly replaces any
+  stored artifact.
 - `datatools/datasets/composed_artificial_dataset.py` is a read-only consumer.
   It can be constructed from a `Recipe`. For an index it loads the selected
   plaque masks, applies the selected deformation, composes targets and
   grayscale image, then applies the selected rigid preset.
 - `scripts/create_*.py` only parse command-line arguments and call the facade.
+- `scripts/ensure_recipe.py` is the portable local/cluster entry point for a
+  checked-in recipe and its artifact backups.
 - `scripts/prepare_composed_artificial_dataset.py` prepares the first large
   source configuration end-to-end, including recipe JSON, deterministic split
   CSVs, and an optional content-addressed SDF cache. It can reuse completed

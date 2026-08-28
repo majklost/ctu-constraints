@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from constraints import get_data_folder
+from constraints.utils import get_repo_root
 from constraints.datatools.datasets import ComposedArtificialDataset, SavedPlaque
 
 # %%
@@ -39,7 +40,8 @@ from constraints.losses_metrics.constraint_function import does_violation_occur_
 
 
 source_root = get_data_folder() / "artificial" / "samples5000"
-dataset = ComposedArtificialDataset.from_recipe(source_root,Recipe.load_json(source_root/"recipes/tworeal_fake_similar.json"))
+recipe_path = get_repo_root() / "recipes/artificial/tworeal_fake_similar.json"
+dataset = ComposedArtificialDataset.from_recipe(source_root,Recipe.load_json(recipe_path))
 print(f"Loaded {len(dataset)} samples from {source_root}")
 
 # %%

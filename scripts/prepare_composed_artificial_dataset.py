@@ -75,7 +75,6 @@ def prepare_dataset(
     resolved_device = resolve_compute_device(device)
     real_ranges = _real_plaque_ranges()
     fake_range = _fake_plaque_range()
-    fake_lumen_radius_px = source_config.empty_artery.lumen_radius_px - 10
     deformation_config = DeformationConfig()
     deformation_rejection = DeformationRejectionConfig()
     rigid_config = RigidConfig()
@@ -100,12 +99,12 @@ def prepare_dataset(
                 REAL_PLAQUES: {
                     "seed": seed,
                     "ranges": [asdict(item) for item in real_ranges],
-                    "lumen_radius_px": source_config.empty_artery.lumen_radius_px,
+                    "lumen_radius_px": None,
                 },
                 FAKE_PLAQUES: {
                     "seed": seed + 1,
                     "ranges": [asdict(fake_range)] * 5,
-                    "lumen_radius_px": fake_lumen_radius_px,
+                    "lumen_radius_px": None,
                 },
                 DEFORMATION: {
                     "seed": seed + 2,
@@ -160,7 +159,6 @@ def prepare_dataset(
         FAKE_PLAQUES,
         (fake_range,) * 5,
         seed=seed + 1,
-        lumen_radius_px=fake_lumen_radius_px,
     )
     _ensure_deformation(
         root,
@@ -249,6 +247,7 @@ def _fake_plaque_range() -> PowerPlaqueSamplingRanges:
         inward_depth_fraction=FloatRange(0.12, 0.15),
         wall_depth_fraction=FloatRange.fixed(0.1),
         shape_power=FloatRange.fixed(2),
+        offset_px_lumen=FloatRange.fixed(-10),
     )
 
 
@@ -469,9 +468,9 @@ def parse_args():
 
 def main() -> None:
     args = parse_args()
-    DEFAULT_PATH = get_data_folder() / "artificial"
+    default_path = get_data_folder() / "artificial"
     prepare_dataset(
-        DEFAULT_PATH / args.name,
+        default_path / args.name,
         num_samples=args.num_samples,
         train_size=args.train_size,
         val_size=args.val_size,

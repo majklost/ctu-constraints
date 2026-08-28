@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Protocol
+from typing import Any, ClassVar, Protocol, Self
 
 import numpy as np
 import torch
@@ -57,6 +57,34 @@ class SDFCacheConfig:
             "sign_convention": "negative_inside",
         }
 
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        expected = {
+            "mode",
+            "implementation_version",
+            "foreground_classes",
+            "dtype",
+            "sign_convention",
+        }
+        if not isinstance(value, dict) or value.keys() != expected:
+            raise ValueError("invalid SDFCacheConfig fields")
+        if (
+            value["implementation_version"] != 1
+            or value["dtype"] != "float32"
+            or value["sign_convention"] != "negative_inside"
+            or not isinstance(value["foreground_classes"], list)
+        ):
+            raise ValueError("unsupported SDFCacheConfig value")
+        try:
+            return cls(
+                mode=value["mode"],
+                foreground_classes=tuple(
+                    ArteryClass[name.upper()] for name in value["foreground_classes"]
+                ),
+            )
+        except (KeyError, TypeError) as error:
+            raise ValueError("invalid SDFCacheConfig value") from error
+
 
 @dataclass(frozen=True)
 class SDFCacheIdentity:
@@ -103,7 +131,7 @@ class SDFCacheIdentity:
             target_plaques=tuple(
                 (plaque.name, plaque.target_class) for plaque in recipe.plaques
             ),
-            deformation=recipe.deformation,
+            deformation=recipe.deformation_name,
             sdf=SDFCacheConfig() if sdf is None else sdf,
         )
 

@@ -264,41 +264,16 @@ versioning `SDFCacheIdentity`.
 ### 5.4 Dataset recipe contract
 
 `Recipe` is a frozen dataclass in code and has a strict JSON representation for
-experiment provenance. Version 1 has this structure:
+experiment provenance. The current recipe also owns its data-root-relative
+source path, optional noise and SDF configuration, and typed generation backups
+for named plaques, deformation, and rigid artifacts. This makes the tracked JSON
+portable between a tuning notebook and a cluster. Omitting deformation or rigid
+motion is represented by `null` and means absence of that transformation.
 
-```json
-{
-  "format_name": "composed-artificial-recipe",
-  "format_version": 1,
-  "plaques": [
-    {
-      "name": "real-plaques",
-      "target_class": "plaque",
-      "appearance": null
-    },
-    {
-      "name": "fake-shadow",
-      "target_class": "lumen",
-      "appearance": "plaque"
-    }
-  ],
-  "deformation": "small-local",
-  "rigid": "easy",
-  "class_intensities": {
-    "background": 0.0,
-    "boundary": 0.65,
-    "lumen": 0.25,
-    "plaque": 1.0
-  }
-}
-```
-
-Omitting deformation or rigid motion is represented by `null` and means
-identity. The source path is supplied separately to
-`ComposedArtificialDataset.from_recipe()`. Unknown fields, versions, class
-names, and missing intensities for enabled appearances are initialization
-errors. Frequently used recipes may be declared in code, but every experiment
-should save the resolved JSON recipe alongside its other provenance.
+Unknown fields, versions, class names, and missing intensities for enabled
+appearances are initialization errors. The current contract and worked workflow
+are documented in [recipe_workflow.md](recipe_workflow.md); resolved recipes
+belong in the tracked `recipes/artificial/` directory.
 
 ## 6. Raw anatomy generation
 

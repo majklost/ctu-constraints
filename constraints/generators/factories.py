@@ -1,14 +1,18 @@
 """Convenient orchestration used by generation scripts and datasets."""
 
+from __future__ import annotations
+
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 
 from constraints.devices import DeviceSelection
 
+from .artifact_metadata import write_artifact_metadata
 from .composition import compose_label_maps
 from .deformation import (
     apply_deformation,
@@ -18,6 +22,7 @@ from .deformation import (
 )
 from .noise import apply_speckle_noise
 from .parametrization.plaque_generators import create_empty_artery
+from .recipe_backups import DeformationBackup, PowerPlaqueBackup, RigidBackup
 from .rendering import (
     DEFAULT_CLASS_INTENSITIES,
     create_grayscale_image_from_label_mask,
@@ -40,6 +45,9 @@ from .types import (
     SourceConfig,
 )
 from .validation import DeformationValidationResult
+
+if TYPE_CHECKING:
+    from .recipes import Recipe
 
 
 @dataclass(frozen=True)
@@ -64,20 +72,41 @@ class PreviewArtificialSample:
 
 
 def preview_artificial_sample(
-    artery_config: EmptyArteryConfig,
+    artery_config: EmptyArteryConfig | Recipe | None = None,
     plaque_layers: Iterable[PlaqueLayer] = (),
     deformation_config: DeformationConfig | None = None,
     deformation_rejection: DeformationRejectionConfig | None = None,
     rigid_config: RigidConfig | None = None,
     rigid_rejection: RigidRejectionConfig | None = None,
     *,
-    seed: int,
+    seed: int | None = None,
     sample_index: int = 0,
     deformation_device: DeviceSelection = "auto",
+    source_root: Path | None = None,
+    recipe: Recipe | None = None,
     class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
     noise_config: NoiseConfig | None = None,
 ) -> PreviewArtificialSample:
-    """Transform and compose directly supplied Boolean plaque layers."""
+    """Preview a low-level composition or a complete recipe."""
+    from .recipes import Recipe as RecipeType
+
+    if recipe is not None:
+        if artery_config is not None:
+            raise ValueError("pass either artery_config or recipe, not both")
+        artery_config = recipe
+    if isinstance(artery_config, RecipeType):
+        from .recipe_preview import preview_recipe_sample
+
+        return preview_recipe_sample(
+            artery_config,
+            source_root=source_root,
+            sample_index=sample_index,
+            deformation_device=deformation_device,
+        )
+    if not isinstance(artery_config, EmptyArteryConfig):
+        raise TypeError("artery_config must be an EmptyArteryConfig or Recipe")
+    if seed is None:
+        raise ValueError("seed is required for low-level previews")
     empty_artery = create_empty_artery(artery_config)
     plaque_layers = tuple(plaque_layers)
 
@@ -152,6 +181,33 @@ def create_plaque_collection(
     source_root = Path(source_root)
     config = get_source_config(source_root)
     plaque_folder = source_root / "plaques"
+    ranges_per_plaque = (
+        (PowerPlaqueSamplingRanges(),)
+        if ranges is None
+        else ranges
+        if isinstance(ranges, tuple)
+        else (ranges,)
+    )
+    backup = PowerPlaqueBackup(
+        ranges=ranges_per_plaque,
+        seed=seed,
+        lumen_radius_px=lumen_radius_px,
+    )
+    metadata_path = plaque_folder / f"{name}.manifest.json"
+    artifact_paths = (
+        plaque_folder / f"{name}.npy",
+        plaque_folder / f"{name}.jsonl",
+        metadata_path,
+    )
+    if any(path.exists() for path in artifact_paths):
+        raise FileExistsError(f"plaque collection already exists: {name}")
+    write_artifact_metadata(
+        metadata_path,
+        kind="plaque-collection",
+        name=name,
+        definition=backup.to_dict(),
+        status="preparing",
+    )
     generate_plaque_masks_power(
         plaque_folder,
         name,
@@ -159,6 +215,13 @@ def create_plaque_collection(
         ranges,
         seed=seed,
         lumen_radius_px=lumen_radius_px,
+    )
+    write_artifact_metadata(
+        metadata_path,
+        kind="plaque-collection",
+        name=name,
+        definition=backup.to_dict(),
+        status="complete",
     )
     return plaque_folder / f"{name}.npy", plaque_folder / f"{name}.jsonl"
 
@@ -175,7 +238,23 @@ def create_deformation_collection(
     """Create one named deformation collection inside a source dataset."""
     source_root = Path(source_root)
     source_config = get_source_config(source_root)
-    return generate_deformation_fields(
+    backup = DeformationBackup(
+        config=config,
+        rejection=(DeformationRejectionConfig() if rejection is None else rejection),
+        seed=seed,
+    )
+    folder = source_root / "deformations"
+    metadata_path = folder / f"{name}.manifest.json"
+    if (folder / name).exists() or metadata_path.exists():
+        raise FileExistsError(f"deformation collection already exists: {name}")
+    write_artifact_metadata(
+        metadata_path,
+        kind="deformation-collection",
+        name=name,
+        definition=backup.to_dict(),
+        status="preparing",
+    )
+    result = generate_deformation_fields(
         source_root / "deformations",
         name,
         source_config,
@@ -185,6 +264,14 @@ def create_deformation_collection(
         seed=seed,
         device=device,
     )
+    write_artifact_metadata(
+        metadata_path,
+        kind="deformation-collection",
+        name=name,
+        definition=backup.to_dict(),
+        status="complete",
+    )
+    return result
 
 
 def create_rigid_collection(
@@ -208,7 +295,30 @@ def create_rigid_collection(
             deformation,
             source_config,
         )
-    return generate_rigid_parameters(
+    backup = RigidBackup(
+        config=config,
+        rejection=RigidRejectionConfig() if rejection is None else rejection,
+        seed=seed,
+    )
+    rigid_folder = parent_folder / "rigid"
+    metadata_path = rigid_folder / f"{name}.manifest.json"
+    if any(
+        path.exists()
+        for path in (
+            rigid_folder / f"{name}.npy",
+            rigid_folder / f"{name}.json",
+            metadata_path,
+        )
+    ):
+        raise FileExistsError(f"rigid collection already exists: {name}")
+    write_artifact_metadata(
+        metadata_path,
+        kind="rigid-collection",
+        name=name,
+        definition=backup.to_dict(),
+        status="preparing",
+    )
+    result = generate_rigid_parameters(
         parent_folder,
         deformation,
         name,
@@ -219,6 +329,14 @@ def create_rigid_collection(
         rejection,
         seed=seed,
     )
+    write_artifact_metadata(
+        metadata_path,
+        kind="rigid-collection",
+        name=name,
+        definition=backup.to_dict(),
+        status="complete",
+    )
+    return result
 
 
 def compose_artificial_sample(

@@ -28,7 +28,6 @@ import torch
 from torch.utils.data import DataLoader
 
 from constraints import (
-    get_data_folder,
     get_experiment_folder,
     show_torch_image,
     show_torch_mask,
@@ -66,9 +65,10 @@ from constraints.transforms.transformers import (
     SpatialTransformer,
 )
 from constraints.types import OverlayPolicy
+from constraints.utils import get_repo_root
 
 FOLDER = get_experiment_folder(Path("ex5") / "initial_decoupled_new")
-DATA = get_data_folder() / "artificial"
+DEFAULT_RECIPE = get_repo_root() / "recipes/artificial/default.json"
 WANDB_PROJECT = "Constraints2"
 WANDB_ENTITY = "mrkosmic-ctu"
 # COUPLING_OPTIONS = ["full", "decoupled"]
@@ -232,8 +232,6 @@ def main(args):
     if args.segmentator_unlearned:
         set_segmentator_encoder_weights(None)
 
-    TRN_FOLDER = DATA / "samples5000"
-
     # if args.modality == "rigid":
     #     TRN_FOLDER = DATA / "rigid" / "trn"
     #     VAL_FOLDER = DATA / "rigid" / "val"
@@ -252,7 +250,8 @@ def main(args):
     #     "BCE_SDFTEMPLATE_MSE",
     #     "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
     # ]
-    source_root = TRN_FOLDER
+    recipe = Recipe.load_json(args.recipe)
+    source_root = recipe.resolve_source_root()
 
     trn_indices = polars.read_csv(source_root / "splits/trn_samples.csv")[
         "sample_index"
@@ -263,13 +262,13 @@ def main(args):
 
     trn_dataset = ComposedArtificialDataset.from_recipe(
         source_root,
-        Recipe.load_json(source_root / "recipes/default.json"),
+        recipe,
         sample_list=trn_indices,
     )
 
     val_dataset = ComposedArtificialDataset.from_recipe(
         source_root,
-        Recipe.load_json(source_root / "recipes/default.json"),
+        recipe,
         sample_list=val_indices,
     )
     # trn_dataset = CachedArtificialDataset(
@@ -387,6 +386,15 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument(
+        "--recipe",
+        type=Path,
+        default=DEFAULT_RECIPE,
+        help=(
+            "Tracked artificial recipe JSON "
+            "(defaults to recipes/artificial/default.json)."
+        ),
+    )
     parser.add_argument("--mode", type=str, choices=MODES, required=True)
     parser.add_argument("--modality", type=str, choices=MODALITIES, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
