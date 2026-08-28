@@ -6,10 +6,14 @@ import torch
 
 from constraints.datatools.datasets import ComposedArtificialDataset, Recipe
 from constraints.generators.factories import (
-    create_plaque_collection,
+    create_layer_collection,
     create_rigid_collection,
 )
-from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    SavedLayer,
+    power_layer_backup,
+)
 from constraints.generators.source import create_source
 from constraints.generators.types import (
     AppearanceKind,
@@ -17,14 +21,12 @@ from constraints.generators.types import (
     EmptyArteryConfig,
     FloatRange,
     NoiseConfig,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
-    SavedPlaque,
     SourceConfig,
 )
 
 
-def _create_source_with_plaques(tmp_path):
+def _create_source_with_layers(tmp_path):
     root = tmp_path / "source"
     config = SourceConfig(
         num_elements=2,
@@ -38,13 +40,13 @@ def _create_source_with_plaques(tmp_path):
         wall_depth_fraction=FloatRange.fixed(0.2),
         shape_power=FloatRange.fixed(0.5),
     )
-    create_plaque_collection(root, "blob", ranges, seed=3)
+    create_layer_collection(root, "blob", power_layer_backup(ranges, seed=3))
     return root
 
 
 def test_dataset_composes_selected_real_plaque_collection(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
-    dataset = ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))
+    root = _create_source_with_layers(tmp_path)
+    dataset = ComposedArtificialDataset(root, layers=(SavedLayer("blob"),))
 
     sample = dataset[0]
 
@@ -57,41 +59,44 @@ def test_dataset_composes_selected_real_plaque_collection(tmp_path) -> None:
 
 
 def test_fake_plaque_changes_target_but_keeps_plaque_appearance(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
-    dataset = ComposedArtificialDataset(
+    root = _create_source_with_layers(tmp_path)
+    ranges = PowerPlaqueSamplingRanges(
+        angular_width_rad=FloatRange.fixed(0.5),
+        inward_depth_fraction=FloatRange.fixed(0.25),
+        wall_depth_fraction=FloatRange.fixed(0.2),
+    )
+    create_layer_collection(
         root,
-        plaques=(
-            SavedPlaque(
-                "blob",
-                target_class=ArteryClass.LUMEN,
-                appearance=AppearanceKind.PLAQUE,
-            ),
+        "fake",
+        power_layer_backup(
+            ranges,
+            seed=3,
+            target_class=ArteryClass.LUMEN,
+            appearance=AppearanceKind.PLAQUE,
         ),
     )
-    masks = np.load(root / "plaques" / "blob.npy")
+    dataset = ComposedArtificialDataset(
+        root,
+        layers=(SavedLayer("fake"),),
+    )
+    labels = np.load(root / "layers" / "fake" / "labels.npy")
 
     sample = dataset[0]
-    fake_pixels = torch.from_numpy(masks[0])
+    fake_pixels = torch.from_numpy(labels[0] >= 0)
 
     assert torch.all(sample["target_labels"][fake_pixels] == ArteryClass.LUMEN)
     assert torch.all(sample["image"][0, fake_pixels] == 1.0)
 
 
-def test_dataset_uses_class_intensities_from_recipe(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
-    recipe = Recipe(
-        plaques=(SavedPlaque("blob"),),
-        class_intensities={
-            **DEFAULT_CLASS_INTENSITIES,
-            AppearanceKind.PLAQUE: 0.8,
-        },
-    )
-    masks = np.load(root / "plaques" / "blob.npy")
+def test_dataset_uses_grayscale_values_stored_in_layer(tmp_path) -> None:
+    root = _create_source_with_layers(tmp_path)
+    recipe = Recipe(layers=(SavedLayer("blob"),))
+    labels = np.load(root / "layers" / "blob" / "labels.npy")
 
     dataset = ComposedArtificialDataset.from_recipe(root, recipe)
     sample = dataset[0]
 
-    assert torch.all(sample["image"][0, torch.from_numpy(masks[0])] == 0.8)
+    assert torch.all(sample["image"][0, torch.from_numpy(labels[0] >= 0)] == 1.0)
 
     identity = dataset.sdf_cache_identity()
     source_id = json.loads((root / "manifest.json").read_text())["dataset_id"]
@@ -99,16 +104,16 @@ def test_dataset_uses_class_intensities_from_recipe(tmp_path) -> None:
 
 
 def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
+    root = _create_source_with_layers(tmp_path)
     fields = np.zeros((2, 2, 65, 65), dtype=np.float32)
     fields[:, 1] = 2
     preset = root / "deformations" / "shift-left"
     preset.mkdir()
     np.save(preset / "fields.npy", fields)
-    baseline = ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))[0]
+    baseline = ComposedArtificialDataset(root, layers=(SavedLayer("blob"),))[0]
     dataset = ComposedArtificialDataset(
         root,
-        plaques=(SavedPlaque("blob"),),
+        layers=(SavedLayer("blob"),),
         deformation="shift-left",
     )
 
@@ -122,7 +127,7 @@ def test_dataset_applies_selected_deformation_before_composition(tmp_path) -> No
 
 
 def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
+    root = _create_source_with_layers(tmp_path)
     create_rigid_collection(
         root,
         "shift-right",
@@ -133,9 +138,9 @@ def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
         ),
         seed=5,
     )
-    baseline = ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))[0]
+    baseline = ComposedArtificialDataset(root, layers=(SavedLayer("blob"),))[0]
     recipe = Recipe(
-        plaques=(SavedPlaque("blob"),),
+        layers=(SavedLayer("blob"),),
         rigid="shift-right",
     )
     dataset = ComposedArtificialDataset.from_recipe(
@@ -153,20 +158,20 @@ def test_dataset_applies_rigid_after_composition(tmp_path) -> None:
     assert dataset.recipe == recipe
 
 
-def test_recipe_rejects_duplicate_plaque_collections() -> None:
+def test_recipe_rejects_duplicate_layer_collections() -> None:
     with pytest.raises(ValueError, match="cannot contain.*twice"):
         Recipe(
-            plaques=(
-                SavedPlaque("blob"),
-                SavedPlaque("blob", target_class=ArteryClass.LUMEN),
+            layers=(
+                SavedLayer("blob"),
+                SavedLayer("blob"),
             )
         )
 
 
 def test_dataset_applies_deterministic_noise_from_recipe(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
+    root = _create_source_with_layers(tmp_path)
     recipe = Recipe(
-        plaques=(SavedPlaque("blob"),),
+        layers=(SavedLayer("blob"),),
         noise=NoiseConfig(speckle_std=0.2, seed=17),
     )
     first_dataset = ComposedArtificialDataset.from_recipe(root, recipe)
@@ -182,14 +187,14 @@ def test_dataset_applies_deterministic_noise_from_recipe(tmp_path) -> None:
     assert not torch.equal(first["image"], other_sample["image"])
     torch.testing.assert_close(
         first["target_labels"],
-        ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))[0][
+        ComposedArtificialDataset(root, layers=(SavedLayer("blob"),))[0][
             "target_labels"
         ],
     )
 
 
 def test_dataset_accepts_noise_config_directly_and_uses_source_index(tmp_path) -> None:
-    root = _create_source_with_plaques(tmp_path)
+    root = _create_source_with_layers(tmp_path)
     noise = NoiseConfig(speckle_std=0.1, seed=9)
     full = ComposedArtificialDataset(root, noise=noise)
     subset = ComposedArtificialDataset(root, noise=noise, sample_list=[1])

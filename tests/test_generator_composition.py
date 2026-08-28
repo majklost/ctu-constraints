@@ -1,66 +1,60 @@
 import numpy as np
-import pytest
 
-from constraints.generators.composition import compose_label_maps
-from constraints.generators.types import AppearanceKind, ArteryClass, PlaqueLayer
+from constraints.generators.composition import compose_layers
+from constraints.generators.layer_generators import (
+    LayerPatch,
+    MaskLayer,
+    normalize_layer_output,
+)
+from constraints.generators.types import AppearanceKind, ArteryClass
 
 
-def test_fake_layers_resolve_to_their_configured_anatomical_classes() -> None:
-    artery = np.array([[0, 1, 2], [0, 1, 2]], dtype=np.uint8)
-    boundary_fake = np.array([[False, False, True], [False, False, False]])
-    lumen_fake = np.array([[False, False, False], [False, True, False]])
+def test_label_and_grayscale_patches_are_independent() -> None:
+    artery = np.array([[2, 2, 2]], dtype=np.uint8)
+    labels = np.array([[ArteryClass.PLAQUE, -1, -1]], dtype=np.int8)
+    image = np.array([[np.nan, 0.3, 0.7]], dtype=np.float32)
 
-    label_maps = compose_label_maps(
-        artery,
-        [
-            PlaqueLayer(boundary_fake, ArteryClass.BOUNDARY),
-            PlaqueLayer(lumen_fake, ArteryClass.LUMEN),
-        ],
+    result = compose_layers(artery, (LayerPatch(labels, image),))
+
+    np.testing.assert_array_equal(result.target_labels, [[3, 2, 2]])
+    np.testing.assert_allclose(result.image, [[0.25, 0.3, 0.7]])
+
+
+def test_later_patch_wins_only_where_it_is_not_transparent() -> None:
+    artery = np.full((1, 2), ArteryClass.LUMEN, dtype=np.uint8)
+    first = LayerPatch(
+        np.array([[3, 3]], dtype=np.int8),
+        np.array([[0.2, 0.4]], dtype=np.float32),
+    )
+    second = LayerPatch(
+        np.array([[1, -1]], dtype=np.int8),
+        np.array([[np.nan, 0.8]], dtype=np.float32),
     )
 
-    assert label_maps.target_labels[0, 2] == ArteryClass.BOUNDARY
-    assert label_maps.target_labels[1, 1] == ArteryClass.LUMEN
-    np.testing.assert_array_equal(
-        label_maps.appearance_labels,
-        label_maps.target_labels,
+    result = compose_layers(artery, (first, second))
+
+    np.testing.assert_array_equal(result.target_labels, [[1, 3]])
+    np.testing.assert_allclose(result.image, [[0.2, 0.8]])
+
+
+def test_mask_layer_is_the_uniform_convenience_form() -> None:
+    patch = normalize_layer_output(
+        MaskLayer(
+            np.array([[True, False]]),
+            ArteryClass.LUMEN,
+            AppearanceKind.SHADOW,
+        )
     )
 
-
-def test_later_plaque_layer_wins_at_overlaps() -> None:
-    artery = np.full((2, 2), ArteryClass.LUMEN, dtype=np.uint8)
-    overlap = np.array([[True, False], [False, False]])
-
-    label_maps = compose_label_maps(
-        artery,
-        [
-            PlaqueLayer(overlap, ArteryClass.PLAQUE),
-            PlaqueLayer(overlap, ArteryClass.BOUNDARY),
-        ],
-    )
-
-    assert label_maps.target_labels[0, 0] == ArteryClass.BOUNDARY
-    assert label_maps.appearance_labels[0, 0] == AppearanceKind.BOUNDARY
+    np.testing.assert_array_equal(patch.labels, [[2, -1]])
+    assert patch.image[0, 0] == np.float32(0.05)
+    assert np.isnan(patch.image[0, 1])
 
 
-def test_appearance_can_differ_from_target_class() -> None:
-    artery = np.full((2, 2), ArteryClass.LUMEN, dtype=np.uint8)
-    artifact = np.array([[True, False], [False, False]])
+def test_gradient_is_kept_as_real_grayscale_values() -> None:
+    gradient = np.linspace(0.1, 0.9, 5, dtype=np.float32)[None]
+    patch = LayerPatch(np.full((1, 5), -1, dtype=np.int8), gradient)
 
-    label_maps = compose_label_maps(
-        artery,
-        [
-            PlaqueLayer(
-                artifact,
-                ArteryClass.LUMEN,
-                AppearanceKind.SHADOW,
-            )
-        ],
-    )
+    result = compose_layers(np.full((1, 5), 2, dtype=np.uint8), (patch,))
 
-    assert label_maps.target_labels[0, 0] == ArteryClass.LUMEN
-    assert label_maps.appearance_labels[0, 0] == AppearanceKind.SHADOW
-
-
-def test_plaque_layer_rejects_non_anatomical_target() -> None:
-    with pytest.raises(ValueError, match="boundary, lumen, or plaque"):
-        PlaqueLayer(np.ones((2, 2), bool), ArteryClass.BACKGROUND)
+    np.testing.assert_allclose(result.image, gradient)

@@ -1,10 +1,4 @@
 {
-  "class_intensities": {
-    "background": 0.0,
-    "boundary": 0.65,
-    "lumen": 0.25,
-    "plaque": 1.0
-  },
   "deformation": {
     "backup": {
       "config": {
@@ -24,73 +18,140 @@
     "name": "default"
   },
   "format_name": "composed-artificial-recipe",
-  "format_version": 3,
+  "format_version": 5,
   "noise": null,
-  "plaques": [
+  "layers": [
     {
-      "appearance": "plaque",
       "backup": {
-        "lumen_radius_px": null,
-        "ranges": [
-          {
-            "count": 2,
-            "sampling": {
-              "angle_rad": {"maximum": 4.188790204786391, "minimum": 1.0471975511965976},
-              "angular_width_rad": {"maximum": 0.6283185307179586, "minimum": 0.6283185307179586},
-              "inward_depth_fraction": {"maximum": 0.3, "minimum": 0.2},
-              "offset_px_lumen": {"maximum": -5, "minimum": -5},
-              "shape_power": {"maximum": 0.5, "minimum": 0.5},
-              "wall_depth_fraction": {"maximum": 0, "minimum": 0}
+        "params": {
+          "lumen_radius_px": null,
+          "ranges": [
+            {
+              "count": 2,
+              "sampling": {
+                "angle_rad": {
+                  "maximum": 4.188790204786391,
+                  "minimum": 1.0471975511965976
+                },
+                "angular_width_rad": {
+                  "maximum": 0.6283185307179586,
+                  "minimum": 0.6283185307179586
+                },
+                "inward_depth_fraction": {
+                  "maximum": 0.3,
+                  "minimum": 0.2
+                },
+                "offset_px_lumen": {
+                  "maximum": -5,
+                  "minimum": -5
+                },
+                "shape_power": {
+                  "maximum": 0.5,
+                  "minimum": 0.5
+                },
+                "wall_depth_fraction": {
+                  "maximum": 0,
+                  "minimum": 0
+                }
+              }
             }
-          }
-        ],
-        "seed": 53,
-        "type": "power"
+          ],
+          "seed": 53,
+          "target_class": "lumen",
+          "appearance": "plaque"
+        },
+        "resolver": "power-v2"
       },
-      "name": "FloatingFakeSimilarTwoPlaque",
-      "target_class": "lumen"
+      "name": "FloatingFakeSimilarTwoPlaque"
     },
     {
-      "appearance": null,
       "backup": {
-        "lumen_radius_px": null,
-        "ranges": [
-          {
-            "count": 1,
-            "sampling": {
-              "angle_rad": {"maximum": -0.3141592653589793, "minimum": -1.0471975511965976},
-              "angular_width_rad": {"maximum": 0.6283185307179586, "minimum": 0.6283185307179586},
-              "inward_depth_fraction": {"maximum": 0.3, "minimum": 0.2},
-              "offset_px_lumen": {"maximum": 0, "minimum": 0},
-              "shape_power": {"maximum": 0.5, "minimum": 0.5},
-              "wall_depth_fraction": {"maximum": 0, "minimum": 0}
+        "params": {
+          "lumen_radius_px": null,
+          "ranges": [
+            {
+              "count": 1,
+              "sampling": {
+                "angle_rad": {
+                  "maximum": -0.3141592653589793,
+                  "minimum": -1.0471975511965976
+                },
+                "angular_width_rad": {
+                  "maximum": 0.6283185307179586,
+                  "minimum": 0.6283185307179586
+                },
+                "inward_depth_fraction": {
+                  "maximum": 0.3,
+                  "minimum": 0.2
+                },
+                "offset_px_lumen": {
+                  "maximum": 0,
+                  "minimum": 0
+                },
+                "shape_power": {
+                  "maximum": 0.5,
+                  "minimum": 0.5
+                },
+                "wall_depth_fraction": {
+                  "maximum": 0,
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "count": 1,
+              "sampling": {
+                "angle_rad": {
+                  "maximum": 1.0471975511965976,
+                  "minimum": 0.3141592653589793
+                },
+                "angular_width_rad": {
+                  "maximum": 0.6283185307179586,
+                  "minimum": 0.6283185307179586
+                },
+                "inward_depth_fraction": {
+                  "maximum": 0.3,
+                  "minimum": 0.2
+                },
+                "offset_px_lumen": {
+                  "maximum": 0,
+                  "minimum": 0
+                },
+                "shape_power": {
+                  "maximum": 0.5,
+                  "minimum": 0.5
+                },
+                "wall_depth_fraction": {
+                  "maximum": 0,
+                  "minimum": 0
+                }
+              }
             }
-          },
-          {
-            "count": 1,
-            "sampling": {
-              "angle_rad": {"maximum": 1.0471975511965976, "minimum": 0.3141592653589793},
-              "angular_width_rad": {"maximum": 0.6283185307179586, "minimum": 0.6283185307179586},
-              "inward_depth_fraction": {"maximum": 0.3, "minimum": 0.2},
-              "offset_px_lumen": {"maximum": 0, "minimum": 0},
-              "shape_power": {"maximum": 0.5, "minimum": 0.5},
-              "wall_depth_fraction": {"maximum": 0, "minimum": 0}
-            }
-          }
-        ],
-        "seed": 25,
-        "type": "power"
+          ],
+          "seed": 25,
+          "target_class": "plaque",
+          "appearance": null
+        },
+        "resolver": "power-v2"
       },
-      "name": "two-real-plaques",
-      "target_class": "plaque"
+      "name": "two-real-plaques"
     }
   ],
   "rigid": {
     "backup": {
       "config": {
-        "angle": {"maximum": 3.141592653589793, "minimum": -3.141592653589793},
-        "dx": {"maximum": 0, "minimum": 0},
-        "dy": {"maximum": 0, "minimum": 0}
+        "angle": {
+          "maximum": 3.141592653589793,
+          "minimum": -3.141592653589793
+        },
+        "dx": {
+          "maximum": 0,
+          "minimum": 0
+        },
+        "dy": {
+          "maximum": 0,
+          "minimum": 0
+        }
       },
       "rejection": {
         "max_attempts": 20,

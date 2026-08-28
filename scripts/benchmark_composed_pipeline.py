@@ -23,9 +23,14 @@ from constraints.devices import resolve_compute_device
 from constraints.generators.deformation import sample_valid_deformation
 from constraints.generators.factories import (
     create_deformation_collection,
-    create_plaque_collection,
+    create_layer_collection,
     create_rigid_collection,
     get_source_config,
+)
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    SavedLayer,
+    power_layer_backup,
 )
 from constraints.generators.rigid import apply_rigid
 from constraints.generators.source import create_source
@@ -33,9 +38,7 @@ from constraints.generators.types import (
     DeformationConfig,
     DeformationRejectionConfig,
     FloatRange,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
-    SavedPlaque,
     SourceConfig,
 )
 from constraints.utils import signed_distance_kornia, signed_distance_scipy
@@ -70,7 +73,8 @@ def _prepare_demo_dataset(
     """Create or reuse the self-contained collection used by this benchmark."""
     required = (
         root / "source_config.json",
-        root / "plaques/2blobs.npy",
+        root / "layers/2blobs/labels.npy",
+        root / "layers/2blobs/image.npy",
         root / "deformations/validated-default/fields.npy",
         root / "deformations/validated-default/rigid/small.npy",
     )
@@ -91,11 +95,10 @@ def _prepare_demo_dataset(
     source_config = SourceConfig(num_elements=num_samples)
     create_source(root, source_config)
     default_plaque = PowerPlaqueSamplingRanges()
-    create_plaque_collection(
+    create_layer_collection(
         root,
         "2blobs",
-        (default_plaque, default_plaque),
-        seed=42,
+        power_layer_backup((default_plaque, default_plaque), seed=42),
     )
     create_deformation_collection(
         root,
@@ -374,7 +377,7 @@ def main() -> None:
         choices=("auto", "cpu", "cuda", "mps"),
         default="auto",
     )
-    parser.add_argument("--plaque", action="append", default=[])
+    parser.add_argument("--layer", action="append", default=[])
     parser.add_argument("--deformation")
     parser.add_argument("--rigid")
     parser.add_argument("--loader-samples", type=int, default=1000)
@@ -405,8 +408,8 @@ def main() -> None:
 
     cuda_device = torch.device("cuda") if torch.cuda.is_available() else None
     if args.prepare_demo:
-        if args.plaque and args.plaque != ["2blobs"]:
-            parser.error("--prepare-demo only provides --plaque 2blobs")
+        if args.layer and args.layer != ["2blobs"]:
+            parser.error("--prepare-demo only provides --layer 2blobs")
         if args.deformation not in {None, "validated-default"}:
             parser.error("--prepare-demo only provides --deformation validated-default")
         if args.rigid not in {None, "small"}:
@@ -420,7 +423,7 @@ def main() -> None:
             args.prepare_samples,
             prepare_device,
         )
-        args.plaque = ["2blobs"]
+        args.layer = ["2blobs"]
         args.deformation = "validated-default"
         args.rigid = "small"
     elif not (args.source_root / "source_config.json").is_file():
@@ -429,15 +432,15 @@ def main() -> None:
             "pass --prepare-demo to create one"
         )
 
-    saved_plaques = tuple(SavedPlaque(name) for name in args.plaque)
+    saved_layers = tuple(SavedLayer(name) for name in args.layer)
     geometry_dataset = ComposedArtificialDataset(
         args.source_root,
-        plaques=saved_plaques,
+        layers=saved_layers,
         deformation=args.deformation,
     )
     dataset = ComposedArtificialDataset(
         args.source_root,
-        plaques=saved_plaques,
+        layers=saved_layers,
         deformation=args.deformation,
         rigid=args.rigid,
     )
@@ -455,7 +458,7 @@ def main() -> None:
         "environment": _environment(),
         "recipe": {
             "source_root": str(args.source_root),
-            "plaques": args.plaque,
+            "layers": args.layer,
             "deformation": args.deformation,
             "rigid": args.rigid,
         },

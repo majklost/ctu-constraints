@@ -18,7 +18,7 @@
 """
 # Composed artificial source dataset
 
-Select named plaque collections and compose them lazily with the reusable
+Select named layer collections and compose them lazily with the reusable
 empty-artery source.
 """
 
@@ -32,7 +32,7 @@ from matplotlib.colors import ListedColormap
 
 from constraints import get_data_folder
 from constraints.utils import get_repo_root
-from constraints.datatools.datasets import ComposedArtificialDataset, SavedPlaque
+from constraints.datatools.datasets import ComposedArtificialDataset, SavedLayer
 
 # %%
 from constraints.generators.recipes import Recipe
@@ -83,29 +83,21 @@ fig.tight_layout()
 
 # %% [markdown]
 """
-Fake plaques can be selected independently and assigned their anatomical target:
+Layer collections already contain their independent image and label patches:
 
 ```python
 dataset = ComposedArtificialDataset(
     source_root,
-    plaques=(
-        SavedPlaque("2blobs"),
-        SavedPlaque(
-            "floating-plaque",
-            target_class=ArteryClass.LUMEN,
-            appearance=AppearanceKind.PLAQUE,
-        ),
-        SavedPlaque(
-            "wall-artifact",
-            target_class=ArteryClass.BOUNDARY,
-            appearance=AppearanceKind.PLAQUE,
-        ),
+    layers=(
+        SavedLayer("2blobs"),
+        SavedLayer("floating-plaque"),
+        SavedLayer("wall-artifact"),
     ),
 )
 ```
 
-Those masks retain plaque-like appearance in the image while resolving to the
-configured class in `target_labels`.
+The resolver that creates each collection decides both the grayscale pixels and
+the labels; the Recipe only orders named layers.
 """
 
 # %% [markdown]
@@ -113,17 +105,20 @@ configured class in `target_labels`.
 
 # %%
 from constraints.generators.factories import preview_artificial_sample
-from constraints.generators.parametrization import create_power_plaque_mask
+from constraints.generators.layer_generators import (
+    MaskLayer,
+    PowerPlaqueSamplingRanges,
+    create_power_plaque_mask,
+    normalize_layer_output,
+)
 from constraints.generators.types import (
     AppearanceKind,
     SourceConfig,
-    PowerPlaqueSamplingRanges,
     DeformationConfig,
     DeformationRejectionConfig,
     RigidConfig,
     RigidRejectionConfig,
     FloatRange,
-    PlaqueLayer,
     ArteryClass,
 )
 from matplotlib import pyplot as plt
@@ -178,18 +173,20 @@ fake_parameters = fake_plaque_range.sample(
     wall_thickness_px=artery_config.wall_thickness_px,
     rng=rng,
 )
-plaque_layers = (
-    PlaqueLayer(
+layers = (
+    normalize_layer_output(MaskLayer(
         create_power_plaque_mask(fake_parameters, artery_config),
         ArteryClass.LUMEN,
         AppearanceKind.PLAQUE,
-    ),
-    PlaqueLayer(create_power_plaque_mask(real_parameters, artery_config)),
+    )),
+    normalize_layer_output(MaskLayer(
+        create_power_plaque_mask(real_parameters, artery_config)
+    )),
 )
 
 sample = preview_artificial_sample(
     artery_config,
-    plaque_layers,
+    layers,
     deformation_config=dc,
     deformation_rejection=drc,
     # rigid_config=rc,

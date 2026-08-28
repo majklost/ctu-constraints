@@ -22,12 +22,13 @@ source root
 
 ### Configuration and pure geometry
 
-- `generators/types.py` contains shared configuration, parameter, and runtime
-  layer dataclasses. `SavedPlaque` gives one stored Boolean mask collection its
-  target and appearance meanings. `PowerPlaqueSamplingRanges.sample()` resolves
-  any number of independent parameter sets from one range configuration.
+- `generators/types.py` contains source and transformation configuration.
+- `generators/layer_generators/` owns the layer boundary: `LayerPatch`, the
+  resolver registry, persisted layer collections, `CyclicRasterizer`, and the
+  isolated PowerPlaque implementation. A resolver may instead return the
+  simpler `MaskLayer(mask, target_class, appearance)` form.
 - `generators/recipes.py` defines the immutable `Recipe`: source, ordered
-  plaques, deformation, rigid preset, rendering/noise, and optional SDF cache.
+  layers, deformation, rigid preset, noise, and optional SDF cache.
   Named artifacts may carry typed generation backups, allowing the same strict,
   versioned JSON to validate or recreate them on another machine. The complete
   notebook-to-cluster flow is documented in [recipe_workflow.md](recipe_workflow.md).
@@ -35,20 +36,17 @@ source root
   digest, and directory contract for pre-rigid SDF caches. Cache generation
   dispatches through `signed_distance_scipy` or `signed_distance_kornia`
   according to the shared dataset `SDFMode`.
-- `generators/parametrization/` rasterizes self-contained empty-artery configs
-  and converts tuples of plaque parameters into Boolean union masks.
-- `generators/composition.py` overlays independent Boolean plaque masks onto
-  target and appearance maps in the exact order supplied. Later layers win at
-  overlaps, so precedence is explicit at each call site. A layer's appearance
-  defaults to its target class but may be overridden for plaque-like artifacts.
-- `generators/rendering.py` maps appearance IDs to grayscale intensities.
+- `generators/composition.py` overlays independent label and grayscale patches
+  in the exact order supplied. Later non-transparent pixels win. `-1` is label
+  transparency and `NaN` is grayscale transparency.
+- `generators/rendering.py` renders the base artery and supplies intensities for
+  the `MaskLayer` convenience form. Full patches contain actual grayscale values.
 - `generators/validation.py` checks topology, foreground margins, and transform
   acceptance.
 
 ### Artifact producers
 
-- `generators/source.py` creates the source root and independent named plaque
-  collections. It also exposes single-sample plaque generation for tuning.
+- `generators/source.py` creates the source root.
 - `generators/deformation.py` samples, validates, applies, stores, and loads
   backward displacement fields. Collections have shape `[N, 2, H, W]` in
   `(dy, dx)` order.
@@ -57,7 +55,7 @@ source root
   rigid presets represent rigid-only geometry.
 - `generators/storage.py` owns small atomic JSON and mmap `.npy` primitives.
 
-Artifact producers depend only on their parent level. Plaque collections are
+Artifact producers depend only on their parent level. Layer collections are
 siblings and independent. A deformation depends on the source artery, while a
 deformation-dependent rigid preset depends on that deformation. Deleting a
 whole child subtree therefore cannot invalidate a sibling.
@@ -73,7 +71,7 @@ whole child subtree therefore cannot invalidate a sibling.
   stored artifact.
 - `datatools/datasets/composed_artificial_dataset.py` is a read-only consumer.
   It can be constructed from a `Recipe`. For an index it loads the selected
-  plaque masks, applies the selected deformation, composes targets and
+  layer patches, applies the selected deformation, composes targets and
   grayscale image, then applies the selected rigid preset.
 - `scripts/create_*.py` only parse command-line arguments and call the facade.
 - `scripts/ensure_recipe.py` is the portable local/cluster entry point for a
@@ -109,17 +107,16 @@ and model placement are preserved.
 The current composed dataset executes:
 
 ```text
-load empty artery and selected masks
+load empty artery and selected patches
     → apply non-rigid deformation to each layer
-    → compose target labels
-    → render grayscale image
+    → compose target labels and grayscale image
     → apply rigid transformation
 ```
 
 The SDF cache belongs after composition and deformation but before rigid
 transformation. `SDFCacheIdentity` is an explicit projection rather than
-a hash of the complete recipe: it includes the source ID, ordered plaque names
-and target classes, deformation, composition/application contract versions,
+a hash of the complete recipe: it includes the source ID, ordered layer names,
+deformation, composition/application contract versions,
 class-channel order, and SDF parameters. It excludes rigid motion, plaque
 appearance, and grayscale intensity. Adding an unrelated recipe field therefore
 does not invalidate the cache; changing an SDF-relevant contract is deliberate

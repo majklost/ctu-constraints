@@ -18,7 +18,7 @@ from .recipes import Recipe
 from .storage import write_json
 from .types import ArteryClass
 
-SDF_CACHE_IDENTITY_VERSION = 1
+SDF_CACHE_IDENTITY_VERSION = 3
 SDF_CACHE_MANIFEST_FILENAME = "manifest.json"
 SDF_CACHE_ARRAY_FILENAME = "sdf.npy"
 
@@ -95,7 +95,7 @@ class SDFCacheIdentity:
     """
 
     source_dataset_id: str
-    target_plaques: tuple[tuple[str, ArteryClass], ...]
+    target_layers: tuple[str, ...]
     deformation: str | None
     sdf: SDFCacheConfig = field(default_factory=SDFCacheConfig)
 
@@ -104,19 +104,15 @@ class SDFCacheIdentity:
     def __post_init__(self) -> None:
         if not isinstance(self.source_dataset_id, str) or not self.source_dataset_id:
             raise ValueError("source_dataset_id must be a non-empty string")
-        target_plaques = tuple(
-            (name, ArteryClass(target_class))
-            for name, target_class in self.target_plaques
-        )
+        target_layers = tuple(self.target_layers)
         if any(
             not isinstance(name, str) or not name or Path(name).name != name
-            for name, _ in target_plaques
+            for name in target_layers
         ):
-            raise ValueError("SDF plaque names must be filename components")
-        names = [name for name, _ in target_plaques]
-        if len(names) != len(set(names)):
-            raise ValueError("an SDF identity cannot contain a plaque twice")
-        object.__setattr__(self, "target_plaques", target_plaques)
+            raise ValueError("SDF layer names must be filename components")
+        if len(target_layers) != len(set(target_layers)):
+            raise ValueError("an SDF identity cannot contain a layer twice")
+        object.__setattr__(self, "target_layers", target_layers)
 
     @classmethod
     def from_recipe(
@@ -128,9 +124,7 @@ class SDFCacheIdentity:
         """Select only recipe fields that affect a pre-rigid target SDF."""
         return cls(
             source_dataset_id=source_dataset_id,
-            target_plaques=tuple(
-                (plaque.name, plaque.target_class) for plaque in recipe.plaques
-            ),
+            target_layers=tuple(layer.name for layer in recipe.layers),
             deformation=recipe.deformation_name,
             sdf=SDFCacheConfig() if sdf is None else sdf,
         )
@@ -141,10 +135,9 @@ class SDFCacheIdentity:
             "identity_version": self.identity_version,
             "source_dataset_id": self.source_dataset_id,
             "target_composition": {
-                "composition_contract": "ordered_overwrite_v1",
-                "plaques": [
-                    {"name": name, "target_class": target_class.name.lower()}
-                    for name, target_class in self.target_plaques
+                "composition_contract": "ordered_layer_overwrite_v1",
+                "layers": [
+                    {"name": name} for name in self.target_layers
                 ],
             },
             "deformation": {

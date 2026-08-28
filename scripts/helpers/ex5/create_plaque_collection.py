@@ -1,8 +1,12 @@
 import numpy as np
 
 from constraints import get_data_folder
-from constraints.generators.factories import create_plaque_collection
-from constraints.generators.types import FloatRange, PowerPlaqueSamplingRanges
+from constraints.generators.factories import create_layer_collection
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    power_layer_backup,
+)
+from constraints.generators.types import FloatRange
 
 
 def create_fake_similar():
@@ -17,11 +21,10 @@ def create_fake_similar():
         offset_px_lumen=FloatRange.fixed(-5),
     )
 
-    create_plaque_collection(
+    create_layer_collection(
         folder,
         "FloatingFakeSimilarTwoPlaque",
-        (fake_plaque_range,) * 2,
-        seed=53,
+        power_layer_backup((fake_plaque_range,) * 2, seed=53),
     )
 
 

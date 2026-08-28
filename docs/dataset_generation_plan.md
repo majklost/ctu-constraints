@@ -252,11 +252,11 @@ missing indices and atomically rewrite the final JSONL in index order.
 Do not hash the complete dataset recipe for a derived cache. Each cache type
 defines an explicit, versioned identity projection containing only inputs that
 can change its values. The current pre-rigid SDF projection includes the source
-`dataset_id`, ordered plaque collection names and target classes, deformation,
+`dataset_id`, ordered layer collection names, deformation,
 composition and deformation-application contract versions, foreground-channel
 order, and SDF implementation settings.
 
-It deliberately excludes plaque appearance, class intensities, and rigid
+It deliberately excludes layer grayscale values, noise, and rigid
 motion. Therefore adding an unrelated field to `Recipe` does not invalidate SDF
 caches. Adding a new SDF-relevant input requires deliberately extending and
 versioning `SDFCacheIdentity`.
@@ -266,12 +266,13 @@ versioning `SDFCacheIdentity`.
 `Recipe` is a frozen dataclass in code and has a strict JSON representation for
 experiment provenance. The current recipe also owns its data-root-relative
 source path, optional noise and SDF configuration, and typed generation backups
-for named plaques, deformation, and rigid artifacts. This makes the tracked JSON
+for named layers, deformation, and rigid artifacts. Layer generation dispatches
+through a stable resolver name and JSON parameters, so recipe and composition
+code do not depend on a particular plaque model. This makes the tracked JSON
 portable between a tuning notebook and a cluster. Omitting deformation or rigid
 motion is represented by `null` and means absence of that transformation.
 
-Unknown fields, versions, class names, and missing intensities for enabled
-appearances are initialization errors. The current contract and worked workflow
+Unknown fields and versions are initialization errors. The current contract and worked workflow
 are documented in [recipe_workflow.md](recipe_workflow.md); resolved recipes
 belong in the tracked `recipes/artificial/` directory.
 
@@ -680,13 +681,14 @@ The exact class names may change, but responsibilities should remain separated:
 
 ```text
 constraints/generators/types.py
-    serializable artery configuration, label/array aliases, shared contracts
+    source and transformation configuration, label/array aliases
 
-constraints/generators/parametrization/
-    plaque parameter dataclasses, samplers, factories, rasterization
+constraints/generators/layer_generators/
+    LayerPatch contract, resolvers, persistence, procedural generators,
+    PowerPlaque parameters, and cyclic rasterization
 
 constraints/generators/composition.py
-    pure artery/plaque composition and fake-target mapping
+    pure ordered label and grayscale patch composition
 
 constraints/generators/deformation.py
     deformation configuration, deterministic field generation, application,

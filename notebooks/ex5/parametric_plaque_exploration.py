@@ -377,12 +377,13 @@ import numpy as np
 from matplotlib.colors import ListedColormap
 from matplotlib.patches import Patch
 
-from constraints.generators.parametrization import (
+from constraints.generators.layer_generators import (
+    CyclicRasterizer,
     PowerPlaqueParameters,
-    create_artery_label_mask,
+    create_empty_artery,
     create_power_plaque,
 )
-from constraints.generators.types import ArterySpec
+from constraints.generators.types import ArteryClass, EmptyArteryConfig
 
 # %%
 IMAGE_SIZE = (256, 256)
@@ -395,6 +396,11 @@ WALL_DEPTH_PX = 0
 
 shape_powers = (0.25, 0.11, 1.0, 2.0)
 
+artery_config = EmptyArteryConfig(
+    lumen_radius_px=LUMEN_RADIUS_PX,
+    wall_thickness_px=WALL_THICKNESS_PX,
+    image_size=IMAGE_SIZE,
+)
 label_maps = []
 for shape_power in shape_powers:
     parameters = PowerPlaqueParameters(
@@ -405,16 +411,9 @@ for shape_power in shape_powers:
         shape_power=shape_power,
     )
     plaque = create_power_plaque(parameters, lumen_radius_px=LUMEN_RADIUS_PX)
-    label_maps.append(
-        create_artery_label_mask(
-            ArterySpec(
-                image_size=IMAGE_SIZE,
-                lumen_radius_px=LUMEN_RADIUS_PX,
-                wall_thickness_px=WALL_THICKNESS_PX,
-                plaques=(plaque,),
-            )
-        )
-    )
+    labels = create_empty_artery(artery_config)
+    labels[CyclicRasterizer(artery_config)((plaque,))] = ArteryClass.PLAQUE
+    label_maps.append(labels)
 
 # %%
 class_names = ("background", "wall", "lumen", "plaque")
@@ -472,7 +471,7 @@ plt.show()
 
 # %%
 # Sampling plaque
-from constraints.generators.types import PowerPlaqueSamplingRanges
+from constraints.generators.layer_generators import PowerPlaqueSamplingRanges
 
 
 # %%
@@ -483,16 +482,9 @@ rng= np.random.default_rng(25)
 
 # %%
 params = power_sample_range.sample(3, lumen_radius_px=LUMEN_RADIUS_PX, wall_thickness_px=WALL_THICKNESS_PX, rng=rng)
-plaques = map(lambda x: create_power_plaque(x,LUMEN_RADIUS_PX),params)
-
-label_map = create_artery_label_mask(
-            ArterySpec(
-                image_size=IMAGE_SIZE,
-                lumen_radius_px=LUMEN_RADIUS_PX,
-                wall_thickness_px=WALL_THICKNESS_PX,
-                plaques=plaques,
-            )
-        )
+plaques = tuple(create_power_plaque(item, LUMEN_RADIUS_PX) for item in params)
+label_map = create_empty_artery(artery_config)
+label_map[CyclicRasterizer(artery_config)(plaques)] = ArteryClass.PLAQUE
 plt.imshow(label_map)
 
 

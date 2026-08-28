@@ -20,9 +20,15 @@ from constraints.devices import DeviceSelection, resolve_compute_device
 from constraints.generators.deformation import load_deformation_fields
 from constraints.generators.factories import (
     create_deformation_collection,
-    create_plaque_collection,
+    create_layer_collection,
     create_rigid_collection,
     get_source_config,
+)
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    SavedLayer,
+    load_layer_collection,
+    power_layer_backup,
 )
 from constraints.generators.recipes import Recipe
 from constraints.generators.rigid import load_rigid_parameters
@@ -35,10 +41,8 @@ from constraints.generators.types import (
     DeformationConfig,
     DeformationRejectionConfig,
     FloatRange,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
     RigidRejectionConfig,
-    SavedPlaque,
     SourceConfig,
 )
 from constraints.utils import get_data_folder
@@ -80,13 +84,17 @@ def prepare_dataset(
     rigid_config = RigidConfig()
     rigid_rejection = RigidRejectionConfig()
     recipe = Recipe(
-        plaques=(
-            SavedPlaque(
+        layers=(
+            SavedLayer(
                 FAKE_PLAQUES,
-                target_class=ArteryClass.LUMEN,
-                appearance=AppearanceKind.PLAQUE,
+                backup=power_layer_backup(
+                    _fake_plaque_range(),
+                    seed=26,
+                    target_class=ArteryClass.LUMEN,
+                    appearance=AppearanceKind.PLAQUE,
+                ),
             ),
-            SavedPlaque(REAL_PLAQUES),
+            SavedLayer(REAL_PLAQUES),
         ),
         deformation=DEFORMATION,
         rigid=RIGID if include_rigid else None,
@@ -148,13 +156,13 @@ def prepare_dataset(
         create_source(root, source_config)
         _write_preparation(preparation_path, definition, status="preparing")
 
-    _ensure_plaque_collection(
+    _ensure_layer_collection(
         root,
         REAL_PLAQUES,
         real_ranges,
         seed=seed,
     )
-    _ensure_plaque_collection(
+    _ensure_layer_collection(
         root,
         FAKE_PLAQUES,
         (fake_range,) * 5,
@@ -196,9 +204,8 @@ def prepare_dataset(
     if sdf_mode is not None:
         sdf_config = SDFCacheConfig(mode=sdf_mode)
         geometry_recipe = Recipe(
-            plaques=recipe.plaques,
+            layers=recipe.layers,
             deformation=recipe.deformation,
-            class_intensities=recipe.class_intensities,
         )
         geometry_dataset = ComposedArtificialDataset.from_recipe(
             root,
@@ -251,7 +258,7 @@ def _fake_plaque_range() -> PowerPlaqueSamplingRanges:
     )
 
 
-def _ensure_plaque_collection(
+def _ensure_layer_collection(
     root: Path,
     name: str,
     ranges: tuple[PowerPlaqueSamplingRanges, ...],
@@ -259,26 +266,16 @@ def _ensure_plaque_collection(
     seed: int,
     lumen_radius_px: float | None = None,
 ) -> None:
-    masks_path = root / "plaques" / f"{name}.npy"
-    parameters_path = root / "plaques" / f"{name}.jsonl"
-    if _all_or_none_exist((masks_path, parameters_path), name):
-        masks = np.load(masks_path, mmap_mode="r")
-        source_config = get_source_config(root)
-        expected_shape = (
-            source_config.num_elements,
-            *source_config.empty_artery.image_size,
-        )
-        if masks.shape != expected_shape or masks.dtype != np.bool_:
-            raise ValueError(f"invalid plaque collection in {masks_path}")
-        print(f"Reusing plaque collection: {name}")
+    folder = root / "layers" / name
+    if folder.exists():
+        load_layer_collection(root, name, get_source_config(root))
+        print(f"Reusing layer collection: {name}")
         return
-    print(f"Creating plaque collection: {name}")
-    create_plaque_collection(
+    print(f"Creating layer collection: {name}")
+    create_layer_collection(
         root,
         name,
-        ranges,
-        seed=seed,
-        lumen_radius_px=lumen_radius_px,
+        power_layer_backup(ranges, seed=seed, lumen_radius_px=lumen_radius_px),
     )
 
 

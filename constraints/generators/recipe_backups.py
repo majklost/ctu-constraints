@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from math import isfinite
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Self
 
 from .types import (
     DeformationConfig,
     DeformationRejectionConfig,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
     RigidRejectionConfig,
 )
@@ -29,69 +29,33 @@ def _validate_optional_name(name: str | None, kind: str) -> None:
 
 
 @dataclass(frozen=True)
-class PowerPlaqueBackup:
-    ranges: tuple[PowerPlaqueSamplingRanges, ...]
-    seed: int
-    lumen_radius_px: float | None = None
+class LayerBackup:
+    """Portable call to a registered layer resolver."""
+
+    resolver: str
+    params: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        ranges = tuple(self.ranges)
-        if not ranges or not all(
-            isinstance(item, PowerPlaqueSamplingRanges) for item in ranges
-        ):
-            raise ValueError("plaque backup requires at least one sampling range")
-        _validate_seed(self.seed)
-        if self.lumen_radius_px is not None and (
-            not isfinite(self.lumen_radius_px) or self.lumen_radius_px <= 0
-        ):
-            raise ValueError("lumen_radius_px must be finite and positive")
-        object.__setattr__(self, "ranges", ranges)
+        if not isinstance(self.resolver, str) or not self.resolver:
+            raise ValueError("layer resolver must be a non-empty string")
+        try:
+            params = json.loads(json.dumps(self.params, allow_nan=False))
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "layer resolver params must be finite JSON values"
+            ) from error
+        if not isinstance(params, dict):
+            raise ValueError("layer resolver params must be an object")
+        object.__setattr__(self, "params", MappingProxyType(params))
 
     def to_dict(self) -> dict[str, Any]:
-        groups: list[dict[str, Any]] = []
-        for ranges in self.ranges:
-            sampling = ranges.to_dict()
-            if groups and groups[-1]["sampling"] == sampling:
-                groups[-1]["count"] += 1
-            else:
-                groups.append({"count": 1, "sampling": sampling})
-        return {
-            "type": "power",
-            "seed": self.seed,
-            "lumen_radius_px": self.lumen_radius_px,
-            "ranges": groups,
-        }
+        return {"resolver": self.resolver, "params": dict(self.params)}
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Self:
-        if not isinstance(value, dict) or value.keys() != {
-            "type",
-            "seed",
-            "lumen_radius_px",
-            "ranges",
-        }:
-            raise ValueError("invalid PowerPlaqueBackup fields")
-        if value["type"] != "power" or not isinstance(value["ranges"], list):
-            raise ValueError("invalid power plaque backup")
-        ranges: list[PowerPlaqueSamplingRanges] = []
-        for group in value["ranges"]:
-            if (
-                not isinstance(group, dict)
-                or group.keys() != {"count", "sampling"}
-                or isinstance(group["count"], bool)
-                or not isinstance(group["count"], int)
-                or group["count"] <= 0
-            ):
-                raise ValueError("invalid power plaque range group")
-            ranges.extend(
-                [PowerPlaqueSamplingRanges.from_dict(group["sampling"])]
-                * group["count"]
-            )
-        return cls(
-            ranges=tuple(ranges),
-            seed=value["seed"],
-            lumen_radius_px=value["lumen_radius_px"],
-        )
+        if not isinstance(value, dict) or value.keys() != {"resolver", "params"}:
+            raise ValueError("invalid LayerBackup fields")
+        return cls(resolver=value["resolver"], params=value["params"])
 
 
 @dataclass(frozen=True)

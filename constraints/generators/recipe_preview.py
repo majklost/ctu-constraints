@@ -12,11 +12,15 @@ from .deformation import (
     sample_valid_deformation,
 )
 from .factories import PreviewArtificialSample, compose_artificial_sample
-from .parametrization.plaque_generators import create_empty_artery
+from .layer_generators import (
+    LayerPatch,
+    create_empty_artery,
+    load_layer_collection,
+    resolve_layer_patch,
+)
 from .recipes import Recipe
 from .rigid import load_rigid_parameters, sample_valid_rigid
-from .source import load_source_config, sample_power_plaque_mask
-from .types import PlaqueLayer
+from .source import load_source_config
 
 
 def preview_recipe_sample(
@@ -34,12 +38,7 @@ def preview_recipe_sample(
     empty_artery = create_empty_artery(config.empty_artery)
 
     layers = tuple(
-        PlaqueLayer(
-            _plaque_mask(root, config, plaque, sample_index),
-            plaque.target_class,
-            plaque.appearance,
-        )
-        for plaque in recipe.plaques
+        _layer_patch(root, config, saved, sample_index) for saved in recipe.layers
     )
 
     deformation_field = None
@@ -95,7 +94,6 @@ def preview_recipe_sample(
     arrays = compose_artificial_sample(
         empty_artery,
         layers,
-        recipe.class_intensities,
         deformation_field=deformation_field,
         rigid_parameters=rigid_parameters,
         noise_config=recipe.noise,
@@ -104,27 +102,21 @@ def preview_recipe_sample(
     return PreviewArtificialSample(
         image=arrays.image,
         target_labels=arrays.target_labels,
-        appearance_labels=arrays.appearance_labels,
         deformation_field=deformation_field,
         deformation_validation=deformation_validation,
         rigid_parameters=rigid_parameters,
     )
 
 
-def _plaque_mask(root, config, plaque, sample_index: int) -> np.ndarray:
-    if plaque.backup is not None:
-        backup = plaque.backup
-        return sample_power_plaque_mask(
+def _layer_patch(root, config, layer, sample_index: int) -> LayerPatch:
+    if layer.backup is not None:
+        return resolve_layer_patch(
+            layer.backup,
+            root,
             config,
-            backup.ranges,
-            seed=backup.seed,
-            sample_index=sample_index,
-            lumen_radius_px=backup.lumen_radius_px,
-        ).mask
-    if plaque.name is None:
-        raise ValueError("plaque has neither a name nor backup")
-    masks = np.load(root / "plaques" / f"{plaque.name}.npy", mmap_mode="r")
-    expected = (config.num_elements, *config.empty_artery.image_size)
-    if masks.shape != expected or masks.dtype != np.bool_:
-        raise ValueError(f"invalid plaque collection: {plaque.name}")
-    return masks[sample_index]
+            sample_index,
+        )
+    if layer.name is None:
+        raise ValueError("layer has neither a name nor backup")
+    collection = load_layer_collection(root, layer.name, config)
+    return LayerPatch(collection.labels[sample_index], collection.image[sample_index])

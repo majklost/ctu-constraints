@@ -1,10 +1,4 @@
 {
-  "class_intensities": {
-    "background": 0.0,
-    "boundary": 0.45,
-    "lumen": 0.25,
-    "plaque": 1.0
-  },
   "deformation": {
     "backup": {
       "config": {
@@ -24,7 +18,124 @@
     "name": "default-deformation-v1"
   },
   "format_name": "composed-artificial-recipe",
-  "format_version": 3,
+  "format_version": 5,
+  "layers": [
+    {
+      "backup": {
+        "params": {
+          "appearance": "plaque",
+          "lumen_radius_px": null,
+          "ranges": [
+            {
+              "count": 2,
+              "sampling": {
+                "angle_rad": {
+                  "maximum": 4.188790204786391,
+                  "minimum": 1.0471975511965976
+                },
+                "angular_width_rad": {
+                  "maximum": 0.6283185307179586,
+                  "minimum": 0.6283185307179586
+                },
+                "inward_depth_fraction": {
+                  "maximum": 0.3,
+                  "minimum": 0.2
+                },
+                "offset_px_lumen": {
+                  "maximum": -3,
+                  "minimum": -3
+                },
+                "shape_power": {
+                  "maximum": 0.5,
+                  "minimum": 0.5
+                },
+                "wall_depth_fraction": {
+                  "maximum": 0,
+                  "minimum": 0
+                }
+              }
+            }
+          ],
+          "seed": 53,
+          "target_class": "lumen"
+        },
+        "resolver": "power-v2"
+      },
+      "name": "fake-similar-offset-minus-3-v1"
+    },
+    {
+      "backup": {
+        "params": {
+          "appearance": null,
+          "lumen_radius_px": null,
+          "ranges": [
+            {
+              "count": 1,
+              "sampling": {
+                "angle_rad": {
+                  "maximum": -0.3141592653589793,
+                  "minimum": -1.0471975511965976
+                },
+                "angular_width_rad": {
+                  "maximum": 0.6283185307179586,
+                  "minimum": 0.6283185307179586
+                },
+                "inward_depth_fraction": {
+                  "maximum": 0.3,
+                  "minimum": 0.2
+                },
+                "offset_px_lumen": {
+                  "maximum": 0.0,
+                  "minimum": 0.0
+                },
+                "shape_power": {
+                  "maximum": 0.5,
+                  "minimum": 0.5
+                },
+                "wall_depth_fraction": {
+                  "maximum": 0,
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "count": 1,
+              "sampling": {
+                "angle_rad": {
+                  "maximum": 1.0471975511965976,
+                  "minimum": 0.3141592653589793
+                },
+                "angular_width_rad": {
+                  "maximum": 0.6283185307179586,
+                  "minimum": 0.6283185307179586
+                },
+                "inward_depth_fraction": {
+                  "maximum": 0.3,
+                  "minimum": 0.2
+                },
+                "offset_px_lumen": {
+                  "maximum": 0.0,
+                  "minimum": 0.0
+                },
+                "shape_power": {
+                  "maximum": 0.5,
+                  "minimum": 0.5
+                },
+                "wall_depth_fraction": {
+                  "maximum": 0,
+                  "minimum": 0
+                }
+              }
+            }
+          ],
+          "seed": 25,
+          "target_class": "plaque"
+        },
+        "resolver": "power-v2"
+      },
+      "name": "two-real-separated-v1"
+    }
+  ],
   "noise": {
     "black_rectangle_probability": 0.0,
     "black_rectangle_size": [
@@ -35,119 +146,6 @@
     "speckle_mode": "multiplicative",
     "speckle_std": 0.7
   },
-  "plaques": [
-    {
-      "appearance": "plaque",
-      "backup": {
-        "lumen_radius_px": null,
-        "ranges": [
-          {
-            "count": 2,
-            "sampling": {
-              "angle_rad": {
-                "maximum": 4.188790204786391,
-                "minimum": 1.0471975511965976
-              },
-              "angular_width_rad": {
-                "maximum": 0.6283185307179586,
-                "minimum": 0.6283185307179586
-              },
-              "inward_depth_fraction": {
-                "maximum": 0.3,
-                "minimum": 0.2
-              },
-              "offset_px_lumen": {
-                "maximum": -3,
-                "minimum": -3
-              },
-              "shape_power": {
-                "maximum": 0.5,
-                "minimum": 0.5
-              },
-              "wall_depth_fraction": {
-                "maximum": 0,
-                "minimum": 0
-              }
-            }
-          }
-        ],
-        "seed": 53,
-        "type": "power"
-      },
-      "name": "fake-similar-offset-minus-3-v1",
-      "target_class": "lumen"
-    },
-    {
-      "appearance": null,
-      "backup": {
-        "lumen_radius_px": null,
-        "ranges": [
-          {
-            "count": 1,
-            "sampling": {
-              "angle_rad": {
-                "maximum": -0.3141592653589793,
-                "minimum": -1.0471975511965976
-              },
-              "angular_width_rad": {
-                "maximum": 0.6283185307179586,
-                "minimum": 0.6283185307179586
-              },
-              "inward_depth_fraction": {
-                "maximum": 0.3,
-                "minimum": 0.2
-              },
-              "offset_px_lumen": {
-                "maximum": 0.0,
-                "minimum": 0.0
-              },
-              "shape_power": {
-                "maximum": 0.5,
-                "minimum": 0.5
-              },
-              "wall_depth_fraction": {
-                "maximum": 0,
-                "minimum": 0
-              }
-            }
-          },
-          {
-            "count": 1,
-            "sampling": {
-              "angle_rad": {
-                "maximum": 1.0471975511965976,
-                "minimum": 0.3141592653589793
-              },
-              "angular_width_rad": {
-                "maximum": 0.6283185307179586,
-                "minimum": 0.6283185307179586
-              },
-              "inward_depth_fraction": {
-                "maximum": 0.3,
-                "minimum": 0.2
-              },
-              "offset_px_lumen": {
-                "maximum": 0.0,
-                "minimum": 0.0
-              },
-              "shape_power": {
-                "maximum": 0.5,
-                "minimum": 0.5
-              },
-              "wall_depth_fraction": {
-                "maximum": 0,
-                "minimum": 0
-              }
-            }
-          }
-        ],
-        "seed": 25,
-        "type": "power"
-      },
-      "name": "two-real-separated-v1",
-      "target_class": "plaque"
-    }
-  ],
   "rigid": {
     "backup": {
       "config": {

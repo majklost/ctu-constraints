@@ -2,9 +2,11 @@ import numpy as np
 import pytest
 from scipy.ndimage import binary_dilation, generate_binary_structure
 
-from constraints.generators.parametrization.plaque_generators import (
-    _create_plaque_mask,
-    _PlaqueSpec,
+from constraints.generators.layer_generators import (
+    CyclicRasterizer,
+    PlaqueSpec,
+    PowerPlaqueParameters,
+    PowerPlaqueSamplingRanges,
     create_empty_artery,
     create_power_plaque_mask,
 )
@@ -12,8 +14,6 @@ from constraints.generators.types import (
     ArteryClass,
     EmptyArteryConfig,
     FloatRange,
-    PowerPlaqueParameters,
-    PowerPlaqueSamplingRanges,
 )
 
 
@@ -51,14 +51,14 @@ def test_power_plaque_touches_lumen_and_wall_but_not_background() -> None:
 
 def test_internal_plaque_spec_supports_wrapped_angle_boundary() -> None:
     config = EmptyArteryConfig(20, 6, (65, 65))
-    plaque = _PlaqueSpec(
+    plaque = PlaqueSpec(
         angle_rad=np.pi,
         angular_width_rad=np.deg2rad(30),
         inner_radius=lambda offset: np.full_like(offset, 15.0),
         outer_radius=lambda offset: np.full_like(offset, 22.0),
     )
 
-    mask = _create_plaque_mask((plaque,), config)
+    mask = CyclicRasterizer(config)((plaque,))
 
     assert mask[32, 12]
     assert not mask[32, 52]
@@ -66,7 +66,7 @@ def test_internal_plaque_spec_supports_wrapped_angle_boundary() -> None:
 
 def test_renderer_rejects_plaque_reaching_background() -> None:
     config = EmptyArteryConfig(20, 5, (65, 65))
-    plaque = _PlaqueSpec(
+    plaque = PlaqueSpec(
         angle_rad=0,
         angular_width_rad=0.5,
         inner_radius=lambda offset: 18.0,
@@ -74,7 +74,7 @@ def test_renderer_rejects_plaque_reaching_background() -> None:
     )
 
     with pytest.raises(ValueError, match="must preserve wall"):
-        _create_plaque_mask((plaque,), config)
+        CyclicRasterizer(config)((plaque,))
 
 
 def test_wallless_artery_allows_plaque_to_reach_outer_boundary() -> None:

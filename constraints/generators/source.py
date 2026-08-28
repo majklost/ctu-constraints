@@ -1,8 +1,7 @@
-"""Creation of a source dataset and independent plaque-mask collections."""
+"""Creation of a source dataset and low-level anatomy sampling."""
 
 import json
 import subprocess
-from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -10,26 +9,9 @@ from uuid import uuid4
 
 import numpy as np
 
-from .parametrization.plaque_generators import (
-    create_empty_artery,
-    create_power_plaque_mask,
-)
+from .layer_generators import create_empty_artery
 from .storage import FORMAT_NAME, FORMAT_VERSION, write_json
-from .types import (
-    ArteryClass,
-    PowerPlaqueParameters,
-    PowerPlaqueSamplingRanges,
-    SourceConfig,
-)
-
-
-@dataclass(frozen=True)
-class PowerPlaqueSample:
-    """One generated plaque mask and the parameters that produced it."""
-
-    mask: np.ndarray
-    parameters: tuple[PowerPlaqueParameters, ...]
-    sample_seed: int
+from .types import ArteryClass, SourceConfig
 
 
 def create_source(root: Path, config: SourceConfig) -> None:
@@ -43,7 +25,7 @@ def create_source(root: Path, config: SourceConfig) -> None:
     provenance = _git_provenance()
 
     root.mkdir(parents=True)
-    (root / "plaques").mkdir()
+    (root / "layers").mkdir()
     (root / "deformations").mkdir()
     (root / "rigid").mkdir()
     np.save(root / "empty_artery.npy", empty_artery, allow_pickle=False)
@@ -79,144 +61,6 @@ def load_source_config(root: Path) -> SourceConfig:
     if not isinstance(value, dict):
         raise ValueError("source_config.json must contain a JSON object")
     return SourceConfig.from_dict(value)
-
-
-def sample_power_plaque_mask(
-    config: SourceConfig,
-    ranges: PowerPlaqueSamplingRanges
-    | tuple[PowerPlaqueSamplingRanges, ...]
-    | None = None,
-    *,
-    seed: int,
-    sample_index: int = 0,
-    lumen_radius_px: float | None = None,
-) -> PowerPlaqueSample:
-    """Generate one reproducible power-plaque mask without writing it.
-
-    ``seed`` and ``sample_index`` use the same scheme as persisted plaque
-    collections, so a preview can be reproduced exactly during generation.
-    ``lumen_radius_px`` may place plaque-like artifacts on an inner radius.
-    """
-    if seed < 0:
-        raise ValueError("seed must be non-negative")
-    if sample_index < 0:
-        raise ValueError("sample_index must be non-negative")
-    if ranges is None:
-        ranges = PowerPlaqueSamplingRanges()
-    if isinstance(ranges, tuple) and not ranges:
-        raise ValueError("at least one plaque range is required")
-    if lumen_radius_px is None:
-        lumen_radius_px = config.empty_artery.lumen_radius_px
-
-    sample_seed = _sample_seed(seed, sample_index)
-    rng = np.random.default_rng(sample_seed)
-    ranges_per_plaque = ranges if isinstance(ranges, tuple) else (ranges,)
-    parameters = tuple(
-        parameter
-        for item in ranges_per_plaque
-        for parameter in item.sample(
-            1,
-            lumen_radius_px=lumen_radius_px,
-            wall_thickness_px=config.empty_artery.wall_thickness_px,
-            rng=rng,
-        )
-    )
-    return PowerPlaqueSample(
-        mask=create_power_plaque_mask(
-            parameters,
-            config.empty_artery,
-            lumen_radius_px=lumen_radius_px,
-        ),
-        parameters=parameters,
-        sample_seed=sample_seed,
-    )
-
-
-def generate_plaque_masks_power(
-    folder: Path,
-    name: str,
-    config: SourceConfig,
-    ranges: PowerPlaqueSamplingRanges
-    | tuple[PowerPlaqueSamplingRanges, ...]
-    | None = None,
-    *,
-    seed: int,
-    lumen_radius_px: float | None = None,
-) -> None:
-    """Generate a named, reproducible collection of power-plaque union masks.
-
-    A single range creates one plaque in every mask. A tuple creates one plaque
-    per range and stores their union while retaining every resolved parameter in
-    the paired JSONL record. ``lumen_radius_px`` controls both fractional depth
-    resolution and the radius around which the plaques are rasterized.
-    """
-    folder = Path(folder)
-    _validate_artifact_name(name)
-    if seed < 0:
-        raise ValueError("seed must be non-negative")
-    if ranges is None:
-        ranges = PowerPlaqueSamplingRanges()
-    if isinstance(ranges, tuple) and not ranges:
-        raise ValueError("at least one plaque range is required")
-
-    folder.mkdir(parents=True, exist_ok=True)
-    masks_path = folder / f"{name}.npy"
-    parameters_path = folder / f"{name}.jsonl"
-    if masks_path.exists() or parameters_path.exists():
-        raise FileExistsError(f"plaque collection already exists: {name}")
-
-    temporary_masks = folder / f".{name}.npy.tmp"
-    temporary_parameters = folder / f".{name}.jsonl.tmp"
-    masks = np.lib.format.open_memmap(
-        temporary_masks,
-        mode="w+",
-        dtype=np.bool_,
-        shape=(config.num_elements, *config.empty_artery.image_size),
-    )
-    try:
-        with temporary_parameters.open("w", encoding="utf-8") as stream:
-            for sample_index in range(config.num_elements):
-                sample = sample_power_plaque_mask(
-                    config,
-                    ranges,
-                    seed=seed,
-                    sample_index=sample_index,
-                    lumen_radius_px=lumen_radius_px,
-                )
-                masks[sample_index] = sample.mask
-                record = {
-                    "sample_index": sample_index,
-                    "sample_seed": sample.sample_seed,
-                    "lumen_radius_px": (
-                        config.empty_artery.lumen_radius_px
-                        if lumen_radius_px is None
-                        else lumen_radius_px
-                    ),
-                    "plaques": [
-                        {"type": "power", "parameters": asdict(item)}
-                        for item in sample.parameters
-                    ],
-                }
-                stream.write(json.dumps(record, sort_keys=True) + "\n")
-        masks.flush()
-        temporary_masks.replace(masks_path)
-        temporary_parameters.replace(parameters_path)
-    except BaseException:
-        temporary_masks.unlink(missing_ok=True)
-        temporary_parameters.unlink(missing_ok=True)
-        raise
-    finally:
-        del masks
-
-
-def _sample_seed(collection_seed: int, sample_index: int) -> int:
-    sequence = np.random.SeedSequence([collection_seed, sample_index])
-    return int(sequence.generate_state(1, dtype=np.uint64)[0])
-
-
-def _validate_artifact_name(name: str) -> None:
-    if not name or name in {".", ".."} or Path(name).name != name:
-        raise ValueError("name must be a non-empty filename component")
 
 
 def _git_provenance() -> dict[str, Any]:

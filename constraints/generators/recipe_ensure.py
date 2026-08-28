@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 from constraints.datatools.datasets.composed_artificial_dataset import (
     ComposedArtificialDataset,
 )
@@ -20,11 +18,12 @@ from .artifact_metadata import definition_differences, read_artifact_definition
 from .deformation import load_deformation_fields
 from .factories import (
     create_deformation_collection,
-    create_plaque_collection,
+    create_layer_collection,
     create_rigid_collection,
     get_source_config,
 )
-from .recipe_backups import DeformationBackup, PowerPlaqueBackup, RigidBackup
+from .layer_generators import load_layer_collection, resolve_layer_patch
+from .recipe_backups import DeformationBackup, LayerBackup, RigidBackup
 from .recipes import Recipe
 from .rigid import load_rigid_parameters
 from .sdf_cache import create_sdf_cache
@@ -73,7 +72,7 @@ def ensure_recipe(
 
     geometry_changes = any(
         item.operation in {"create", "replace"}
-        and item.kind in {"plaque", "deformation"}
+        and item.kind in {"layer", "deformation"}
         for item in actions
     )
     created: list[str] = []
@@ -104,19 +103,26 @@ def ensure_recipe(
 def _preflight(recipe, root, source_config, overwrite):
     actions: list[_Action] = []
     errors: list[str] = []
-    for plaque in recipe.plaques:
-        name = plaque.name
+    for layer in recipe.layers:
+        name = layer.name
         assert name is not None
-        folder = root / "plaques"
+        folder = root / "layers"
+        if layer.backup is not None:
+            try:
+                resolve_layer_patch(layer.backup, root, source_config, 0)
+            except (OSError, RuntimeError, ValueError) as error:
+                errors.append(f"layer {name!r} has an invalid backup: {error}")
         actions.append(
             _assess(
-                kind="plaque",
+                kind="layer",
                 name=name,
-                backup=plaque.backup,
-                paths=(folder / f"{name}.npy", folder / f"{name}.jsonl"),
+                backup=layer.backup,
+                paths=(folder / name / "labels.npy", folder / name / "image.npy"),
                 metadata_path=folder / f"{name}.manifest.json",
-                parse=PowerPlaqueBackup.from_dict,
-                validate=lambda name=name: _validate_plaque(root, name, source_config),
+                parse=LayerBackup.from_dict,
+                validate=lambda name=name: load_layer_collection(
+                    root, name, source_config
+                ),
                 overwrite=overwrite,
                 errors=errors,
             )
@@ -230,17 +236,8 @@ def _assess(
     return _Action("replace", kind, name, backup, paths, metadata_path)
 
 
-def _validate_plaque(root, name, source_config) -> None:
-    masks = np.load(root / "plaques" / f"{name}.npy", mmap_mode="r")
-    expected = (source_config.num_elements, *source_config.empty_artery.image_size)
-    if masks.shape != expected or masks.dtype != np.bool_:
-        raise ValueError(
-            f"expected Boolean {expected}, got {masks.shape} {masks.dtype}"
-        )
-
-
 def _remove_action(action: _Action) -> None:
-    if action.kind == "deformation":
+    if action.kind in {"layer", "deformation"}:
         folder = action.paths[0].parent
         if folder.exists():
             shutil.rmtree(folder)
@@ -253,14 +250,8 @@ def _remove_action(action: _Action) -> None:
 def _create_action(action, recipe, root, device) -> None:
     if action.backup is None:
         return
-    if action.kind == "plaque":
-        create_plaque_collection(
-            root,
-            action.name,
-            action.backup.ranges,
-            seed=action.backup.seed,
-            lumen_radius_px=action.backup.lumen_radius_px,
-        )
+    if action.kind == "layer":
+        create_layer_collection(root, action.name, action.backup)
     elif action.kind == "deformation":
         create_deformation_collection(
             root,
@@ -295,9 +286,8 @@ def _ensure_sdf(recipe, root, batch_size, device) -> Path | None:
         return None
     geometry_recipe = Recipe(
         source=recipe.source,
-        plaques=recipe.plaques,
+        layers=recipe.layers,
         deformation=recipe.deformation,
-        class_intensities=recipe.class_intensities,
     )
     dataset = ComposedArtificialDataset.from_recipe(root, geometry_recipe)
     identity = dataset.sdf_cache_identity(recipe.sdf_cache)

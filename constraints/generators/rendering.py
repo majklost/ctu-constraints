@@ -15,6 +15,7 @@ DEFAULT_CLASS_INTENSITIES: Mapping[AppearanceKind, float] = MappingProxyType(
         AppearanceKind.BOUNDARY: 0.45,
         AppearanceKind.LUMEN: 0.25,
         AppearanceKind.PLAQUE: 1.0,
+        AppearanceKind.SHADOW: 0.05,
     }
 )
 

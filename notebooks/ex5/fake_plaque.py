@@ -30,21 +30,23 @@ from constraints.datatools.label_schema import LabelSchema
 from constraints.generators.factories import preview_artificial_sample
 from constraints.generators.recipe_backups import (
     DeformationBackup,
-    PowerPlaqueBackup,
     RigidBackup,
     SavedDeformation,
     SavedRigid,
 )
 from constraints.generators.recipes import Recipe
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    SavedLayer,
+    power_layer_backup,
+)
 from constraints.generators.types import (
     AppearanceKind,
     ArteryClass,
     DeformationConfig,
     FloatRange,
     NoiseConfig,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
-    SavedPlaque,
 )
 from constraints.losses_metrics.constraint_function import (
     does_violation_occur_with_wall,
@@ -83,15 +85,16 @@ rc = RigidConfig(dx=FloatRange.fixed(0), dy=FloatRange.fixed(0))
 # %%
 recipe = Recipe(
     source="artificial/samples5000",
-    plaques=(
-        SavedPlaque(
-            target_class=ArteryClass.LUMEN,
-            appearance=AppearanceKind.PLAQUE,
-            backup=PowerPlaqueBackup((fake_plaque_range,) * 2, seed=53),
+    layers=(
+        SavedLayer(
+            backup=power_layer_backup(
+                (fake_plaque_range,) * 2,
+                seed=53,
+                target_class=ArteryClass.LUMEN,
+                appearance=AppearanceKind.PLAQUE,
+            ),
         ),
-        SavedPlaque(
-            backup=PowerPlaqueBackup((plaque_range1, plaque_range2), seed=25)
-        ),
+        SavedLayer(backup=power_layer_backup((plaque_range1, plaque_range2), seed=25)),
     ),
     deformation=SavedDeformation(backup=DeformationBackup(dc, seed=27)),
     rigid=SavedRigid(backup=RigidBackup(rc, seed=52)),
@@ -115,7 +118,7 @@ print(
 # Give every generated artifact a stable name only after the visual tuning is done.
 # Fresh names keep this trial independent of older datasets on the cluster.
 cluster_recipe = recipe.with_names(
-    plaques={
+    layers={
         0: "fake-similar-offset-minus-3-v1",
         1: "two-real-separated-v1",
     },
@@ -128,7 +131,7 @@ print(recipe_path)
 
 # %% [markdown]
 # The JSON above is the portable cluster input. It contains the relative source
-# path and all backups needed to recreate missing plaque, deformation, and rigid
+# path and all backups needed to recreate missing layer, deformation, and rigid
 # artifacts. On the cluster, from the repository root, run:
 #
 # ```bash

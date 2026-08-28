@@ -2,9 +2,13 @@
 
 from pathlib import Path
 
-from constraints.generators.factories import create_plaque_collection
+from constraints.generators.factories import create_layer_collection
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    power_layer_backup,
+)
 from constraints.generators.source import create_source
-from constraints.generators.types import PowerPlaqueSamplingRanges, SourceConfig
+from constraints.generators.types import SourceConfig
 
 DEMO_ROOT = Path("data/artificial/demo")
 DEMO_NUM_SAMPLES = 20
@@ -16,11 +20,10 @@ def create_demo_dataset(root: Path = DEMO_ROOT) -> None:
     create_source(root, SourceConfig(num_elements=DEMO_NUM_SAMPLES))
 
     default_plaque = PowerPlaqueSamplingRanges()
-    create_plaque_collection(
+    create_layer_collection(
         root,
         "2blobs",
-        (default_plaque, default_plaque),
-        seed=DEMO_SEED,
+        power_layer_backup((default_plaque, default_plaque), seed=DEMO_SEED),
     )
 
 

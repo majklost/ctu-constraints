@@ -1,15 +1,19 @@
-import json
-
 import numpy as np
 
 from constraints.generators.factories import (
-    create_plaque_collection,
+    create_layer_collection,
     get_source_config,
 )
+from constraints.generators.layer_generators import (
+    LayerPatch,
+    PowerPlaqueSamplingRanges,
+    power_layer_backup,
+    register_layer_resolver,
+)
+from constraints.generators.recipe_backups import LayerBackup
 from constraints.generators.source import create_source
 from constraints.generators.types import (
     EmptyArteryConfig,
-    PowerPlaqueSamplingRanges,
     SourceConfig,
 )
 
@@ -22,16 +26,37 @@ def test_factory_creates_collection_from_source_root(tmp_path) -> None:
     )
     create_source(root, config)
 
-    masks_path, parameters_path = create_plaque_collection(
+    folder = create_layer_collection(
         root,
         "three-big-blobs",
-        (PowerPlaqueSamplingRanges(),) * 3,
-        seed=12,
+        power_layer_backup((PowerPlaqueSamplingRanges(),) * 3, seed=12),
     )
 
     assert get_source_config(root) == config
-    assert np.load(masks_path).shape == (2, 65, 65)
-    assert len(parameters_path.read_text().splitlines()) == 2
-    first_record = json.loads(parameters_path.read_text().splitlines()[0])
-    assert first_record["sample_index"] == 0
-    assert len(first_record["plaques"]) == 3
+    assert np.load(folder / "labels.npy").shape == (2, 65, 65)
+    assert np.load(folder / "image.npy").shape == (2, 65, 65)
+
+
+def test_registered_resolver_can_store_independent_patches(tmp_path) -> None:
+    @register_layer_resolver("test-independent-patches-v1")
+    def separated(context, params):
+        shape = context.source_config.empty_artery.image_size
+        labels = np.full(shape, -1, dtype=np.int8)
+        labels[1, 1] = 3
+        image = np.full(shape, np.nan, dtype=np.float32)
+        image[1, 1:3] = [0.2, 0.8]
+        return LayerPatch(labels, image)
+
+    root = tmp_path / "source"
+    create_source(root, SourceConfig(1, EmptyArteryConfig(20, 5, (65, 65))))
+
+    folder = create_layer_collection(
+        root,
+        "separated",
+        LayerBackup("test-independent-patches-v1"),
+    )
+
+    labels = np.load(folder / "labels.npy")
+    image = np.load(folder / "image.npy")
+    assert (labels[0] >= 0).sum() == 1
+    assert np.isfinite(image[0]).sum() == 2

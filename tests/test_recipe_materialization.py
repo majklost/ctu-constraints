@@ -5,9 +5,13 @@ import pytest
 
 from constraints.datatools.datasets import ComposedArtificialDataset
 from constraints.generators.factories import preview_artificial_sample
+from constraints.generators.layer_generators import (
+    PowerPlaqueSamplingRanges,
+    SavedLayer,
+    power_layer_backup,
+)
 from constraints.generators.recipe_backups import (
     DeformationBackup,
-    PowerPlaqueBackup,
     RigidBackup,
     SavedDeformation,
     SavedRigid,
@@ -19,9 +23,7 @@ from constraints.generators.types import (
     DeformationConfig,
     EmptyArteryConfig,
     FloatRange,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
-    SavedPlaque,
     SourceConfig,
 )
 
@@ -35,9 +37,9 @@ def _source(tmp_path):
     return root
 
 
-def _plaque_backup(*, inward: float = 0.2) -> PowerPlaqueBackup:
-    return PowerPlaqueBackup(
-        ranges=(
+def _layer_backup(*, inward: float = 0.2):
+    return power_layer_backup(
+        (
             PowerPlaqueSamplingRanges(
                 angle_rad=FloatRange.fixed(0),
                 angular_width_rad=FloatRange.fixed(0.5),
@@ -52,7 +54,7 @@ def _plaque_backup(*, inward: float = 0.2) -> PowerPlaqueBackup:
 def test_recipe_preview_and_ensure_use_the_same_backup(tmp_path) -> None:
     root = _source(tmp_path)
     recipe = Recipe(
-        plaques=(SavedPlaque("blob", backup=_plaque_backup()),),
+        layers=(SavedLayer("blob", backup=_layer_backup()),),
         rigid=SavedRigid(
             "shift",
             RigidBackup(
@@ -71,9 +73,9 @@ def test_recipe_preview_and_ensure_use_the_same_backup(tmp_path) -> None:
     stored = ComposedArtificialDataset.from_recipe(root, recipe)[1]
 
     np.testing.assert_array_equal(preview.target_labels, stored["target_labels"])
-    assert report.created == ("plaque 'blob'", "rigid 'shift'")
+    assert report.created == ("layer 'blob'", "rigid 'shift'")
     assert (
-        json.loads((root / "plaques/blob.manifest.json").read_text())["status"]
+        json.loads((root / "layers/blob.manifest.json").read_text())["status"]
         == "complete"
     )
     assert (root / "rigid/shift.npy").exists()
@@ -82,32 +84,34 @@ def test_recipe_preview_and_ensure_use_the_same_backup(tmp_path) -> None:
 def test_preflight_fails_before_creating_any_artifact(tmp_path) -> None:
     root = _source(tmp_path)
     recipe = Recipe(
-        plaques=(
-            SavedPlaque("creatable", backup=_plaque_backup()),
-            SavedPlaque("missing"),
+        layers=(
+            SavedLayer("creatable", backup=_layer_backup()),
+            SavedLayer("missing"),
         )
     )
 
     with pytest.raises(RuntimeError, match="missing.*has no backup"):
         recipe.ensure(root)
 
-    assert not (root / "plaques/creatable.npy").exists()
+    assert not (root / "layers/creatable").exists()
 
 
 def test_definition_mismatch_is_readable_and_overwritable(tmp_path) -> None:
     root = _source(tmp_path)
-    original = Recipe(plaques=(SavedPlaque("blob", backup=_plaque_backup(inward=0.2)),))
+    original = Recipe(layers=(SavedLayer("blob", backup=_layer_backup(inward=0.2)),))
     original.ensure(root)
-    changed = Recipe(plaques=(SavedPlaque("blob", backup=_plaque_backup(inward=0.3)),))
+    changed = Recipe(layers=(SavedLayer("blob", backup=_layer_backup(inward=0.3)),))
 
     with pytest.raises(RuntimeError, match="inward_depth_fraction.minimum"):
         changed.ensure(root)
 
     report = changed.ensure(root, overwrite=True)
 
-    assert report.replaced == ("plaque 'blob'",)
-    stored = json.loads((root / "plaques/blob.manifest.json").read_text())
-    assert stored["definition"]["ranges"][0]["sampling"]["inward_depth_fraction"] == {
+    assert report.replaced == ("layer 'blob'",)
+    stored = json.loads((root / "layers/blob.manifest.json").read_text())
+    assert stored["definition"]["params"]["ranges"][0]["sampling"][
+        "inward_depth_fraction"
+    ] == {
         "minimum": 0.3,
         "maximum": 0.3,
     }
@@ -116,7 +120,7 @@ def test_definition_mismatch_is_readable_and_overwritable(tmp_path) -> None:
 def test_ensure_creates_and_reuses_requested_sdf_cache(tmp_path) -> None:
     root = _source(tmp_path)
     recipe = Recipe(
-        plaques=(SavedPlaque("blob", backup=_plaque_backup()),),
+        layers=(SavedLayer("blob", backup=_layer_backup()),),
         sdf_cache=SDFCacheConfig(mode="scipy"),
     )
 

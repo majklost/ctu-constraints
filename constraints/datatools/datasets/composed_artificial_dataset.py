@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,16 +18,15 @@ from constraints.generators.factories import (
     compose_artificial_sample,
     get_source_config,
 )
+from constraints.generators.layer_generators import (
+    LayerPatch,
+    SavedLayer,
+    load_layer_collection,
+)
 from constraints.generators.recipes import Recipe
-from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
 from constraints.generators.rigid import load_rigid_parameters
 from constraints.generators.storage import read_manifest
-from constraints.generators.types import (
-    AppearanceKind,
-    NoiseConfig,
-    PlaqueLayer,
-    SavedPlaque,
-)
+from constraints.generators.types import NoiseConfig
 
 from ..label_schema import LabelSchema
 from .base_dataset import PerSampleDataset
@@ -54,25 +53,22 @@ class ComposedArtificialDataset(PerSampleDataset):
         self,
         root: Path,
         *,
-        plaques: Sequence[SavedPlaque] = (),
+        layers: Sequence[SavedLayer] = (),
         deformation: str | None = None,
         rigid: str | None = None,
-        class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
         noise: NoiseConfig | None = None,
         sample_list: list[int] | None = None,
     ) -> None:
         self.root = Path(root)
         self.recipe = Recipe(
-            plaques=tuple(plaques),
+            layers=tuple(layers),
             deformation=deformation,
             rigid=rigid,
-            class_intensities=class_intensities,
             noise=noise,
         )
         self.recipe.require_resolved()
         self.config = get_source_config(self.root)
         self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
-        self._class_intensities = self.recipe.class_intensities
         self._deformation_fields = (
             None
             if self.recipe.deformation_name is None
@@ -93,9 +89,9 @@ class ComposedArtificialDataset(PerSampleDataset):
                 self.config,
             )
         )
-        self._plaque_masks = tuple(
-            (plaque, self._load_plaque_collection(plaque.name))
-            for plaque in self.recipe.plaques
+        self._layer_collections = tuple(
+            (layer, load_layer_collection(self.root, layer.name, self.config))
+            for layer in self.recipe.layers
         )
         self._sample_list = (
             sample_list
@@ -112,10 +108,9 @@ class ComposedArtificialDataset(PerSampleDataset):
             raise TypeError("recipe must be a Recipe instance")
         dataset = cls(
             root,
-            plaques=recipe.plaques,
+            layers=recipe.layers,
             deformation=recipe.deformation,
             rigid=recipe.rigid,
-            class_intensities=recipe.class_intensities,
             noise=recipe.noise,
             sample_list=sample_list,
         )
@@ -128,12 +123,8 @@ class ComposedArtificialDataset(PerSampleDataset):
     def __getitem__(self, index: int) -> Sample:
         index = self._normalize_index(index)
         layers = [
-            PlaqueLayer(
-                masks[index],
-                plaque.target_class,
-                plaque.appearance,
-            )
-            for plaque, masks in self._plaque_masks
+            LayerPatch(collection.labels[index], collection.image[index])
+            for _, collection in self._layer_collections
         ]
         field = (
             None
@@ -146,7 +137,6 @@ class ComposedArtificialDataset(PerSampleDataset):
         arrays = compose_artificial_sample(
             self._empty_artery,
             layers,
-            self._class_intensities,
             deformation_field=field,
             rigid_parameters=rigid_parameters,
             noise_config=self.recipe.noise,
@@ -181,22 +171,6 @@ class ComposedArtificialDataset(PerSampleDataset):
         if not isinstance(dataset_id, str) or not dataset_id:
             raise ValueError("source manifest has no dataset_id")
         return SDFCacheIdentity.from_recipe(dataset_id, self.recipe, config)
-
-    def _load_plaque_collection(self, name: str) -> np.ndarray:
-        if not name or Path(name).name != name:
-            raise ValueError("plaque collection name must be a filename component")
-        path = self.root / "plaques" / f"{name}.npy"
-        masks = np.load(path, mmap_mode="r")
-        expected_shape = (
-            self.config.num_elements,
-            *self.config.empty_artery.image_size,
-        )
-        if masks.shape != expected_shape or masks.dtype != np.bool_:
-            raise ValueError(
-                f"invalid plaque collection {name!r}: expected Boolean "
-                f"{expected_shape}, got {masks.shape} {masks.dtype}"
-            )
-        return masks
 
     def _normalize_index(self, index: int) -> int:
         return self._sample_list[index]

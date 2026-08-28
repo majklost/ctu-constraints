@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,33 +13,28 @@ from numpy.typing import NDArray
 from constraints.devices import DeviceSelection
 
 from .artifact_metadata import write_artifact_metadata
-from .composition import compose_label_maps
+from .composition import compose_layers
 from .deformation import (
     apply_deformation,
     generate_deformation_fields,
     load_deformation_fields,
     sample_valid_deformation,
 )
+from .layer_generators import (
+    TRANSPARENT_LABEL,
+    LayerPatch,
+    create_empty_artery,
+    materialize_layer_collection,
+)
 from .noise import apply_speckle_noise
-from .parametrization.plaque_generators import create_empty_artery
-from .recipe_backups import DeformationBackup, PowerPlaqueBackup, RigidBackup
-from .rendering import (
-    DEFAULT_CLASS_INTENSITIES,
-    create_grayscale_image_from_label_mask,
-)
+from .recipe_backups import DeformationBackup, LayerBackup, RigidBackup
 from .rigid import apply_rigid, generate_rigid_parameters, sample_valid_rigid
-from .source import (
-    generate_plaque_masks_power,
-    load_source_config,
-)
+from .source import load_source_config
 from .types import (
-    AppearanceKind,
     DeformationConfig,
     DeformationRejectionConfig,
     EmptyArteryConfig,
     NoiseConfig,
-    PlaqueLayer,
-    PowerPlaqueSamplingRanges,
     RigidConfig,
     RigidRejectionConfig,
     SourceConfig,
@@ -56,7 +51,6 @@ class ComposedSampleArrays:
 
     image: NDArray[np.float32]
     target_labels: NDArray[np.uint8]
-    appearance_labels: NDArray[np.uint8]
 
 
 @dataclass(frozen=True)
@@ -65,7 +59,6 @@ class PreviewArtificialSample:
 
     image: NDArray[np.float32]
     target_labels: NDArray[np.uint8]
-    appearance_labels: NDArray[np.uint8]
     deformation_field: NDArray[np.float32] | None
     deformation_validation: DeformationValidationResult | None
     rigid_parameters: NDArray[np.float32] | None = None
@@ -73,7 +66,7 @@ class PreviewArtificialSample:
 
 def preview_artificial_sample(
     artery_config: EmptyArteryConfig | Recipe | None = None,
-    plaque_layers: Iterable[PlaqueLayer] = (),
+    layers: Iterable[LayerPatch] = (),
     deformation_config: DeformationConfig | None = None,
     deformation_rejection: DeformationRejectionConfig | None = None,
     rigid_config: RigidConfig | None = None,
@@ -84,7 +77,6 @@ def preview_artificial_sample(
     deformation_device: DeviceSelection = "auto",
     source_root: Path | None = None,
     recipe: Recipe | None = None,
-    class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
     noise_config: NoiseConfig | None = None,
 ) -> PreviewArtificialSample:
     """Preview a low-level composition or a complete recipe."""
@@ -108,7 +100,7 @@ def preview_artificial_sample(
     if seed is None:
         raise ValueError("seed is required for low-level previews")
     empty_artery = create_empty_artery(artery_config)
-    plaque_layers = tuple(plaque_layers)
+    layers = tuple(layers)
 
     deformation = None
     if deformation_config is not None:
@@ -137,8 +129,7 @@ def preview_artificial_sample(
         )
     arrays = compose_artificial_sample(
         empty_artery,
-        plaque_layers,
-        class_intensities,
+        layers,
         deformation_field=None if deformation is None else deformation.field,
         rigid_parameters=None if rigid is None else rigid.parameters,
         noise_config=noise_config,
@@ -147,7 +138,6 @@ def preview_artificial_sample(
     return PreviewArtificialSample(
         image=arrays.image,
         target_labels=arrays.target_labels,
-        appearance_labels=arrays.appearance_labels,
         deformation_field=None if deformation is None else deformation.field,
         deformation_validation=(
             None if deformation is None else deformation.validation
@@ -161,69 +151,37 @@ def get_source_config(source_root: Path) -> SourceConfig:
     return load_source_config(source_root)
 
 
-def create_plaque_collection(
+def create_layer_collection(
     source_root: Path,
     name: str,
-    ranges: PowerPlaqueSamplingRanges
-    | tuple[PowerPlaqueSamplingRanges, ...]
-    | None = None,
-    *,
-    seed: int,
-    lumen_radius_px: float | None = None,
-) -> tuple[Path, Path]:
-    """Create a named plaque collection inside an existing source dataset.
-
-    This is the script-facing API. It resolves the source configuration and
-    storage location, then dispatches to the configured plaque generator.
-
-    source_root - root of whole dataset
-    """
+    backup: LayerBackup,
+) -> Path:
+    """Materialize one named layer using its registered resolver."""
     source_root = Path(source_root)
+    if not name or Path(name).name != name:
+        raise ValueError("layer name must be a filename component")
     config = get_source_config(source_root)
-    plaque_folder = source_root / "plaques"
-    ranges_per_plaque = (
-        (PowerPlaqueSamplingRanges(),)
-        if ranges is None
-        else ranges
-        if isinstance(ranges, tuple)
-        else (ranges,)
-    )
-    backup = PowerPlaqueBackup(
-        ranges=ranges_per_plaque,
-        seed=seed,
-        lumen_radius_px=lumen_radius_px,
-    )
-    metadata_path = plaque_folder / f"{name}.manifest.json"
-    artifact_paths = (
-        plaque_folder / f"{name}.npy",
-        plaque_folder / f"{name}.jsonl",
-        metadata_path,
-    )
+    layer_root = source_root / "layers"
+    metadata_path = layer_root / f"{name}.manifest.json"
+    artifact_paths = (layer_root / name, metadata_path)
     if any(path.exists() for path in artifact_paths):
-        raise FileExistsError(f"plaque collection already exists: {name}")
+        raise FileExistsError(f"layer collection already exists: {name}")
     write_artifact_metadata(
         metadata_path,
-        kind="plaque-collection",
+        kind="layer-collection",
         name=name,
         definition=backup.to_dict(),
         status="preparing",
     )
-    generate_plaque_masks_power(
-        plaque_folder,
-        name,
-        config,
-        ranges,
-        seed=seed,
-        lumen_radius_px=lumen_radius_px,
-    )
+    result = materialize_layer_collection(source_root, name, config, backup)
     write_artifact_metadata(
         metadata_path,
-        kind="plaque-collection",
+        kind="layer-collection",
         name=name,
         definition=backup.to_dict(),
         status="complete",
     )
-    return plaque_folder / f"{name}.npy", plaque_folder / f"{name}.jsonl"
+    return result
 
 
 def create_deformation_collection(
@@ -341,8 +299,7 @@ def create_rigid_collection(
 
 def compose_artificial_sample(
     empty_artery: np.ndarray,
-    layers: Iterable[PlaqueLayer],
-    class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
+    layers: Iterable[LayerPatch],
     *,
     deformation_field: np.ndarray | None = None,
     rigid_parameters: np.ndarray | tuple[float, float, float] | None = None,
@@ -355,24 +312,11 @@ def compose_artificial_sample(
         empty_artery = np.rint(
             apply_deformation(empty_artery, deformation_field, method="nearest")
         ).astype(np.uint8)
-        layers = tuple(
-            PlaqueLayer(
-                apply_deformation(layer.mask, deformation_field, method="nearest")
-                > 0.5,
-                layer.target_class,
-                layer.appearance,
-            )
-            for layer in layers
-        )
-    label_maps = compose_label_maps(empty_artery, layers)
-    image = create_grayscale_image_from_label_mask(
-        label_maps.appearance_labels,
-        class_intensities,
-    )
+        layers = tuple(_deform_layer(layer, deformation_field) for layer in layers)
+    composed = compose_layers(empty_artery, layers)
     arrays = ComposedSampleArrays(
-        image=image,
-        target_labels=label_maps.target_labels,
-        appearance_labels=label_maps.appearance_labels,
+        image=composed.image,
+        target_labels=composed.target_labels,
     )
     if rigid_parameters is not None:
         arrays = ComposedSampleArrays(
@@ -380,13 +324,6 @@ def compose_artificial_sample(
             target_labels=np.rint(
                 apply_rigid(
                     arrays.target_labels,
-                    *rigid_parameters,
-                    method="nearest",
-                )
-            ).astype(np.uint8),
-            appearance_labels=np.rint(
-                apply_rigid(
-                    arrays.appearance_labels,
                     *rigid_parameters,
                     method="nearest",
                 )
@@ -401,5 +338,21 @@ def compose_artificial_sample(
             sample_index=sample_index,
         ),
         target_labels=arrays.target_labels,
-        appearance_labels=arrays.appearance_labels,
     )
+
+
+def _deform_layer(layer: LayerPatch, field: np.ndarray) -> LayerPatch:
+    label_pixels = layer.labels != TRANSPARENT_LABEL
+    labels = apply_deformation(
+        np.where(label_pixels, layer.labels, 0), field, method="nearest"
+    ).astype(np.int8)
+    warped_label_pixels = apply_deformation(label_pixels, field, method="nearest") > 0.5
+    labels[~warped_label_pixels] = TRANSPARENT_LABEL
+
+    image_pixels = ~np.isnan(layer.image)
+    image = apply_deformation(
+        np.where(image_pixels, layer.image, 0.0), field, method="linear"
+    ).astype(np.float32)
+    warped_image_pixels = apply_deformation(image_pixels, field, method="nearest") > 0.5
+    image[~warped_image_pixels] = np.nan
+    return LayerPatch(labels, image)

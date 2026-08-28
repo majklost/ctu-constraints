@@ -17,13 +17,16 @@ a backup containing its complete generation configuration:
 ```python
 recipe = Recipe(
     source="artificial/samples5000",
-    plaques=(
-        SavedPlaque(
-            target_class=ArteryClass.LUMEN,
-            appearance=AppearanceKind.PLAQUE,
-            backup=PowerPlaqueBackup((fake_ranges,) * 2, seed=53),
+    layers=(
+        SavedLayer(
+            backup=power_layer_backup(
+                (fake_ranges,) * 2,
+                seed=53,
+                target_class=ArteryClass.LUMEN,
+                appearance=AppearanceKind.PLAQUE,
+            ),
         ),
-        SavedPlaque(backup=PowerPlaqueBackup(real_ranges, seed=25)),
+        SavedLayer(backup=power_layer_backup(real_ranges, seed=25)),
     ),
     deformation=SavedDeformation(backup=DeformationBackup(dc, seed=27)),
     rigid=SavedRigid(backup=RigidBackup(rc, seed=52)),
@@ -38,7 +41,7 @@ recipe:
 
 ```python
 cluster_recipe = recipe.with_names(
-    plaques={0: "fake-similar-offset-minus-3-v1", 1: "two-real-separated-v1"},
+    layers={0: "fake-similar-offset-minus-3-v1", 1: "two-real-separated-v1"},
     deformation="default-deformation-v1",
     rigid="rotation-only-v1",
 )
@@ -54,7 +57,7 @@ mechanism. A complete worked example is in
 
 ## Artifact references and backups
 
-Every plaque, deformation, and rigid entry has two independent fields:
+Every layer, deformation, and rigid entry has two independent fields:
 
 - `name` identifies the stored artifact used by a resolved recipe.
 - `backup` contains enough typed configuration to generate or verify it.
@@ -67,6 +70,54 @@ saved as a usable dataset until `with_names()` resolves it.
 `deformation: null` and `rigid: null` mean that the transformation is absent.
 A rigid artifact in such a recipe is stored at source level, independently of
 all deformation folders.
+
+## Layer resolvers
+
+Layer backups are generic calls into the registry in
+`generators/layer_generators/registry.py`:
+
+```python
+LayerBackup(
+    resolver="my-holed-layer-v1",
+    params={"hole_count": 3, "radius_px": 5, "seed": 81},
+)
+```
+
+A registered resolver returns either an arbitrary `LayerPatch` or a uniform
+`MaskLayer`. The full form has independent per-pixel labels and grayscale:
+
+```python
+@register_layer_resolver("my-holed-layer-v1")
+def resolve_holed(context, params):
+    solid = make_solid_mask(context, params)
+    holed = make_holes(solid, params)
+    labels = np.full(solid.shape, -1, dtype=np.int8)
+    labels[holed] = ArteryClass.PLAQUE
+    image = np.full(solid.shape, np.nan, dtype=np.float32)
+    image[solid] = make_gradient(solid, params)
+    return LayerPatch(labels, image)
+```
+
+`labels == -1` and `image == NaN` are transparent. Their valid regions may be
+different. For the common uniform case, return:
+
+```python
+return MaskLayer(mask, ArteryClass.LUMEN, AppearanceKind.PLAQUE)
+```
+
+Resolver names are stable recipe identifiers, not Python import paths. Give a
+changed algorithm a new versioned name. Parameters must be finite JSON values.
+`power_layer_backup()` is only a convenience constructor for the built-in
+`power-v2` resolver; PowerPlaque types are not part of the Recipe contract.
+Custom resolver modules must be imported before preview or ensure, ensuring
+the CLI and notebook register the same functions before loading a recipe.
+Resolvers must derive randomness from their JSON seed and `context.sample_index`;
+the same call is used for preview and stored materialization.
+
+For notebook-only iteration, call the resolver function directly and pass its
+result through `normalize_layer_output()` into `preview_artificial_sample()`.
+The same registered function is called by a backup during recipe preview and
+materialization. Collections store `labels.npy` and `image.npy`.
 
 ## Materialize or validate
 
@@ -97,8 +148,9 @@ finished.
 `--overwrite` changes the final rule: conflicting artifacts that have backups
 are replaced. This is intentionally explicit because another recipe may use the
 same name. Prefer a new name for experiments; use overwrite only when replacing
-the shared identity is deliberate. Replacing geometry also invalidates derived
-SDF caches, and replacing a deformation recreates its dependent rigid artifact.
+the shared identity is deliberate. Replacing layer geometry also invalidates
+derived SDF caches, and replacing a deformation recreates its dependent rigid
+artifact.
 
 The equivalent Python call is:
 
@@ -119,7 +171,7 @@ recipe = replace(
 ```
 
 The cache identity contains only geometry and SDF-relevant fields, so grayscale
-noise, appearance intensities, and rigid motion do not produce unnecessary new
+noise and rigid motion do not produce unnecessary new
 caches.
 
 ## Load for an experiment

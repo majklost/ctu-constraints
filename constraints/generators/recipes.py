@@ -4,27 +4,25 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
-from math import isfinite
+from dataclasses import dataclass, replace
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from constraints.devices import DeviceSelection
 
+from .layer_generators import SavedLayer
 from .recipe_backups import (
     DeformationBackup,
-    PowerPlaqueBackup,
+    LayerBackup,
     RigidBackup,
     SavedDeformation,
     SavedRigid,
 )
-from .rendering import DEFAULT_CLASS_INTENSITIES
 from .storage import write_json
-from .types import AppearanceKind, ArteryClass, NoiseConfig, SavedPlaque
+from .types import NoiseConfig
 
 RECIPE_FORMAT_NAME = "composed-artificial-recipe"
-RECIPE_FORMAT_VERSION = 3
+RECIPE_FORMAT_VERSION = 5
 
 if TYPE_CHECKING:
     from .recipe_ensure import EnsureReport
@@ -36,12 +34,9 @@ class Recipe:
     """One central definition for preview, materialization, and composition."""
 
     source: str | None = None
-    plaques: tuple[SavedPlaque, ...] = ()
+    layers: tuple[SavedLayer, ...] = ()
     deformation: SavedDeformation | str | None = None
     rigid: SavedRigid | str | None = None
-    class_intensities: Mapping[AppearanceKind, float] = field(
-        default_factory=lambda: DEFAULT_CLASS_INTENSITIES
-    )
     noise: NoiseConfig | None = None
     sdf_cache: SDFCacheConfig | None = None
 
@@ -54,13 +49,13 @@ class Recipe:
                 raise ValueError("recipe source must be a safe relative path")
             object.__setattr__(self, "source", source.as_posix())
 
-        plaques = tuple(self.plaques)
-        if not all(isinstance(plaque, SavedPlaque) for plaque in plaques):
-            raise TypeError("recipe plaques must contain SavedPlaque instances")
-        names = [plaque.name for plaque in plaques if plaque.name is not None]
+        layers = tuple(self.layers)
+        if not all(isinstance(layer, SavedLayer) for layer in layers):
+            raise TypeError("recipe layers must contain SavedLayer instances")
+        names = [layer.name for layer in layers if layer.name is not None]
         if len(names) != len(set(names)):
-            raise ValueError("a recipe cannot contain a plaque collection twice")
-        object.__setattr__(self, "plaques", plaques)
+            raise ValueError("a recipe cannot contain a layer collection twice")
+        object.__setattr__(self, "layers", layers)
 
         if isinstance(self.deformation, str):
             object.__setattr__(
@@ -76,11 +71,6 @@ class Recipe:
         elif self.rigid is not None and not isinstance(self.rigid, SavedRigid):
             raise TypeError("recipe rigid must be a SavedRigid or None")
 
-        object.__setattr__(
-            self,
-            "class_intensities",
-            MappingProxyType(_validate_intensities(self.class_intensities, plaques)),
-        )
         if self.noise is not None and not isinstance(self.noise, NoiseConfig):
             raise TypeError("recipe noise must be a NoiseConfig instance or None")
         if self.sdf_cache is not None:
@@ -100,8 +90,8 @@ class Recipe:
     def require_resolved(self) -> None:
         """Require names for every artifact needed by a stored dataset."""
         missing = [
-            f"plaques[{index}]"
-            for index, item in enumerate(self.plaques)
+            f"layers[{index}]"
+            for index, item in enumerate(self.layers)
             if item.name is None
         ]
         if self.deformation is not None and self.deformation.name is None:
@@ -127,15 +117,15 @@ class Recipe:
     def with_names(
         self,
         *,
-        plaques: Mapping[int, str] | None = None,
+        layers: Mapping[int, str] | None = None,
         deformation: str | None = None,
         rigid: str | None = None,
     ) -> Self:
         """Return a copy with names assigned to dynamic artifacts."""
-        plaque_names = {} if plaques is None else dict(plaques)
-        resolved_plaques = tuple(
-            replace(item, name=plaque_names.get(index, item.name))
-            for index, item in enumerate(self.plaques)
+        layer_names = {} if layers is None else dict(layers)
+        resolved_layers = tuple(
+            replace(item, name=layer_names.get(index, item.name))
+            for index, item in enumerate(self.layers)
         )
         resolved_deformation = self.deformation
         if deformation is not None:
@@ -149,7 +139,7 @@ class Recipe:
             resolved_rigid = replace(resolved_rigid, name=rigid)
         return replace(
             self,
-            plaques=resolved_plaques,
+            layers=resolved_layers,
             deformation=resolved_deformation,
             rigid=resolved_rigid,
         )
@@ -178,13 +168,9 @@ class Recipe:
             "format_name": RECIPE_FORMAT_NAME,
             "format_version": self.format_version,
             "source": self.source,
-            "plaques": [_plaque_to_dict(item) for item in self.plaques],
+            "layers": [_layer_to_dict(item) for item in self.layers],
             "deformation": _deformation_to_dict(self.deformation),
             "rigid": _rigid_to_dict(self.rigid),
-            "class_intensities": {
-                kind.name.lower(): intensity
-                for kind, intensity in self.class_intensities.items()
-            },
             "noise": None if self.noise is None else self.noise.to_dict(),
             "sdf_cache": (None if self.sdf_cache is None else self.sdf_cache.to_dict()),
         }
@@ -203,10 +189,9 @@ class Recipe:
             "format_name",
             "format_version",
             "source",
-            "plaques",
+            "layers",
             "deformation",
             "rigid",
-            "class_intensities",
             "noise",
             "sdf_cache",
         }
@@ -217,10 +202,9 @@ class Recipe:
 
             return cls(
                 source=value["source"],
-                plaques=tuple(_plaque_from_dict(item) for item in value["plaques"]),
+                layers=tuple(_layer_from_dict(item) for item in value["layers"]),
                 deformation=_deformation_from_dict(value["deformation"]),
                 rigid=_rigid_from_dict(value["rigid"]),
-                class_intensities=_intensities_from_dict(value["class_intensities"]),
                 noise=(
                     None
                     if value["noise"] is None
@@ -247,62 +231,21 @@ class Recipe:
         return cls.from_dict(value)
 
 
-def _validate_intensities(
-    value: Mapping[AppearanceKind, float], plaques: tuple[SavedPlaque, ...]
-) -> dict[AppearanceKind, float]:
-    try:
-        intensities = {
-            AppearanceKind(kind): float(intensity) for kind, intensity in value.items()
-        }
-    except (AttributeError, TypeError, ValueError) as error:
-        raise ValueError(
-            "class_intensities must map appearance kinds to numbers"
-        ) from error
-    if not all(isfinite(intensity) for intensity in intensities.values()):
-        raise ValueError("class intensities must be finite")
-    required = {
-        AppearanceKind.BACKGROUND,
-        AppearanceKind.BOUNDARY,
-        AppearanceKind.LUMEN,
-    }
-    required.update(
-        item.appearance
-        if item.appearance is not None
-        else AppearanceKind(item.target_class.value)
-        for item in plaques
-    )
-    missing = required - intensities.keys()
-    if missing:
-        names = ", ".join(sorted(kind.name for kind in missing))
-        raise ValueError(f"missing class intensities for: {names}")
-    return dict(sorted(intensities.items(), key=lambda item: item[0].value))
-
-
-def _plaque_to_dict(item: SavedPlaque) -> dict[str, Any]:
+def _layer_to_dict(item: SavedLayer) -> dict[str, Any]:
     return {
         "name": item.name,
-        "target_class": item.target_class.name.lower(),
-        "appearance": None if item.appearance is None else item.appearance.name.lower(),
         "backup": None if item.backup is None else item.backup.to_dict(),
     }
 
 
-def _plaque_from_dict(value: dict[str, Any]) -> SavedPlaque:
-    expected = {"name", "target_class", "appearance", "backup"}
+def _layer_from_dict(value: dict[str, Any]) -> SavedLayer:
+    expected = {"name", "backup"}
     if not isinstance(value, dict) or value.keys() != expected:
-        raise ValueError("invalid Recipe plaque fields")
-    return SavedPlaque(
+        raise ValueError("invalid Recipe layer fields")
+    return SavedLayer(
         name=value["name"],
-        target_class=ArteryClass[value["target_class"].upper()],
-        appearance=(
-            None
-            if value["appearance"] is None
-            else AppearanceKind[value["appearance"].upper()]
-        ),
         backup=(
-            None
-            if value["backup"] is None
-            else PowerPlaqueBackup.from_dict(value["backup"])
+            None if value["backup"] is None else LayerBackup.from_dict(value["backup"])
         ),
     )
 
@@ -351,11 +294,3 @@ def _rigid_from_dict(value: dict[str, Any] | None) -> SavedRigid | None:
             None if value["backup"] is None else RigidBackup.from_dict(value["backup"])
         ),
     )
-
-
-def _intensities_from_dict(value: dict[str, Any]) -> dict[AppearanceKind, float]:
-    if not isinstance(value, dict):
-        raise ValueError("invalid Recipe class_intensities")
-    return {
-        AppearanceKind[name.upper()]: intensity for name, intensity in value.items()
-    }
