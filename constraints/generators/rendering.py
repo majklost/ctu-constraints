@@ -12,7 +12,7 @@ LabelMap = NDArray[np.uint8]
 DEFAULT_CLASS_INTENSITIES: Mapping[AppearanceKind, float] = MappingProxyType(
     {
         AppearanceKind.BACKGROUND: 0.0,
-        AppearanceKind.BOUNDARY: 0.65,
+        AppearanceKind.BOUNDARY: 0.45,
         AppearanceKind.LUMEN: 0.25,
         AppearanceKind.PLAQUE: 1.0,
     }

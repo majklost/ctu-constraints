@@ -16,6 +16,7 @@ from .deformation import (
     load_deformation_fields,
     sample_valid_deformation,
 )
+from .noise import apply_speckle_noise
 from .parametrization.plaque_generators import create_empty_artery
 from .rendering import (
     DEFAULT_CLASS_INTENSITIES,
@@ -31,6 +32,7 @@ from .types import (
     DeformationConfig,
     DeformationRejectionConfig,
     EmptyArteryConfig,
+    NoiseConfig,
     PlaqueLayer,
     PowerPlaqueSamplingRanges,
     RigidConfig,
@@ -73,6 +75,7 @@ def preview_artificial_sample(
     sample_index: int = 0,
     deformation_device: DeviceSelection = "auto",
     class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
+    noise_config: NoiseConfig | None = None,
 ) -> PreviewArtificialSample:
     """Transform and compose directly supplied Boolean plaque layers."""
     empty_artery = create_empty_artery(artery_config)
@@ -109,6 +112,8 @@ def preview_artificial_sample(
         class_intensities,
         deformation_field=None if deformation is None else deformation.field,
         rigid_parameters=None if rigid is None else rigid.parameters,
+        noise_config=noise_config,
+        sample_index=sample_index,
     )
     return PreviewArtificialSample(
         image=arrays.image,
@@ -141,7 +146,7 @@ def create_plaque_collection(
 
     This is the script-facing API. It resolves the source configuration and
     storage location, then dispatches to the configured plaque generator.
-    
+
     source_root - root of whole dataset
     """
     source_root = Path(source_root)
@@ -223,6 +228,8 @@ def compose_artificial_sample(
     *,
     deformation_field: np.ndarray | None = None,
     rigid_parameters: np.ndarray | tuple[float, float, float] | None = None,
+    noise_config: NoiseConfig | None = None,
+    sample_index: int = 0,
 ) -> ComposedSampleArrays:
     """Apply stored transforms and compose one artificial sample."""
     layers = tuple(layers)
@@ -249,22 +256,32 @@ def compose_artificial_sample(
         target_labels=label_maps.target_labels,
         appearance_labels=label_maps.appearance_labels,
     )
-    if rigid_parameters is None:
+    if rigid_parameters is not None:
+        arrays = ComposedSampleArrays(
+            image=apply_rigid(arrays.image, *rigid_parameters, method="linear"),
+            target_labels=np.rint(
+                apply_rigid(
+                    arrays.target_labels,
+                    *rigid_parameters,
+                    method="nearest",
+                )
+            ).astype(np.uint8),
+            appearance_labels=np.rint(
+                apply_rigid(
+                    arrays.appearance_labels,
+                    *rigid_parameters,
+                    method="nearest",
+                )
+            ).astype(np.uint8),
+        )
+    if noise_config is None:
         return arrays
     return ComposedSampleArrays(
-        image=apply_rigid(arrays.image, *rigid_parameters, method="linear"),
-        target_labels=np.rint(
-            apply_rigid(
-                arrays.target_labels,
-                *rigid_parameters,
-                method="nearest",
-            )
-        ).astype(np.uint8),
-        appearance_labels=np.rint(
-            apply_rigid(
-                arrays.appearance_labels,
-                *rigid_parameters,
-                method="nearest",
-            )
-        ).astype(np.uint8),
+        image=apply_speckle_noise(
+            arrays.image,
+            noise_config,
+            sample_index=sample_index,
+        ),
+        target_labels=arrays.target_labels,
+        appearance_labels=arrays.appearance_labels,
     )

@@ -335,9 +335,75 @@ class PlaqueLayer:
 
 @dataclass(frozen=True)
 class NoiseConfig:
+    """Configuration for deterministic image noise.
+
+    ``seed`` identifies the noise realization collection. Individual samples
+    derive independent random streams from this seed and their source index.
+    """
+
     speckle_std: float = 0.0
+    speckle_mode: Literal["multiplicative", "additive"] = "multiplicative"
     black_rectangle_probability: float = 0.0
     black_rectangle_size: tuple[int, int] = (0, 0)
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.speckle_std) or self.speckle_std < 0:
+            raise ValueError("speckle_std must be finite and non-negative")
+        if self.speckle_mode not in ("multiplicative", "additive"):
+            raise ValueError("speckle_mode must be 'multiplicative' or 'additive'")
+        if (
+            not isfinite(self.black_rectangle_probability)
+            or not 0 <= self.black_rectangle_probability <= 1
+        ):
+            raise ValueError("black_rectangle_probability must be in [0, 1]")
+        if len(self.black_rectangle_size) != 2 or any(
+            isinstance(size, bool) or not isinstance(size, int) or size < 0
+            for size in self.black_rectangle_size
+        ):
+            raise ValueError(
+                "black_rectangle_size must contain two non-negative integers"
+            )
+        if (
+            isinstance(self.seed, bool)
+            or not isinstance(self.seed, int)
+            or self.seed < 0
+        ):
+            raise ValueError("noise seed must be a non-negative integer")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "speckle_std": self.speckle_std,
+            "speckle_mode": self.speckle_mode,
+            "black_rectangle_probability": self.black_rectangle_probability,
+            "black_rectangle_size": list(self.black_rectangle_size),
+            "seed": self.seed,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> Self:
+        legacy_fields = {
+            "speckle_std",
+            "black_rectangle_probability",
+            "black_rectangle_size",
+            "seed",
+        }
+        expected = legacy_fields | {"speckle_mode"}
+        if not isinstance(value, dict) or value.keys() not in (
+            legacy_fields,
+            expected,
+        ):
+            raise ValueError("invalid NoiseConfig fields")
+        try:
+            return cls(
+                speckle_std=value["speckle_std"],
+                speckle_mode=value.get("speckle_mode", "multiplicative"),
+                black_rectangle_probability=value["black_rectangle_probability"],
+                black_rectangle_size=tuple(value["black_rectangle_size"]),
+                seed=value["seed"],
+            )
+        except (TypeError, KeyError) as error:
+            raise ValueError("invalid NoiseConfig value") from error
 
 
 @dataclass(frozen=True)

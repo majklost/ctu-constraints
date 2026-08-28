@@ -10,11 +10,17 @@ from constraints.generators.types import (
 
 
 def create_rotonly():
-    FOLDER = get_data_folder() / "artificial" / "samples5000"/"deformation/default"
+    FOLDER = get_data_folder() / "artificial" / "samples5000"
 
     rc = RigidConfig(dx=FloatRange.fixed(0), dy=FloatRange.fixed(0))
 
-    create_rigid_collection(FOLDER, "FloatingFakeSimilarTwoPlaque", rc, seed=52)
+    create_rigid_collection(
+        FOLDER,
+        "FloatingFakeSimilarTwoPlaque",
+        deformation="default",
+        config=rc,
+        seed=52,
+    )
 
 
 if __name__ == "__main__":

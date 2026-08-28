@@ -4,7 +4,12 @@ import pytest
 
 from constraints.generators.recipes import Recipe
 from constraints.generators.rendering import DEFAULT_CLASS_INTENSITIES
-from constraints.generators.types import AppearanceKind, ArteryClass, SavedPlaque
+from constraints.generators.types import (
+    AppearanceKind,
+    ArteryClass,
+    NoiseConfig,
+    SavedPlaque,
+)
 
 
 def test_recipe_json_round_trip_preserves_appearance_and_intensities(tmp_path) -> None:
@@ -24,6 +29,7 @@ def test_recipe_json_round_trip_preserves_appearance_and_intensities(tmp_path) -
             AppearanceKind.PLAQUE: 0.9,
             AppearanceKind.SHADOW: 0.05,
         },
+        noise=NoiseConfig(speckle_std=0.15, speckle_mode="additive", seed=42),
     )
 
     recipe.save_json(path)
@@ -32,9 +38,12 @@ def test_recipe_json_round_trip_preserves_appearance_and_intensities(tmp_path) -
     assert loaded == recipe
     assert loaded.class_intensities[AppearanceKind.SHADOW] == 0.05
     value = json.loads(path.read_text())
-    assert value["format_version"] == 1
+    assert value["format_version"] == 2
     assert value["plaques"][0]["appearance"] == "shadow"
     assert value["class_intensities"]["plaque"] == 0.9
+    assert value["noise"]["speckle_std"] == 0.15
+    assert value["noise"]["speckle_mode"] == "additive"
+    assert value["noise"]["seed"] == 42
 
 
 def test_recipe_owns_an_immutable_copy_of_intensities() -> None:
@@ -54,3 +63,13 @@ def test_recipe_rejects_unknown_json_fields() -> None:
 
     with pytest.raises(ValueError, match="Recipe fields"):
         Recipe.from_dict(value)
+
+
+def test_recipe_loads_version_one_without_noise() -> None:
+    value = Recipe().to_dict()
+    value["format_version"] = 1
+    del value["noise"]
+
+    recipe = Recipe.from_dict(value)
+
+    assert recipe.noise is None

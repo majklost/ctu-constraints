@@ -16,6 +16,7 @@ from constraints.generators.types import (
     ArteryClass,
     EmptyArteryConfig,
     FloatRange,
+    NoiseConfig,
     PowerPlaqueSamplingRanges,
     RigidConfig,
     SavedPlaque,
@@ -160,3 +161,37 @@ def test_recipe_rejects_duplicate_plaque_collections() -> None:
                 SavedPlaque("blob", target_class=ArteryClass.LUMEN),
             )
         )
+
+
+def test_dataset_applies_deterministic_noise_from_recipe(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    recipe = Recipe(
+        plaques=(SavedPlaque("blob"),),
+        noise=NoiseConfig(speckle_std=0.2, seed=17),
+    )
+    first_dataset = ComposedArtificialDataset.from_recipe(root, recipe)
+    second_dataset = ComposedArtificialDataset.from_recipe(root, recipe)
+
+    first = first_dataset[0]
+    repeated = first_dataset[0]
+    recreated = second_dataset[0]
+    other_sample = first_dataset[1]
+
+    torch.testing.assert_close(first["image"], repeated["image"], rtol=0, atol=0)
+    torch.testing.assert_close(first["image"], recreated["image"], rtol=0, atol=0)
+    assert not torch.equal(first["image"], other_sample["image"])
+    torch.testing.assert_close(
+        first["target_labels"],
+        ComposedArtificialDataset(root, plaques=(SavedPlaque("blob"),))[0][
+            "target_labels"
+        ],
+    )
+
+
+def test_dataset_accepts_noise_config_directly_and_uses_source_index(tmp_path) -> None:
+    root = _create_source_with_plaques(tmp_path)
+    noise = NoiseConfig(speckle_std=0.1, seed=9)
+    full = ComposedArtificialDataset(root, noise=noise)
+    subset = ComposedArtificialDataset(root, noise=noise, sample_list=[1])
+
+    torch.testing.assert_close(full[1]["image"], subset[0]["image"], rtol=0, atol=0)

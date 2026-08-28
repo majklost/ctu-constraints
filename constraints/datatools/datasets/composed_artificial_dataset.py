@@ -24,6 +24,7 @@ from constraints.generators.rigid import load_rigid_parameters
 from constraints.generators.storage import read_manifest
 from constraints.generators.types import (
     AppearanceKind,
+    NoiseConfig,
     PlaqueLayer,
     SavedPlaque,
 )
@@ -57,14 +58,16 @@ class ComposedArtificialDataset(PerSampleDataset):
         deformation: str | None = None,
         rigid: str | None = None,
         class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
+        noise: NoiseConfig | None = None,
         sample_list: list[int] | None = None,
     ) -> None:
         self.root = Path(root)
         self.recipe = Recipe(
-            tuple(plaques),
-            deformation,
-            rigid,
-            class_intensities,
+            plaques=tuple(plaques),
+            deformation=deformation,
+            rigid=rigid,
+            class_intensities=class_intensities,
+            noise=noise,
         )
         self.config = get_source_config(self.root)
         self._empty_artery = np.load(self.root / "empty_artery.npy", mmap_mode="r")
@@ -112,6 +115,7 @@ class ComposedArtificialDataset(PerSampleDataset):
             deformation=recipe.deformation,
             rigid=recipe.rigid,
             class_intensities=recipe.class_intensities,
+            noise=recipe.noise,
             sample_list=sample_list,
         )
 
@@ -142,6 +146,8 @@ class ComposedArtificialDataset(PerSampleDataset):
             self._class_intensities,
             deformation_field=field,
             rigid_parameters=rigid_parameters,
+            noise_config=self.recipe.noise,
+            sample_index=index,
         )
         sample = Sample(
             image=torch.from_numpy(arrays.image[None]),

@@ -10,10 +10,10 @@ from typing import Any, ClassVar, Self
 
 from .rendering import DEFAULT_CLASS_INTENSITIES
 from .storage import write_json
-from .types import AppearanceKind, ArteryClass, SavedPlaque
+from .types import AppearanceKind, ArteryClass, NoiseConfig, SavedPlaque
 
 RECIPE_FORMAT_NAME = "composed-artificial-recipe"
-RECIPE_FORMAT_VERSION = 1
+RECIPE_FORMAT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,7 @@ class Recipe:
     class_intensities: Mapping[AppearanceKind, float] = field(
         default_factory=lambda: DEFAULT_CLASS_INTENSITIES
     )
+    noise: NoiseConfig | None = None
 
     format_version: ClassVar[int] = RECIPE_FORMAT_VERSION
 
@@ -75,6 +76,9 @@ class Recipe:
         ordered = dict(sorted(intensities.items(), key=lambda item: item[0].value))
         object.__setattr__(self, "class_intensities", MappingProxyType(ordered))
 
+        if self.noise is not None and not isinstance(self.noise, NoiseConfig):
+            raise TypeError("recipe noise must be a NoiseConfig instance or None")
+
     def to_dict(self) -> dict[str, Any]:
         """Return the stable, human-readable JSON representation."""
         return {
@@ -98,12 +102,13 @@ class Recipe:
                 kind.name.lower(): intensity
                 for kind, intensity in self.class_intensities.items()
             },
+            "noise": None if self.noise is None else self.noise.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Self:
         """Decode and strictly validate a recipe JSON object."""
-        expected = {
+        common_fields = {
             "format_name",
             "format_version",
             "plaques",
@@ -111,11 +116,15 @@ class Recipe:
             "rigid",
             "class_intensities",
         }
-        if not isinstance(value, dict) or value.keys() != expected:
+        if not isinstance(value, dict) or not common_fields <= value.keys():
             raise ValueError("invalid Recipe fields")
         if value["format_name"] != RECIPE_FORMAT_NAME:
             raise ValueError("unsupported recipe format")
-        if value["format_version"] != RECIPE_FORMAT_VERSION:
+        version = value["format_version"]
+        expected = common_fields if version == 1 else common_fields | {"noise"}
+        if value.keys() != expected:
+            raise ValueError("invalid Recipe fields")
+        if version not in (1, RECIPE_FORMAT_VERSION):
             raise ValueError("unsupported recipe format version")
         plaques_value = value["plaques"]
         intensities_value = value["class_intensities"]
@@ -149,6 +158,11 @@ class Recipe:
                 deformation=value["deformation"],
                 rigid=value["rigid"],
                 class_intensities=intensities,
+                noise=(
+                    None
+                    if version == 1 or value["noise"] is None
+                    else NoiseConfig.from_dict(value["noise"])
+                ),
             )
         except (AttributeError, KeyError, TypeError) as error:
             raise ValueError("invalid Recipe value") from error
