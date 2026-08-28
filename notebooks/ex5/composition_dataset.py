@@ -149,6 +149,7 @@ fake_plaque_range = PowerPlaqueSamplingRanges(
     inward_depth_fraction=FloatRange(0.12, 0.15),
     shape_power=FloatRange.fixed(2),
     wall_depth_fraction=FloatRange.fixed(0.1),
+    offset_px_lumen=FloatRange.fixed(-5),
 )
 
 
@@ -169,18 +170,15 @@ real_parameters = plaque_range1.sample(
     wall_thickness_px=artery_config.wall_thickness_px,
     rng=rng,
 )
-fake_lumen_radius_px = artery_config.lumen_radius_px - 5
 fake_parameters = fake_plaque_range.sample(
     5,
-    lumen_radius_px=fake_lumen_radius_px,
+    lumen_radius_px=artery_config.lumen_radius_px,
     wall_thickness_px=artery_config.wall_thickness_px,
     rng=rng,
 )
 plaque_layers = (
     PlaqueLayer(
-        create_power_plaque_mask(
-            fake_parameters, artery_config, lumen_radius_px=fake_lumen_radius_px
-        ),
+        create_power_plaque_mask(fake_parameters, artery_config),
         ArteryClass.LUMEN,
         AppearanceKind.PLAQUE,
     ),

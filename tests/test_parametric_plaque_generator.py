@@ -99,6 +99,7 @@ def test_sampling_resolves_relative_depths_to_pixels() -> None:
         inward_depth_fraction=FloatRange.fixed(0.2),
         wall_depth_fraction=FloatRange.fixed(0.4),
         shape_power=FloatRange.fixed(0.75),
+        offset_px_lumen=FloatRange.fixed(-5),
     )
 
     parameters = ranges.sample(
@@ -115,8 +116,35 @@ def test_sampling_resolves_relative_depths_to_pixels() -> None:
             inward_depth_px=10,
             wall_depth_px=4,
             shape_power=0.75,
+            offset_px_lumen=-5,
         ),
     )
+
+
+def test_negative_lumen_offset_moves_plaque_inside_lumen() -> None:
+    config = EmptyArteryConfig(20, 5, (65, 65))
+    parameters = (
+        PowerPlaqueParameters(
+            angle_rad=0,
+            angular_width_rad=0.5,
+            inward_depth_px=2,
+            wall_depth_px=1,
+            offset_px_lumen=-5,
+        ),
+    )
+
+    mask = create_power_plaque_mask(parameters, config)
+
+    assert mask[32, 47]  # radius 15: shifted plaque centerline
+    assert not mask[32, 52]  # radius 20: actual lumen boundary
+
+
+def test_lumen_offset_must_leave_a_positive_base_radius() -> None:
+    config = EmptyArteryConfig(20, 5, (65, 65))
+    parameters = (PowerPlaqueParameters(0, 0.5, 2, 1, offset_px_lumen=-20),)
+
+    with pytest.raises(ValueError, match="offset_px_lumen"):
+        create_power_plaque_mask(parameters, config)
 
 
 def test_sampling_multiple_parameters_repeats_with_same_seed() -> None:

@@ -67,6 +67,7 @@ def test_generate_power_plaque_collection_writes_masks_and_parameters(
         inward_depth_fraction=FloatRange.fixed(0.25),
         wall_depth_fraction=FloatRange.fixed(0.2),
         shape_power=FloatRange.fixed(0.5),
+        offset_px_lumen=FloatRange.fixed(-2),
     )
 
     generate_plaque_masks_power(tmp_path, "narrow", config, ranges, seed=7)
@@ -81,6 +82,7 @@ def test_generate_power_plaque_collection_writes_masks_and_parameters(
     assert masks.any(axis=(1, 2)).all()
     assert [record["sample_index"] for record in records] == [0, 1, 2]
     assert records[0]["plaques"][0]["parameters"]["inward_depth_px"] == 5
+    assert records[0]["plaques"][0]["parameters"]["offset_px_lumen"] == -2
 
 
 def test_plaque_sample_seed_is_independent_of_collection_length(tmp_path) -> None:

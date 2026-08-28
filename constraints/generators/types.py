@@ -173,7 +173,9 @@ class PowerPlaqueSamplingRanges:
 
     Angular measurements are in radians. ``inward_depth_fraction`` is relative
     to the lumen radius and ``wall_depth_fraction`` is relative to wall
-    thickness. Sampling resolves both fractions to pixels.
+    thickness. Sampling resolves both fractions to pixels. ``offset_px_lumen``
+    is a signed radial offset from the lumen boundary: negative values move a
+    plaque into the lumen and positive values move it into the wall.
 
     Angles do not need to be normalized to ``[-pi, pi]``. To cross the wrap
     point, use an unwrapped range such as 350 to 370 degrees in radians.
@@ -184,6 +186,7 @@ class PowerPlaqueSamplingRanges:
     inward_depth_fraction: FloatRange = FloatRange(0.05, 0.3)
     wall_depth_fraction: FloatRange = FloatRange(0.1, 0.5)
     shape_power: FloatRange = FloatRange(0.25, 2.0)
+    offset_px_lumen: FloatRange = FloatRange.fixed(0.0)
 
     def __post_init__(self) -> None:
         if self.angular_width_rad.minimum <= 0:
@@ -230,6 +233,7 @@ class PowerPlaqueSamplingRanges:
                     self.wall_depth_fraction.sample(rng) * wall_thickness_px
                 ),
                 shape_power=self.shape_power.sample(rng),
+                offset_px_lumen=self.offset_px_lumen.sample(rng),
             )
             for _ in range(num)
         )
@@ -242,6 +246,8 @@ class PowerPlaqueParameters:
     Depths are resolved pixel measurements. ``shape_power=0.5`` produces the
     familiar square-root profile of an ellipse in local angular/radial
     coordinates. Larger values concentrate the plaque around its central angle.
+    ``offset_px_lumen`` is added to the lumen radius before both radial
+    boundaries are constructed.
     """
 
     angle_rad: float
@@ -249,6 +255,7 @@ class PowerPlaqueParameters:
     inward_depth_px: float
     wall_depth_px: float
     shape_power: float = 0.5
+    offset_px_lumen: float = 0.0
 
     def __post_init__(self) -> None:
         values = (
@@ -257,6 +264,7 @@ class PowerPlaqueParameters:
             self.inward_depth_px,
             self.wall_depth_px,
             self.shape_power,
+            self.offset_px_lumen,
         )
         if not all(isfinite(value) for value in values):
             raise ValueError("all power-plaque parameters must be finite")

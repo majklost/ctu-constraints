@@ -135,18 +135,21 @@ def create_power_plaque(
     """Turn serializable parameters into a callable runtime plaque spec."""
     if not isfinite(lumen_radius_px) or lumen_radius_px <= 0:
         raise ValueError("lumen_radius_px must be finite and positive")
+    base_radius_px = lumen_radius_px + parameters.offset_px_lumen
+    if base_radius_px <= 0:
+        raise ValueError("lumen_radius_px + offset_px_lumen must be positive")
 
     return _PlaqueSpec(
         angle_rad=parameters.angle_rad,
         angular_width_rad=parameters.angular_width_rad,
         inner_radius=_PowerRadialBoundary(
-            base_radius_px=lumen_radius_px,
+            base_radius_px=base_radius_px,
             signed_depth_px=-parameters.inward_depth_px,
             angular_width_rad=parameters.angular_width_rad,
             shape_power=parameters.shape_power,
         ),
         outer_radius=_PowerRadialBoundary(
-            base_radius_px=lumen_radius_px,
+            base_radius_px=base_radius_px,
             signed_depth_px=parameters.wall_depth_px,
             angular_width_rad=parameters.angular_width_rad,
             shape_power=parameters.shape_power,
