@@ -8,6 +8,11 @@ from typing import Self
 import torch
 import torch.nn.functional
 
+from constraints.datatools.datasets.artery_common_types import (
+    ArtificialMaskColor,
+    ArtificialMaskLabel,
+)
+
 
 @dataclass(frozen=True)
 class LabelSchema:
@@ -157,6 +162,12 @@ class LabelSchema:
             has_foreground,
             labels,
             torch.full_like(labels, self.background_id),
+        )
+
+    @staticmethod
+    def as_artery():
+        return LabelSchema.from_lists(
+            names=ArtificialMaskLabel, colors=ArtificialMaskColor
         )
 
 

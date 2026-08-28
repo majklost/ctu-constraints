@@ -41,6 +41,7 @@ from constraints.generators.types import (
     SavedPlaque,
     SourceConfig,
 )
+from constraints.utils import get_data_folder
 
 DEFAULT_NUM_SAMPLES = 5_000
 DEFAULT_TRAIN_SIZE = 2_000
@@ -447,8 +448,9 @@ def _print_storage_estimate(config: SourceConfig, *, include_sdf: bool) -> None:
 
 
 def parse_args():
+
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("root", type=Path)
+    parser.add_argument("name", type=Path)
     parser.add_argument("--num-samples", type=int, default=DEFAULT_NUM_SAMPLES)
     parser.add_argument("--train-size", type=int, default=DEFAULT_TRAIN_SIZE)
     parser.add_argument("--val-size", type=int, default=DEFAULT_VAL_SIZE)
@@ -467,8 +469,9 @@ def parse_args():
 
 def main() -> None:
     args = parse_args()
+    DEFAULT_PATH = get_data_folder() / "artificial"
     prepare_dataset(
-        args.root,
+        DEFAULT_PATH / args.name,
         num_samples=args.num_samples,
         train_size=args.train_size,
         val_size=args.val_size,

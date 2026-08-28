@@ -285,6 +285,7 @@ class _ConstraintViolationTerm(MetricTerm, ABC):
         label_schema: LabelSchema,
         blob_threshold: int = 50,
         check_wall_integrity: bool = True,
+        max_ignored_enclosed_background_area: int = 2,
         track_violating_samples: bool = False,
     ) -> None:
         super().__init__(label_schema)
@@ -294,6 +295,7 @@ class _ConstraintViolationTerm(MetricTerm, ABC):
             label_schema=label_schema,
             blob_threshold=blob_threshold,
             check_wall_integrity=check_wall_integrity,
+            max_ignored_enclosed_background_area=(max_ignored_enclosed_background_area),
         )
         self._track_violating_samples = track_violating_samples
 

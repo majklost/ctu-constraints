@@ -141,6 +141,8 @@ def create_plaque_collection(
 
     This is the script-facing API. It resolves the source configuration and
     storage location, then dispatches to the configured plaque generator.
+    
+    source_root - root of whole dataset
     """
     source_root = Path(source_root)
     config = get_source_config(source_root)

@@ -57,6 +57,7 @@ class ComposedArtificialDataset(PerSampleDataset):
         deformation: str | None = None,
         rigid: str | None = None,
         class_intensities: Mapping[AppearanceKind, float] = DEFAULT_CLASS_INTENSITIES,
+        sample_list: list[int] | None = None,
     ) -> None:
         self.root = Path(root)
         self.recipe = Recipe(
@@ -92,12 +93,15 @@ class ComposedArtificialDataset(PerSampleDataset):
             (plaque, self._load_plaque_collection(plaque.name))
             for plaque in self.recipe.plaques
         )
+        self._sample_list = (
+            sample_list
+            if sample_list is not None
+            else list(range(self.config.num_elements))
+        )
 
     @classmethod
     def from_recipe(
-        cls,
-        root: Path,
-        recipe: Recipe,
+        cls, root: Path, recipe: Recipe, sample_list: list[int] | None = None
     ) -> ComposedArtificialDataset:
         """Load a dataset from an explicit artifact-selection recipe."""
         if not isinstance(recipe, Recipe):
@@ -108,10 +112,11 @@ class ComposedArtificialDataset(PerSampleDataset):
             deformation=recipe.deformation,
             rigid=recipe.rigid,
             class_intensities=recipe.class_intensities,
+            sample_list=sample_list,
         )
 
     def __len__(self) -> int:
-        return self.config.num_elements
+        return len(self._sample_list)
 
     def __getitem__(self, index: int) -> Sample:
         index = self._normalize_index(index)
@@ -185,9 +190,4 @@ class ComposedArtificialDataset(PerSampleDataset):
         return masks
 
     def _normalize_index(self, index: int) -> int:
-        index = int(index)
-        if index < 0:
-            index += len(self)
-        if not 0 <= index < len(self):
-            raise IndexError(index)
-        return index
+        return self._sample_list[index]

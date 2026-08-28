@@ -36,6 +36,7 @@ from constraints.generators.types import (
 )
 
 from constraints import get_experiment_folder
+import torch
 
 FOLDER = get_experiment_folder("ex5/fake")
 print(FOLDER.absolute)
@@ -48,10 +49,15 @@ WALL_DEPTH_PX = 0
 rng = np.random.default_rng(25)
 
 # %%
+from constraints.generators.types import DeformationConfig, RigidConfig
+
+
 fake_plaque_range = PowerPlaqueSamplingRanges(
-    inward_depth_fraction=FloatRange(0.12, 0.15),
-    shape_power=FloatRange.fixed(2),
-    wall_depth_fraction=FloatRange.fixed(0.1),
+    angle_rad=FloatRange(np.pi / 3, 2*np.pi-2*np.pi / 3),
+    angular_width_rad=FloatRange.fixed(np.pi / 5),
+    inward_depth_fraction=FloatRange(0.2, 0.3),
+    shape_power=FloatRange.fixed(0.5),
+    wall_depth_fraction=FloatRange.fixed(0),
 )
 plaque_range1 = PowerPlaqueSamplingRanges(
     angle_rad=FloatRange(-np.pi / 3, -np.pi / 10),
@@ -67,12 +73,16 @@ plaque_range2 = PowerPlaqueSamplingRanges(
     shape_power=FloatRange.fixed(0.5),
     wall_depth_fraction=FloatRange.fixed(0),
 )
+dc = DeformationConfig()
+rc = RigidConfig(dx=FloatRange.fixed(0),dy=FloatRange.fixed(0))
 
 # %%
 artery_config = EmptyArteryConfig(LUMEN_RADIUS_PX, WALL_THICKNESS_PX, IMAGE_SIZE)
-fake_lumen_radius_px = LUMEN_RADIUS_PX - 5
+from constraints.datatools.label_schema import LabelSchema
+from constraints.losses_metrics.constraint_function import does_violation_occur_with_wall
+fake_lumen_radius_px = LUMEN_RADIUS_PX - 3
 fake_params = fake_plaque_range.sample(
-    8,
+    2,
     lumen_radius_px=fake_lumen_radius_px,
     wall_thickness_px=WALL_THICKNESS_PX,
     rng=rng,
@@ -92,10 +102,14 @@ layers = (
     ),
     PlaqueLayer(create_power_plaque_mask(real_params, artery_config)),
 )
-sample = preview_artificial_sample(artery_config, layers, seed=25)
+sample = preview_artificial_sample(artery_config, layers, deformation_config=dc, seed=np.random.randint(0,1000),rigid_config=rc)
 label_map = sample.target_labels
 plt.imshow(label_map)
-plt.savefig(FOLDER / ("mask" + str(fake_params[0].shape_power)))
+plt.show()
+plt.imshow(sample.image,cmap="gray")
+plt.show()
+print(does_violation_occur_with_wall(torch.from_numpy(label_map), LabelSchema.as_artery()))
+# plt.savefig(FOLDER / ("mask" + str(fake_params[0].shape_power)))
 
 
 # %%

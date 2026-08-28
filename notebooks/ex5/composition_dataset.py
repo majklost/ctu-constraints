@@ -35,11 +35,23 @@ from constraints.datatools.datasets import ComposedArtificialDataset, SavedPlaqu
 
 # %%
 from constraints.generators.recipes import Recipe
+from constraints.losses_metrics.constraint_function import does_violation_occur_no_wall, does_violation_occur_with_wall
 
 
-source_root = get_data_folder() / "artificial" / "test"
-dataset = ComposedArtificialDataset.from_recipe(source_root,Recipe.load_json(source_root/"recipes/default.json"))
+source_root = get_data_folder() / "artificial" / "samples5000"
+dataset = ComposedArtificialDataset.from_recipe(source_root,Recipe.load_json(source_root/"recipes/tworeal_fake_similar.json"))
 print(f"Loaded {len(dataset)} samples from {source_root}")
+
+# %%
+for i in range(len(dataset)):
+    d= dataset[i]
+    out = does_violation_occur_with_wall(d['target_labels'],dataset.label_schema)
+    if out[0]:
+        print(f"Sample {i}, violations:")
+        for s in out[1]:
+            print(s)
+        # plt.imshow(d["target_labels"])
+        # plt.show()
 
 # %%
 

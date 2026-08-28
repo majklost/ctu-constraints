@@ -1,9 +1,10 @@
+from typing import cast
+
 import numpy as np
 import torch
-from typing import cast
 from scipy.ndimage import binary_dilation, generate_binary_structure, label
-from ..datatools.label_schema import LabelSchema
 
+from ..datatools.label_schema import LabelSchema
 
 
 def _label_components(mask: np.ndarray, structure: np.ndarray) -> tuple[np.ndarray, int]:
@@ -27,6 +28,7 @@ def does_violation_occur_with_wall(
     label_schema: LabelSchema,
     blob_threshold: int = 50,
     check_wall_integrity: bool = True,
+    max_ignored_enclosed_background_area: int = 2,
 ) -> tuple[bool, list[str]]:
     """Check Violations according to the following rules for 4-class vessel segmentation:
     
@@ -43,8 +45,10 @@ def does_violation_occur_with_wall(
       has a hole, tear, or missing segment that allows BG to leak inside).
     - Rule 3 (Plaque Placement): Plaque is floating inside Lumen without touching the Wall,
       or Plaque is embedded in Wall without touching the Lumen.
-    - Rule 4 (Background Flow): Background component is enclosed inside the vessel/wall structure
-      and does not touch the outer image edge.
+    - Rule 4 (Background Flow): A visible Background component is enclosed inside the
+      vessel/wall structure and does not touch the outer image edge. Diagonal paths count
+      as connected and components no larger than ``max_ignored_enclosed_background_area``
+      are treated as invisible rasterization artifacts.
     - Rule 5 (Wall Structure): Wall is split into more than one significant connected component
       (i.e. broken or fragmented ring).
 
@@ -52,11 +56,16 @@ def does_violation_occur_with_wall(
         - prediction: (H, W) or (1, H, W) tensor with values from ARTIFICIAL_MASK_LABEL_IDS
             representing the predicted segmentation mask
     - blob_threshold: minimum number of pixels required for a connected component to be considered a detection
+    - max_ignored_enclosed_background_area: largest enclosed Background component,
+        in pixels, ignored as visually insignificant
     
     OUTPUT:
     - violation_occurred: bool indicating whether a violation occurred
     - violation_details: list of strings describing the specific violations that were found
     """
+    if max_ignored_enclosed_background_area < 0:
+        raise ValueError("max_ignored_enclosed_background_area must be >= 0")
+
     violations = []
 
     # Move to CPU and convert to NumPy for morphological operations
@@ -65,9 +74,6 @@ def does_violation_occur_with_wall(
     # Connectivity structures:
     # 8-connectivity for component grouping & spatial adjacency
     s8 = generate_binary_structure(2, 2)
-    # 4-connectivity for background enclosure checks to avoid diagonal leakage
-    s4 = generate_binary_structure(2, 1)
-
     name_to_id = {name: class_id for class_id, name in label_schema.names.items()}
     required_names = {"background", "boundary", "lumen", "plaque"}
     if not required_names <= name_to_id.keys():
@@ -137,7 +143,7 @@ def does_violation_occur_with_wall(
     # ---------------------------------------------------------
     # Rule 4: Background must not be trapped inside
     # ---------------------------------------------------------
-    bg_labeled, num_bg = _label_components(bg_mask, structure=s4)
+    bg_labeled, num_bg = _label_components(bg_mask, structure=s8)
 
     for i in range(1, num_bg + 1):
         comp_mask = bg_labeled == i
@@ -149,9 +155,15 @@ def does_violation_occur_with_wall(
             or np.any(comp_mask[:, -1])
         )
 
-        if not touches_edge:
+        component_area = int(np.count_nonzero(comp_mask))
+        if (
+            not touches_edge
+            and component_area > max_ignored_enclosed_background_area
+        ):
             violations.append(
-                f"Background constraint violated: Background component {i} is enclosed and does not touch the image edge."
+                "Background constraint violated: "
+                f"Background component {i} is enclosed, has area {component_area} px, "
+                "and does not touch the image edge."
             )
 
     # ---------------------------------------------------------
@@ -275,4 +287,3 @@ def does_violation_occur_no_wall(
             )
 
     return len(violations) > 0, violations
-

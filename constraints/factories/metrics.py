@@ -21,6 +21,7 @@ def _validation_metrics(
     label_schema: LabelSchema,
     blob_threshold: int,
     check_wall_integrity: bool,
+    max_ignored_enclosed_background_area: int,
 ) -> list:
     return [
         *_iou_metrics(label_schema),
@@ -29,11 +30,13 @@ def _validation_metrics(
             label_schema,
             blob_threshold=blob_threshold,
             check_wall_integrity=check_wall_integrity,
+            max_ignored_enclosed_background_area=(max_ignored_enclosed_background_area),
         ),
         RegistrationConstraintViolationTerm(
             label_schema,
             blob_threshold=blob_threshold,
             check_wall_integrity=check_wall_integrity,
+            max_ignored_enclosed_background_area=(max_ignored_enclosed_background_area),
         ),
     ]
 
@@ -43,6 +46,7 @@ def create_default_staged_metrics(
     *,
     blob_threshold: int = 50,
     check_wall_integrity: bool = True,
+    max_ignored_enclosed_background_area: int = 2,
 ) -> StagedMetricComputer:
     """Build the former default metrics using independent state per stage.
 
@@ -53,13 +57,28 @@ def create_default_staged_metrics(
         {
             "train": CompositeMetric(_iou_metrics(label_schema)),
             "val": CompositeMetric(
-                _validation_metrics(label_schema, blob_threshold, check_wall_integrity)
+                _validation_metrics(
+                    label_schema,
+                    blob_threshold,
+                    check_wall_integrity,
+                    max_ignored_enclosed_background_area,
+                )
             ),
             "val_extra": CompositeMetric(
-                _validation_metrics(label_schema, blob_threshold, check_wall_integrity)
+                _validation_metrics(
+                    label_schema,
+                    blob_threshold,
+                    check_wall_integrity,
+                    max_ignored_enclosed_background_area,
+                )
             ),
             "test": CompositeMetric(
-                _validation_metrics(label_schema, blob_threshold, check_wall_integrity)
+                _validation_metrics(
+                    label_schema,
+                    blob_threshold,
+                    check_wall_integrity,
+                    max_ignored_enclosed_background_area,
+                )
             ),
         }
     )

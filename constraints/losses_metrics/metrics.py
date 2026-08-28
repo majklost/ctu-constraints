@@ -15,11 +15,15 @@ class ConstraintViolationCounter(Metric):
         label_schema: LabelSchema,
         blob_threshold: int,
         check_wall_integrity: bool = True,
+        max_ignored_enclosed_background_area: int = 2,
     ) -> None:
         super().__init__()
         self._label_schema = label_schema
         self._blob_threshold = blob_threshold
         self._check_wall_integrity = check_wall_integrity
+        self._max_ignored_enclosed_background_area = (
+            max_ignored_enclosed_background_area
+        )
         self.add_state(
             "violating_samples",
             default=torch.tensor(0, dtype=torch.long),
@@ -55,10 +59,13 @@ class ConstraintViolationCounter(Metric):
             for prediction in predictions
             for occurred, details in [
                 does_violation_occur_with_wall(
-                prediction,
-                label_schema=self._label_schema,
-                blob_threshold=self._blob_threshold,
-                check_wall_integrity=self._check_wall_integrity,
+                    prediction,
+                    label_schema=self._label_schema,
+                    blob_threshold=self._blob_threshold,
+                    check_wall_integrity=self._check_wall_integrity,
+                    max_ignored_enclosed_background_area=(
+                        self._max_ignored_enclosed_background_area
+                    ),
                 )
             ]
         )
