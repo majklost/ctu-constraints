@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from constraints.devices import DeviceSelection, resolve_compute_device
 from constraints.voxelmorph.utils import random_disp, spatial_transform
 
+from .progress import track
 from .storage import write_json
 from .types import DeformationConfig, DeformationRejectionConfig, SourceConfig
 from .validation import DeformationValidationResult, validate_deformation
@@ -158,6 +159,7 @@ def generate_deformation_fields(
     *,
     seed: int,
     device: DeviceSelection = "auto",
+    progress: bool = False,
 ) -> tuple[Path, Path]:
     """Generate one mmap-friendly ``[N, 2, H, W]`` deformation collection."""
     folder = Path(folder)
@@ -190,7 +192,11 @@ def generate_deformation_fields(
     accepted_diagnostics: list[DeformationValidationResult] = []
     rejected_candidate_count = 0
     try:
-        for sample_index in range(source_config.num_elements):
+        for sample_index in track(
+            range(source_config.num_elements),
+            enabled=progress,
+            description=f"Deformation {name}",
+        ):
             sample = sample_valid_deformation(
                 source_labels,
                 config,

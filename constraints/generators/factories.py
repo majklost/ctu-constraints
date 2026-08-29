@@ -155,6 +155,8 @@ def create_layer_collection(
     source_root: Path,
     name: str,
     backup: LayerBackup,
+    *,
+    progress: bool = False,
 ) -> Path:
     """Materialize one named layer using its registered resolver."""
     source_root = Path(source_root)
@@ -173,7 +175,9 @@ def create_layer_collection(
         definition=backup.to_dict(),
         status="preparing",
     )
-    result = materialize_layer_collection(source_root, name, config, backup)
+    result = materialize_layer_collection(
+        source_root, name, config, backup, progress=progress
+    )
     write_artifact_metadata(
         metadata_path,
         kind="layer-collection",
@@ -192,6 +196,7 @@ def create_deformation_collection(
     *,
     seed: int,
     device: DeviceSelection = "auto",
+    progress: bool = False,
 ) -> tuple[Path, Path]:
     """Create one named deformation collection inside a source dataset."""
     source_root = Path(source_root)
@@ -221,6 +226,7 @@ def create_deformation_collection(
         rejection,
         seed=seed,
         device=device,
+        progress=progress,
     )
     write_artifact_metadata(
         metadata_path,
@@ -240,6 +246,7 @@ def create_rigid_collection(
     *,
     deformation: str | None = None,
     seed: int,
+    progress: bool = False,
 ) -> tuple[Path, Path]:
     """Create a source-level or deformation-dependent rigid preset."""
     source_root = Path(source_root)
@@ -286,6 +293,7 @@ def create_rigid_collection(
         config,
         rejection,
         seed=seed,
+        progress=progress,
     )
     write_artifact_metadata(
         metadata_path,

@@ -58,6 +58,7 @@ def ensure_recipe(
     overwrite: bool = False,
     device: DeviceSelection = "auto",
     sdf_batch_size: int = 16,
+    progress: bool = False,
 ) -> EnsureReport:
     """Preflight the complete recipe, then execute the resulting action plan."""
     root = recipe.resolve_source_root(source_root)
@@ -87,11 +88,11 @@ def ensure_recipe(
             replaced.append(action.label)
         else:
             created.append(action.label)
-        _create_action(action, recipe, root, device)
+        _create_action(action, recipe, root, device, progress)
 
     if geometry_changes:
         _invalidate_sdf_caches(root)
-    sdf_path = _ensure_sdf(recipe, root, sdf_batch_size, device)
+    sdf_path = _ensure_sdf(recipe, root, sdf_batch_size, device, progress)
     return EnsureReport(
         created=tuple(created),
         replaced=tuple(replaced),
@@ -247,11 +248,13 @@ def _remove_action(action: _Action) -> None:
     action.metadata_path.unlink(missing_ok=True)
 
 
-def _create_action(action, recipe, root, device) -> None:
+def _create_action(action, recipe, root, device, progress) -> None:
     if action.backup is None:
         return
     if action.kind == "layer":
-        create_layer_collection(root, action.name, action.backup)
+        create_layer_collection(
+            root, action.name, action.backup, progress=progress
+        )
     elif action.kind == "deformation":
         create_deformation_collection(
             root,
@@ -260,6 +263,7 @@ def _create_action(action, recipe, root, device) -> None:
             action.backup.rejection,
             seed=action.backup.seed,
             device=device,
+            progress=progress,
         )
     else:
         create_rigid_collection(
@@ -269,6 +273,7 @@ def _create_action(action, recipe, root, device) -> None:
             action.backup.rejection,
             deformation=recipe.deformation_name,
             seed=action.backup.seed,
+            progress=progress,
         )
 
 
@@ -281,7 +286,7 @@ def _invalidate_sdf_caches(root: Path) -> None:
             shutil.rmtree(path)
 
 
-def _ensure_sdf(recipe, root, batch_size, device) -> Path | None:
+def _ensure_sdf(recipe, root, batch_size, device, progress) -> Path | None:
     if recipe.sdf_cache is None:
         return None
     geometry_recipe = Recipe(
@@ -301,6 +306,10 @@ def _ensure_sdf(recipe, root, batch_size, device) -> Path | None:
             raise RuntimeError(f"incomplete or incompatible SDF cache: {folder}")
         return folder / "sdf.npy"
     array_path, _ = create_sdf_cache(
-        dataset, recipe.sdf_cache, batch_size=batch_size, device=device
+        dataset,
+        recipe.sdf_cache,
+        batch_size=batch_size,
+        device=device,
+        progress=progress,
     )
     return array_path

@@ -1,5 +1,8 @@
 import numpy as np
+import torch
 
+from constraints.datatools.label_schema import LabelSchema
+from constraints.generators.composition import compose_layers
 from constraints.generators.factories import (
     create_layer_collection,
     get_source_config,
@@ -7,14 +10,21 @@ from constraints.generators.factories import (
 from constraints.generators.layer_generators import (
     LayerPatch,
     PowerPlaqueSamplingRanges,
+    bubble_cavity_layer_backup,
+    create_empty_artery,
     power_layer_backup,
     register_layer_resolver,
+    resolve_layer_patch,
 )
 from constraints.generators.recipe_backups import LayerBackup
 from constraints.generators.source import create_source
 from constraints.generators.types import (
     EmptyArteryConfig,
+    FloatRange,
     SourceConfig,
+)
+from constraints.losses_metrics.constraint_function import (
+    does_violation_occur_with_wall,
 )
 
 
@@ -60,3 +70,71 @@ def test_registered_resolver_can_store_independent_patches(tmp_path) -> None:
     image = np.load(folder / "image.npy")
     assert (labels[0] >= 0).sum() == 1
     assert np.isfinite(image[0]).sum() == 2
+
+
+def test_bubble_cavity_layer_is_deterministic_and_best_effort(tmp_path) -> None:
+    config = SourceConfig(num_elements=1)
+    plaque_range = PowerPlaqueSamplingRanges(
+        angular_width_rad=FloatRange.fixed(2.5),
+        inward_depth_fraction=FloatRange.fixed(0.6),
+        wall_depth_fraction=FloatRange.fixed(0.2),
+    )
+    backup = bubble_cavity_layer_backup(
+        plaque_range,
+        seed=17,
+        bubbles_per_kind=100,
+        maximum_attempts=1,
+        plaque_blur_sigma_px=1.5,
+    )
+
+    first = resolve_layer_patch(backup, tmp_path, config, 0)
+    second = resolve_layer_patch(backup, tmp_path, config, 0)
+
+    assert np.array_equal(first.labels, second.labels)
+    assert np.array_equal(first.image, second.image, equal_nan=True)
+    plaque_image = first.image[first.labels >= 0]
+    assert np.any((plaque_image > 0.25) & (plaque_image < 1.0))
+
+
+def test_bubble_cavity_ground_truth_never_creates_floating_plaque(tmp_path) -> None:
+    config = SourceConfig(num_elements=10)
+    artery = create_empty_artery(config.empty_artery)
+    backup = bubble_cavity_layer_backup(
+        PowerPlaqueSamplingRanges(
+            angular_width_rad=FloatRange(2.0, 2.6),
+            inward_depth_fraction=FloatRange(0.45, 0.65),
+            wall_depth_fraction=FloatRange(0.05, 0.25),
+        ),
+        seed=81,
+        bubbles_per_kind=3,
+        minimum_plaque_separation_px=5,
+    )
+
+    for index in range(config.num_elements):
+        patch = resolve_layer_patch(backup, tmp_path, config, index)
+        labels = compose_layers(artery, (patch,)).target_labels
+        violation, details = does_violation_occur_with_wall(
+            torch.from_numpy(labels), LabelSchema.as_artery()
+        )
+        assert not violation, details
+
+
+def test_hard_bubble_render_does_not_leave_plaque_inside_bites(tmp_path) -> None:
+    config = SourceConfig(num_elements=1)
+    backup = bubble_cavity_layer_backup(
+        PowerPlaqueSamplingRanges(
+            angular_width_rad=FloatRange.fixed(2.5),
+            inward_depth_fraction=FloatRange.fixed(0.6),
+            wall_depth_fraction=FloatRange.fixed(0.2),
+        ),
+        seed=81,
+        bubbles_per_kind=3,
+        plaque_blur_sigma_px=0,
+        bubble_blur_sigma_px=0,
+    )
+
+    patch = resolve_layer_patch(backup, tmp_path, config, 0)
+    bite_pixels = patch.labels == 2
+
+    assert np.any(bite_pixels)
+    assert np.all(patch.image[bite_pixels] == 0.25)

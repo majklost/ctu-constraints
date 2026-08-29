@@ -31,23 +31,29 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 from constraints import get_data_folder
-from constraints.utils import get_repo_root
 from constraints.datatools.datasets import ComposedArtificialDataset, SavedLayer
 
 # %%
 from constraints.generators.recipes import Recipe
-from constraints.losses_metrics.constraint_function import does_violation_occur_no_wall, does_violation_occur_with_wall
-
+from constraints.losses_metrics.constraint_function import (
+    does_violation_occur_no_wall,
+    does_violation_occur_with_wall,
+)
+from constraints.utils import get_repo_root
 
 source_root = get_data_folder() / "artificial" / "samples5000"
-recipe_path = get_repo_root() / "recipes/artificial/tworeal_fake_similar.json"
-dataset = ComposedArtificialDataset.from_recipe(source_root,Recipe.load_json(recipe_path))
+recipe_path = (
+    get_repo_root() / "recipes/artificial/bubble_cavities_overlap_gradient.json"
+)
+dataset = ComposedArtificialDataset.from_recipe(
+    source_root, Recipe.load_json(recipe_path)
+)
 print(f"Loaded {len(dataset)} samples from {source_root}")
 
 # %%
 for i in range(len(dataset)):
-    d= dataset[i]
-    out = does_violation_occur_with_wall(d['target_labels'],dataset.label_schema)
+    d = dataset[i]
+    out = does_violation_occur_with_wall(d["target_labels"], dataset.label_schema)
     if out[0]:
         print(f"Sample {i}, violations:")
         for s in out[1]:
@@ -61,7 +67,9 @@ for i in range(len(dataset)):
 sample_indices = range(6)
 fig, axes = plt.subplots(len(sample_indices), 2, figsize=(8, 18))
 
-cmap = ListedColormap([dataset.label_schema.colors[i] for i in sorted(dataset.label_schema.colors)])
+cmap = ListedColormap(
+    [dataset.label_schema.colors[i] for i in sorted(dataset.label_schema.colors)]
+)
 for row, sample_index in enumerate(sample_indices):
     sample = dataset[sample_index]
     axes[row, 0].imshow(sample["image"].squeeze(), cmap="gray", vmin=0, vmax=1)
@@ -104,6 +112,9 @@ the labels; the Recipe only orders named layers.
 # # Tuning parameters
 
 # %%
+import numpy as np
+from matplotlib import pyplot as plt
+
 from constraints.generators.factories import preview_artificial_sample
 from constraints.generators.layer_generators import (
     MaskLayer,
@@ -113,16 +124,14 @@ from constraints.generators.layer_generators import (
 )
 from constraints.generators.types import (
     AppearanceKind,
-    SourceConfig,
+    ArteryClass,
     DeformationConfig,
     DeformationRejectionConfig,
+    FloatRange,
     RigidConfig,
     RigidRejectionConfig,
-    FloatRange,
-    ArteryClass,
+    SourceConfig,
 )
-from matplotlib import pyplot as plt
-import numpy as np
 
 # %%
 rn = np.random.randint(0, 1000)
@@ -174,14 +183,16 @@ fake_parameters = fake_plaque_range.sample(
     rng=rng,
 )
 layers = (
-    normalize_layer_output(MaskLayer(
-        create_power_plaque_mask(fake_parameters, artery_config),
-        ArteryClass.LUMEN,
-        AppearanceKind.PLAQUE,
-    )),
-    normalize_layer_output(MaskLayer(
-        create_power_plaque_mask(real_parameters, artery_config)
-    )),
+    normalize_layer_output(
+        MaskLayer(
+            create_power_plaque_mask(fake_parameters, artery_config),
+            ArteryClass.LUMEN,
+            AppearanceKind.PLAQUE,
+        )
+    ),
+    normalize_layer_output(
+        MaskLayer(create_power_plaque_mask(real_parameters, artery_config))
+    ),
 )
 
 sample = preview_artificial_sample(
@@ -194,7 +205,7 @@ sample = preview_artificial_sample(
 )
 plt.imshow(sample.target_labels)
 plt.show()
-plt.imshow(sample.image,cmap="grey")
+plt.imshow(sample.image, cmap="grey")
 
 
 # %%

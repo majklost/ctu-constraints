@@ -14,6 +14,7 @@ from constraints.datatools.datasets.types import SDFMode
 from constraints.devices import DeviceSelection
 from constraints.utils import signed_distance_kornia, signed_distance_scipy
 
+from .progress import track
 from .recipes import Recipe
 from .storage import write_json
 from .types import ArteryClass
@@ -188,6 +189,7 @@ def create_sdf_cache(
     *,
     batch_size: int = 16,
     device: DeviceSelection = "auto",
+    progress: bool = False,
 ) -> tuple[Path, Path]:
     """Materialize one content-addressed pre-rigid SDF cache.
 
@@ -226,7 +228,14 @@ def create_sdf_cache(
         shape=(num_elements, num_channels, height, width),
     )
     try:
-        for start in range(0, num_elements, batch_size):
+        starts = range(0, num_elements, batch_size)
+        for start in track(
+            starts,
+            enabled=progress,
+            description="SDF cache",
+            total=len(starts),
+            unit="batch",
+        ):
             stop = min(start + batch_size, num_elements)
             labels = torch.stack(
                 [

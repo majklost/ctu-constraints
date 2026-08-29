@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import isfinite, pi
 from typing import Any, Self
 
 import numpy as np
 
-from ..types import EmptyArteryConfig, FloatArray, FloatRange, SourceConfig
+from ..recipe_backups import LayerBackup
+from ..types import (
+    AppearanceKind,
+    ArteryClass,
+    EmptyArteryConfig,
+    FloatArray,
+    FloatRange,
+    SourceConfig,
+)
 from .rasterizer import CyclicRasterizer, PlaqueSpec
+from .types import LayerResolverContext, MaskLayer
 
 
 @dataclass(frozen=True)
@@ -219,3 +229,50 @@ def sample_power_plaque_mask(
         parameters,
         sample_seed,
     )
+
+
+def power_layer_backup(
+    ranges: PowerPlaqueSamplingRanges
+    | tuple[PowerPlaqueSamplingRanges, ...]
+    | None = None,
+    *,
+    seed: int,
+    lumen_radius_px: float | None = None,
+    target_class: ArteryClass = ArteryClass.PLAQUE,
+    appearance: AppearanceKind | None = None,
+) -> LayerBackup:
+    ranges = (PowerPlaqueSamplingRanges(),) if ranges is None else ranges
+    ranges = (ranges,) if isinstance(ranges, PowerPlaqueSamplingRanges) else ranges
+    if not ranges:
+        raise ValueError("power layer requires at least one sampling range")
+    groups: list[dict[str, Any]] = []
+    for item in ranges:
+        sampling = item.to_dict()
+        if groups and groups[-1]["sampling"] == sampling:
+            groups[-1]["count"] += 1
+        else:
+            groups.append({"count": 1, "sampling": sampling})
+    return LayerBackup(
+        "power-v2",
+        {
+            "seed": seed,
+            "lumen_radius_px": lumen_radius_px,
+            "ranges": groups,
+            "target_class": ArteryClass(target_class).name.lower(),
+            "appearance": (
+                None if appearance is None else AppearanceKind(appearance).name.lower()
+            ),
+        },
+    )
+
+
+def _power_range_group(value: Any) -> tuple[PowerPlaqueSamplingRanges, ...]:
+    if (
+        not isinstance(value, dict)
+        or value.keys() != {"count", "sampling"}
+        or isinstance(value["count"], bool)
+        or not isinstance(value["count"], int)
+        or value["count"] <= 0
+    ):
+        raise ValueError("invalid power-v2 range group")
+    return (PowerPlaqueSamplingRanges.from_dict(value["sampling"]),) * value["count"]

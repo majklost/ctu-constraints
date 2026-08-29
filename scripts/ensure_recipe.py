@@ -26,6 +26,7 @@ def main() -> None:
         overwrite=args.overwrite,
         device=args.device,
         sdf_batch_size=args.sdf_batch_size,
+        progress=True,
     )
     for label in report.created:
         print(f"Created {label}")

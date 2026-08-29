@@ -151,6 +151,7 @@ class Recipe:
         overwrite: bool = False,
         device: DeviceSelection = "auto",
         sdf_batch_size: int = 16,
+        progress: bool = False,
     ) -> EnsureReport:
         """Create or validate all stored artifacts after a complete preflight."""
         from .recipe_ensure import ensure_recipe
@@ -161,6 +162,7 @@ class Recipe:
             overwrite=overwrite,
             device=device,
             sdf_batch_size=sdf_batch_size,
+            progress=progress,
         )
 
     def to_dict(self) -> dict[str, Any]:

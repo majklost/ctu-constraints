@@ -1,0 +1,104 @@
+{
+  "deformation": {
+    "backup": {
+      "config": {
+        "fractal_mode": "blur",
+        "integrations": 2,
+        "magnitude": 7.0,
+        "scales": 14,
+        "voxsize": 1.0
+      },
+      "rejection": {
+        "max_attempts": 20,
+        "minimum_foreground_margin_px": 1,
+        "minimum_jacobian": 0.0
+      },
+      "seed": 27
+    },
+    "name": "default-deformation-v1"
+  },
+  "format_name": "composed-artificial-recipe",
+  "format_version": 5,
+  "layers": [
+    {
+      "backup": {
+        "params": {
+          "bubble_blur_sigma_px": 1.5,
+          "bubbles_per_kind": 4,
+          "maximum_attempts": 2000,
+          "minimum_plaque_separation_px": 5,
+          "plaque_blur_sigma_px": 1.5,
+          "plaque_sampling": {
+            "angle_rad": {
+              "maximum": 0.6283185307179586,
+              "minimum": -0.6283185307179586
+            },
+            "angular_width_rad": {
+              "maximum": 2.6179938779914944,
+              "minimum": 2.0943951023931953
+            },
+            "inward_depth_fraction": {
+              "maximum": 0.65,
+              "minimum": 0.45
+            },
+            "offset_px_lumen": {
+              "maximum": 0.0,
+              "minimum": 0.0
+            },
+            "shape_power": {
+              "maximum": 0.8,
+              "minimum": 0.4
+            },
+            "wall_depth_fraction": {
+              "maximum": 0.25,
+              "minimum": 0.05
+            }
+          },
+          "radius_px": {
+            "maximum": 13.0,
+            "minimum": 6.0
+          },
+          "seed": 81
+        },
+        "resolver": "bubble-cavities-v2"
+      },
+      "name": "bubble-cavities-smoothed-topology-safe-v3"
+    }
+  ],
+  "noise": {
+    "black_rectangle_probability": 0.0,
+    "black_rectangle_size": [
+      0,
+      0
+    ],
+    "seed": 0,
+    "speckle_mode": "multiplicative",
+    "speckle_std": 0.7
+  },
+  "rigid": {
+    "backup": {
+      "config": {
+        "angle": {
+          "maximum": 3.141592653589793,
+          "minimum": -3.141592653589793
+        },
+        "dx": {
+          "maximum": 0,
+          "minimum": 0
+        },
+        "dy": {
+          "maximum": 0,
+          "minimum": 0
+        }
+      },
+      "rejection": {
+        "max_attempts": 20,
+        "minimum_foreground_margin_px": 1
+      },
+      "seed": 52
+    },
+    "name": "rotation-only-v1"
+  },
+  "sdf_cache": null,
+  "source": "artificial/samples5000"
+}

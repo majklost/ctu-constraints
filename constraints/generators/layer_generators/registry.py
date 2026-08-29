@@ -10,10 +10,15 @@ from typing import Any
 
 import numpy as np
 
+from constraints.generators.layer_generators.power import (
+    _power_range_group,
+    sample_power_plaque_mask,
+)
+
+from ..progress import track
 from ..recipe_backups import LayerBackup
 from ..rendering import DEFAULT_CLASS_INTENSITIES
 from ..types import AppearanceKind, ArteryClass, SourceConfig
-from .power import PowerPlaqueSamplingRanges, sample_power_plaque_mask
 from .types import (
     TRANSPARENT_LABEL,
     LayerCollection,
@@ -69,39 +74,63 @@ def normalize_layer_output(output: LayerOutput) -> LayerPatch:
     return LayerPatch(labels, image)
 
 
-def power_layer_backup(
-    ranges: PowerPlaqueSamplingRanges
-    | tuple[PowerPlaqueSamplingRanges, ...]
-    | None = None,
+def materialize_layer_collection(
+    source_root: Path,
+    name: str,
+    source_config: SourceConfig,
+    backup: LayerBackup,
     *,
-    seed: int,
-    lumen_radius_px: float | None = None,
-    target_class: ArteryClass = ArteryClass.PLAQUE,
-    appearance: AppearanceKind | None = None,
-) -> LayerBackup:
-    ranges = (PowerPlaqueSamplingRanges(),) if ranges is None else ranges
-    ranges = (ranges,) if isinstance(ranges, PowerPlaqueSamplingRanges) else ranges
-    if not ranges:
-        raise ValueError("power layer requires at least one sampling range")
-    groups: list[dict[str, Any]] = []
-    for item in ranges:
-        sampling = item.to_dict()
-        if groups and groups[-1]["sampling"] == sampling:
-            groups[-1]["count"] += 1
-        else:
-            groups.append({"count": 1, "sampling": sampling})
-    return LayerBackup(
-        "power-v2",
-        {
-            "seed": seed,
-            "lumen_radius_px": lumen_radius_px,
-            "ranges": groups,
-            "target_class": ArteryClass(target_class).name.lower(),
-            "appearance": (
-                None if appearance is None else AppearanceKind(appearance).name.lower()
-            ),
-        },
+    progress: bool = False,
+) -> Path:
+    folder = Path(source_root) / "layers" / name
+    if folder.exists():
+        raise FileExistsError(f"layer collection already exists: {name}")
+    folder.mkdir(parents=True)
+    labels_tmp = folder / ".labels.npy.tmp"
+    image_tmp = folder / ".image.npy.tmp"
+    shape = (source_config.num_elements, *source_config.empty_artery.image_size)
+    labels = np.lib.format.open_memmap(
+        labels_tmp, mode="w+", dtype=np.int8, shape=shape
     )
+    image = np.lib.format.open_memmap(
+        image_tmp, mode="w+", dtype=np.float32, shape=shape
+    )
+    try:
+        for index in track(
+            range(source_config.num_elements),
+            enabled=progress,
+            description=f"Layer {name}",
+        ):
+            patch = resolve_layer_patch(backup, source_root, source_config, index)
+            if patch.labels.shape != shape[1:]:
+                raise ValueError("resolved layer shape does not match source")
+            labels[index], image[index] = patch.labels, patch.image
+        labels.flush()
+        image.flush()
+        labels_tmp.replace(folder / "labels.npy")
+        image_tmp.replace(folder / "image.npy")
+    except BaseException:
+        shutil.rmtree(folder)
+        raise
+    finally:
+        del labels, image
+    return folder
+
+
+def load_layer_collection(
+    source_root: Path, name: str, source_config: SourceConfig
+) -> LayerCollection:
+    if not name or Path(name).name != name:
+        raise ValueError("layer collection name must be a filename component")
+    folder = Path(source_root) / "layers" / name
+    labels = np.load(folder / "labels.npy", mmap_mode="r")
+    image = np.load(folder / "image.npy", mmap_mode="r")
+    expected = (source_config.num_elements, *source_config.empty_artery.image_size)
+    if labels.shape != expected or labels.dtype != np.int8:
+        raise ValueError(f"invalid labels in layer collection {name!r}")
+    if image.shape != expected or image.dtype != np.float32:
+        raise ValueError(f"invalid image in layer collection {name!r}")
+    return LayerCollection(labels, image)
 
 
 @register_layer_resolver("power-v2")
@@ -150,67 +179,3 @@ def _resolve_power(
     )
     return MaskLayer(sample.mask, target_class, appearance)
 
-
-def _power_range_group(value: Any) -> tuple[PowerPlaqueSamplingRanges, ...]:
-    if (
-        not isinstance(value, dict)
-        or value.keys() != {"count", "sampling"}
-        or isinstance(value["count"], bool)
-        or not isinstance(value["count"], int)
-        or value["count"] <= 0
-    ):
-        raise ValueError("invalid power-v2 range group")
-    return (PowerPlaqueSamplingRanges.from_dict(value["sampling"]),) * value["count"]
-
-
-def materialize_layer_collection(
-    source_root: Path,
-    name: str,
-    source_config: SourceConfig,
-    backup: LayerBackup,
-) -> Path:
-    folder = Path(source_root) / "layers" / name
-    if folder.exists():
-        raise FileExistsError(f"layer collection already exists: {name}")
-    folder.mkdir(parents=True)
-    labels_tmp = folder / ".labels.npy.tmp"
-    image_tmp = folder / ".image.npy.tmp"
-    shape = (source_config.num_elements, *source_config.empty_artery.image_size)
-    labels = np.lib.format.open_memmap(
-        labels_tmp, mode="w+", dtype=np.int8, shape=shape
-    )
-    image = np.lib.format.open_memmap(
-        image_tmp, mode="w+", dtype=np.float32, shape=shape
-    )
-    try:
-        for index in range(source_config.num_elements):
-            patch = resolve_layer_patch(backup, source_root, source_config, index)
-            if patch.labels.shape != shape[1:]:
-                raise ValueError("resolved layer shape does not match source")
-            labels[index], image[index] = patch.labels, patch.image
-        labels.flush()
-        image.flush()
-        labels_tmp.replace(folder / "labels.npy")
-        image_tmp.replace(folder / "image.npy")
-    except BaseException:
-        shutil.rmtree(folder)
-        raise
-    finally:
-        del labels, image
-    return folder
-
-
-def load_layer_collection(
-    source_root: Path, name: str, source_config: SourceConfig
-) -> LayerCollection:
-    if not name or Path(name).name != name:
-        raise ValueError("layer collection name must be a filename component")
-    folder = Path(source_root) / "layers" / name
-    labels = np.load(folder / "labels.npy", mmap_mode="r")
-    image = np.load(folder / "image.npy", mmap_mode="r")
-    expected = (source_config.num_elements, *source_config.empty_artery.image_size)
-    if labels.shape != expected or labels.dtype != np.int8:
-        raise ValueError(f"invalid labels in layer collection {name!r}")
-    if image.shape != expected or image.dtype != np.float32:
-        raise ValueError(f"invalid image in layer collection {name!r}")
-    return LayerCollection(labels, image)

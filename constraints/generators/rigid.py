@@ -9,6 +9,7 @@ import torch
 from numpy.typing import NDArray
 
 from .deformation import apply_deformation
+from .progress import track
 from .storage import write_json
 from .types import RigidConfig, RigidRejectionConfig, SourceConfig
 from .validation import foreground_margin
@@ -147,6 +148,7 @@ def generate_rigid_parameters(
     rejection: RigidRejectionConfig | None = None,
     *,
     seed: int,
+    progress: bool = False,
 ) -> tuple[Path, Path]:
     """Generate a named ``[N,3]`` rigid preset under its validation parent."""
     parent_folder = Path(parent_folder)
@@ -176,7 +178,11 @@ def generate_rigid_parameters(
     accepted_margins: list[int] = []
     rejected_candidate_count = 0
     try:
-        for sample_index in range(source_config.num_elements):
+        for sample_index in track(
+            range(source_config.num_elements),
+            enabled=progress,
+            description=f"Rigid {name}",
+        ):
             deformed_labels = source_labels
             if deformation_fields is not None:
                 deformed_labels = np.rint(
