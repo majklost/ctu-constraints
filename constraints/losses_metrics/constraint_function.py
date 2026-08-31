@@ -77,7 +77,7 @@ def does_violation_occur_with_wall(
 
     # Connectivity structures:
     # 8-connectivity for component grouping & spatial adjacency
-    s8 = generate_binary_structure(2, 1)
+    s8 = generate_binary_structure(2, 2)
     name_to_id = {name: class_id for class_id, name in label_schema.names.items()}
     required_names = {"background", "boundary", "lumen", "plaque"}
     if not required_names <= name_to_id.keys():
