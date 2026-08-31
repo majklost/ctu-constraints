@@ -5,3 +5,6 @@ ArtificialMaskColor = [
     (0.10, 0.70, 0.10),  # green
     (0.10, 0.35, 0.95),
 ]
+
+
+ACDCMaskLabel = ["background", "right_ventricle", "myocardum", "left_ventricle"]

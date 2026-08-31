@@ -9,7 +9,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: ctu-constraints
 #     language: python
 #     name: python3
 # ---
@@ -69,5 +69,44 @@ for i in range(len(image_fnames)):
     image_fname = image_fnames[i].name
     label_fname = label_fnames[i].name
     assert image_fname == label_fname.replace("_label",""),"name differs"
+
+# %% [markdown]
+# # ACDC
+
+# %%
+ACDC = get_data_folder() /"real"/"acdc"/"ACDC_preprocessed"/"ACDC_training_slices"
+assert ACDC.is_dir()
+
+# %%
+slices = list(ACDC.iterdir())
+print(len(slices))
+
+# %%
+sample_id =0
+file=h5py.File(slices[sample_id])
+print(file.keys())
+img = np.array(file['image'])
+label = np.array(file['label'])
+scribble = np.array(file['scribble'])
+
+plt.imshow(img,cmap="gray")
+plt.show()
+plt.imshow(label)
+plt.show()
+plt.imshow(scribble)
+plt.show()
+
+print(np.unique(label))
+
+# %%
+print(img.shape)
+print(label.shape)
+
+# %%
+fig,axs = plt.subplots(1,5)
+for i in range(4):
+    axs[i].imshow(label==i)
+axs[4].imshow(img)
+plt.show()
 
 # %%

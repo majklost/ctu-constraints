@@ -5,7 +5,7 @@ from typing import get_args
 import numpy as np
 import torch
 
-from constraints.datatools.datasets.artery_common_types import (
+from constraints.datatools.datasets.common_types import (
     ArtificialMaskColor,
     ArtificialMaskLabel,
 )

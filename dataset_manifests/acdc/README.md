@@ -1,0 +1,4 @@
+- 1678 slices
+- use only slices for start
+- (216, 256)
+- 4 classes (bg, left, myocardium, right)

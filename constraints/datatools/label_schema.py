@@ -8,7 +8,7 @@ from typing import Self
 import torch
 import torch.nn.functional
 
-from constraints.datatools.datasets.artery_common_types import (
+from constraints.datatools.datasets.common_types import (
     ArtificialMaskColor,
     ArtificialMaskLabel,
 )
