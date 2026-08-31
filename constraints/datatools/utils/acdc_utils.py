@@ -43,3 +43,5 @@ def is_annular(mask_2d: np.ndarray, min_hole_area: int = 10) -> bool:
         return valid_holes == 1
 
     return num_holes == 1
+
+

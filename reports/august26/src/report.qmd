@@ -1,0 +1,106 @@
+---
+title: "Report: Srpen 2026"
+author: "Michal Mrkos"
+date: today
+number-sections: true
+toc: true
+#bibliography: references.bib
+
+format:
+  typst:
+    toc: false
+    number-sections: true
+
+execute:
+  echo: false
+  warning: false
+  cache: true
+---
+## Kontext
+
+V minulém reportu "PROJECT architecture and loss determination" bylo porovnáno $10$ různých ztrátových funkcí na jednoduchém datasetu obsahujícím vždy dva pláty tvaru elipsy. Pozice elips byly fixní, rozdíly mezi trénovacími příklady byly dány rigidní transformací, aplikací deformačního pole nebo kombinací obou technik.
+
+Jedním z hlavních požadavků bylo vytvoření umělého datasetu, na kterém UNET bude dělat topologické chyby (dále budeme označovat jako topoligcky obtížný dataset). Dále podpora pro více šablon najednou, regularizaci pole a připojení reálných datasetů. 
+
+## Tvorba topologicky obtížného datasetu
+
+Pro tvorbu nového datasetu byl implementován generátor plátů, který nyní na vstupu vezme funkce $f(\varphi)\rightarrow \mathbb{R}$, $g(\varphi)\rightarrow \mathbb{R}$ a rozsah $\varphi \in [ \varphi_1, \varphi_2 ]$ a vykreslí daný plát.
+
+Jako inciální přístup pro tvrobu plátů bylo zvoleno vykreslení pomocí mocniny. Definujeme $\alpha$ jako střed plátu a $w$ jako úhel, který zabírá.
+
+poté zavedeme nový souřadnicový systém $\theta = \frac{2}{w}\cdot \text{atan2}(\sin(\varphi-\alpha),\cos(\varphi-\alpha))$. Samotný profile je poté definován jako $f(\theta)=[\max(1-\theta^2),0]^p$, kde $p\in\mathbb{R}^+$.
+
+Plátu je takto vytvořeno několik, je možné aplikovat offset vůči vnitřní stěně cévy. Pláty jsou uloženy v různých vrstvách a je možné je překrývat (např zvlášť malé, zvlášť velké, sloučit dohromady)
+
+- Pro každý vzorek v datasetu je možné vygenerovat deformační pole, pole je generováno tak, aby nedošlo k porušení topologie, či vytlačení cévy mimo obraz. Pole musí být předgenerováno dopředu (změřeno 112 ms/vzorek CPU, 7.67 ms/vzorek CUDA).
+- Pro každý vzorek v dataset je možné vygenerovat rigidní posun, posun je generován tak, aby nedošlo k vytlačení již zdeformované cévy mimo obraz
+- Na výsledný šedotónový obrázek je možné aplikovat šum (multiplikativní/aditivní), nebo překrýt některé oblasti černými obdélníky
+
+- **TODO** Obrázky nedeform, deform, posun. 
+
+Bylo vyzkoušeno několik přístupů, s cílem zmást UNET. Ve všech popsaných přístupech je aplikována následně deformace, rigidní posun a multiplikativní šum. 
+
+
+
+### Plovoucí pláty
+
+- V tomto přístupu byly ke standardním plátům, které jsou připojeno přímo k stěně cévy a mají v GT masce hodnotu 'plát', přidány falešné pláty, které v šedotónovém obraze vypadají stejně jako GT pláty, nicméně nejsou připojeny ke stěně cévy a v GT masce mají hodnotu "lumen" (jedná se tedy jen o šum/ artefakt). 
+- Hypotéza tohoto experimentu byla, že UNET při klasifikaci pixelu blíže ke středu cévy nebude mít dostatečné informace o "nepřipojení" falešného plátu a bude tedy falešný plát klasifikovat jako pravý, čímž se dopustí topologické chyby.
+
+- Z medicínského hlediska by měl daný přístup simulovat částečné ultrazvukové odrazy.
+
+
+### Díry a "kousance"
+
+- Tento přístup je obměnou tzv. "pathfinding" problému. Do standardně vygenerovaných plátů byly vygenerovánany "díry". Jestliže je dané díra dosažitelná z lumenu, je prohlášena celá za lumen, v opačném případě se jedná pouze o šum a díra je v GT masce označena hodnotou "plát".
+
+- Hypotéza experimentu byla, že UNET bude díry klasifikovat pouze z lokálního pohledu na základě tvaru.
+
+- Z medicínského hlediska by měl daný přístup simulovat nehomogenity v plátu.
+
+
+
+### Pohlcení signálu plátem
+
+
+### Výsledky
+
+Pro všechny tři přístupy byly otestovány dvě trn/val varianty:
+
+1. 2000 tréninkových dat a 200 validačních vzorků
+2. 200 tréninkových a  2000 validačních dat
+
+Ve všech případech bylo měřeno IoU jednotlivých tříd a procento vzorků, kde predikce sítě UNET porušuje topologii.
+
+## Přidání externích datasetů
+
+- Do prostředí byly přidány datasety [ACDC](https://www.kaggle.com/datasets/anhoangvo/acdc-dataset/data) a [CSV](http://119.29.231.17/index.html).
+- Ne všechny vzorky datasetu CSV splňují očekávaná topologická pravidla. Ve většině případů se ovšem jedná o nedokonalosti při tvorbě GT masek (viz obrázek). Je potřeba vyřešit, zda budeme dataset využívat tak, jak je, nebo dovolíme dodatečnou úpravu masek.
+
+-**TODO obrázek** a statistiky porušení
+
+
+### Interpretace výsledků
+
+
+
+
+## Další provedené práce za období srpen 2026
+
+*Sekce (vyjma změny IoU) nemá vliv na prezentaci výsledků, čtenář ji může případně přeskočit. *
+
+Značná část měsíce byla věnována úpravám kódu, které měly za cíl zjednodušit přidávání, organizaci a analýzu budoucích experimentů.
+
+
+- **Nahrazení pojmu affine za správny pojem Rigid**
+- **Změna výpočtu IoU** – v předchozích experimentech bylo reportováno IoU jako průměrné IoU přes jednotlivé vzorky (image-level average), tedy:$$mIoU = \frac{1}{\vert{}\mathcal{D}_\text{val}\vert{}} \sum_{x \in \mathcal{D}_\text{val}} IoU(x)$$což je méně standardní varianta náchylná ke zkreslení u malých objektů. V tomto a následujících reportech se využívá standardnější přístup (odpovídající např. torchmetrics.JaccardIndex), kde se nejprve akumulují průniky a sjednocení globálně přes celý validační dataset pro každou třídu $c \in \mathcal{C}$ a následně se provede průměr přes třídy:$$mIoU = \frac{1}{\vert{}\mathcal{C}\vert{}} \sum_{c \in \mathcal{C}} \frac{\sum_{x \in \mathcal{D}_\text{val}} \vert{}TP_c(x)\vert{}}{\sum_{x \in \mathcal{D}_\text{val}} \left(\vert{}TP_c(x)\vert{} + \vert{}FP_c(x)\vert{} + \vert{}FN_c(x)\vert{}\right)}$$
+- **Přípravné práce pro  více templatů a podporu dynamických templatů** - Každý dataset nyní definuje, zda předává template pro každý vzorek, nebo zda nabízí množinu templatů pro celý dataset. Objekty TemplateSource a TemplateRefiner poté unifikují tyto možnosti pro trénovací kód a dovolují úpravu templatů (např přidání plátů).
+- **Přidání regularizace deformačního pole** - po vzoru architektury Voxelmorph je vypočten gradient vektorového pole ve 2D a suma čtverců jeho složek. Vrácena je poté průměrná hodnota přes celý 2D prostor. 
+- **Rozdělení ztrátových funkcí** - každá ztrátová funkce je zapsána jako vážený průměr ztrátových termů. Hlavní termy jsou registrační, segmentační a regularizace deformačního pole. Příkladem `RegistrationCentroidTerm`, `SegmentationCrossEntropyTerm`. Pomáhá elegantnějí skládat jednotlivá řešení.
+- **Rozdělení metrik a uploadu obrázků** - zjednodušení připisování metrik pro experimenty. Metriky rozdělené dle módu ("trénování","validace","extra",...). Stejné rozdělení i pro upload obrázků a překrytí do logovacího rozhraní
+
+
+
+## Plánované experimenty
+- naplánované experimenty 6x5 lossů
+- TEDS-NET
