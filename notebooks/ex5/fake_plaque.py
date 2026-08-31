@@ -36,6 +36,7 @@ from constraints.generators.layer_generators import (
     SavedLayer,
     bubble_cavity_layer_backup,
     power_layer_backup,
+    wall_attenuation_layer_backup,
 )
 from constraints.generators.recipe_backups import (
     DeformationBackup,
@@ -48,6 +49,7 @@ from constraints.generators.types import (
     AppearanceKind,
     ArteryClass,
     DeformationConfig,
+    DeformationRejectionConfig,
     FloatRange,
     NoiseConfig,
     RigidConfig,
@@ -272,12 +274,122 @@ print(cavity_recipe_path)
 # # Wall Attenuation
 # Let plaque grow into the boundary, leaving, for example, only five boundary
 # pixels in the target (so the boundary is still an annular ring).
-# Make the plaque larger in the grayscale image, potentially reaching the outer
+# Make the plaque larger in the grayscale image, reaching the outer
 # edge. Use an intensity gradient to make the plaque/boundary transition unclear.
+# There should be many plaques with different growth into the boundary, but the
+# structure has to remain annular.
 #
+# In grayscale, the gradient should start inside the plaque. Its length differs
+# between plaques and slowly brings the appearance to background intensity. The
+# pixels corresponding to boundary will therefore be in the lower part of the
+# gradient or black and indistinguishable from background.
+#
+# In GT, there is boundary behind every plaque. Each plaque independently uses
+# $$\text{wall\_residual\_px} \in \{4, 5, 8, 12\}\text{ px},$$
+# so the boundary remains an annular structure. In the image, the plaque extends
+# farther than its target and fades to background intensity at the artery's
+# exterior. The sampled fade begins inside the labelled plaque for the shorter
+# residual-wall choices.
+# Candidate deformation fields are stress-tested with a four-pixel annular wall
+# and rejected if nearest-neighbor resampling opens a gap. This preserves the
+# difficult four-pixel GT cases without thickening the other residual walls.
 # The U-Net may omit the remaining boundary and connect plaque directly to the
 # background, producing a topological violation.
 #
 
+# %%
+attenuation_plaque_range = PowerPlaqueSamplingRanges(
+    angle_rad=FloatRange(-np.pi, np.pi),
+    angular_width_rad=FloatRange(np.pi / 6, np.pi / 3),
+    inward_depth_fraction=FloatRange(0.15, 0.35),
+    # Ignored by this layer: exact residual wall widths determine GT wall depth.
+    wall_depth_fraction=FloatRange.fixed(0),
+    shape_power=FloatRange(0.4, 0.8),
+)
+
+attenuation_recipe = Recipe(
+    source="artificial/samples5000",
+    layers=(
+        SavedLayer(
+            backup=wall_attenuation_layer_backup(
+                (attenuation_plaque_range,) * 4,
+                seed=93,
+                residual_wall_px=(4, 5, 8, 12),
+                gradient_length_px=FloatRange(10, 24),
+            )
+        ),
+    ),
+    deformation=SavedDeformation(
+        backup=DeformationBackup(
+            dc,
+            rejection=DeformationRejectionConfig(
+                preserved_wall_thickness_px=4,
+                max_attempts=100,
+            ),
+            seed=27,
+        )
+    ),
+    rigid=SavedRigid(backup=RigidBackup(rc, seed=52)),
+    noise=nc,
+)
+
+# %%
+attenuation_source_config = get_source_config(attenuation_recipe.resolve_source_root())
+attenuation_index = np.random.randint(0, attenuation_source_config.num_elements)
+attenuation_sample = preview_artificial_sample(
+    recipe=attenuation_recipe,
+    sample_index=attenuation_index,
+)
+
+attenuation_classes = ("background", "boundary", "lumen", "plaque")
+attenuation_colors = ("black", "tab:orange", "tab:blue", "tab:red")
+fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+axes[0].imshow(
+    attenuation_sample.target_labels,
+    cmap=ListedColormap(attenuation_colors),
+    vmin=-0.5,
+    vmax=3.5,
+)
+axes[0].set_title("GT: residual wall remains")
+axes[0].legend(
+    handles=[
+        Patch(color=color, label=name)
+        for name, color in zip(attenuation_classes, attenuation_colors, strict=True)
+    ],
+    loc="lower right",
+)
+axes[1].imshow(attenuation_sample.image, cmap="gray", vmin=0, vmax=1)
+axes[1].set_title("Image: plaque fades into background")
+for axis in axes:
+    axis.axis("off")
+plt.show()
+
+print(
+    does_violation_occur_with_wall(
+        torch.from_numpy(attenuation_sample.target_labels),
+        LabelSchema.as_artery(),
+    )
+)
+
+# %%
+attenuation_cluster_recipe = attenuation_recipe.with_names(
+    layers={0: "wall-attenuation-four-plaques-v2"},
+    deformation="wall-preserving-4px-deformation-v1",
+    rigid="rotation-only-v1",
+)
+attenuation_recipe_path = REPO_ROOT / "recipes/artificial/wall_attenuation.json"
+attenuation_cluster_recipe.save_json(attenuation_recipe_path)
+print(attenuation_recipe_path)
+
 # %% [markdown]
+# Materialize and train this experiment on the cluster with:
 #
+# ```bash
+# .venv/bin/python scripts/ensure_recipe.py \
+#     recipes/artificial/wall_attenuation.json \
+#     --device cuda
+#
+# .venv/bin/python experiments/ex5/initial_decoupled_new.py \
+#     --recipe recipes/artificial/wall_attenuation.json \
+#     --mode UNET --modality deformed
+# ```

@@ -15,6 +15,7 @@ from constraints.generators.layer_generators import (
     power_layer_backup,
     register_layer_resolver,
     resolve_layer_patch,
+    wall_attenuation_layer_backup,
 )
 from constraints.generators.recipe_backups import LayerBackup
 from constraints.generators.source import create_source
@@ -138,3 +139,32 @@ def test_hard_bubble_render_does_not_leave_plaque_inside_bites(tmp_path) -> None
 
     assert np.any(bite_pixels)
     assert np.all(patch.image[bite_pixels] == 0.25)
+
+
+def test_wall_attenuation_preserves_gt_wall_and_extends_only_image(tmp_path) -> None:
+    config = SourceConfig(num_elements=8)
+    artery = create_empty_artery(config.empty_artery)
+    sampling = PowerPlaqueSamplingRanges(
+        angular_width_rad=FloatRange(0.5, 1.0),
+        inward_depth_fraction=FloatRange(0.15, 0.3),
+        wall_depth_fraction=FloatRange.fixed(0),
+    )
+    backup = wall_attenuation_layer_backup(
+        (sampling,) * 4,
+        seed=93,
+        residual_wall_px=(4, 5, 8, 12),
+        gradient_length_px=FloatRange(10, 24),
+    )
+
+    for index in range(config.num_elements):
+        patch = resolve_layer_patch(backup, tmp_path, config, index)
+        repeated = resolve_layer_patch(backup, tmp_path, config, index)
+        assert np.array_equal(patch.labels, repeated.labels)
+        assert np.array_equal(patch.image, repeated.image, equal_nan=True)
+        assert np.any(np.isfinite(patch.image) & (patch.labels == -1))
+
+        labels = compose_layers(artery, (patch,)).target_labels
+        violation, details = does_violation_occur_with_wall(
+            torch.from_numpy(labels), LabelSchema.as_artery()
+        )
+        assert not violation, details

@@ -260,6 +260,9 @@ def main(args):
         "sample_index"
     ].to_list()
 
+    if args.swap_splits:
+        trn_indices, val_indices = val_indices, trn_indices
+
     trn_dataset = ComposedArtificialDataset.from_recipe(
         source_root,
         recipe,
@@ -462,6 +465,11 @@ if __name__ == "__main__":
         choices=RIGID_DEF_MODES,
         default=None,
         help="Choose the rigid-deformable registration mode.",
+    )
+    parser.add_argument(
+        "--swap_splits",
+        action="store_true",
+        help="train on validation, validate on TRN",
     )
     args = parser.parse_args()
 

@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 
 FloatArray = NDArray[np.float64]
 
+
 class ArteryClass(IntEnum):
     BACKGROUND = 0
     BOUNDARY = 1
@@ -338,6 +339,7 @@ class DeformationRejectionConfig:
 
     minimum_jacobian: float = 0.0
     minimum_foreground_margin_px: int = 1
+    preserved_wall_thickness_px: int = 0
     max_attempts: int = 20
 
     def __post_init__(self) -> None:
@@ -352,6 +354,14 @@ class DeformationRejectionConfig:
                 "minimum_foreground_margin_px must be a non-negative integer"
             )
         if (
+            isinstance(self.preserved_wall_thickness_px, bool)
+            or not isinstance(self.preserved_wall_thickness_px, int)
+            or self.preserved_wall_thickness_px < 0
+        ):
+            raise ValueError(
+                "preserved_wall_thickness_px must be a non-negative integer"
+            )
+        if (
             isinstance(self.max_attempts, bool)
             or not isinstance(self.max_attempts, int)
             or self.max_attempts <= 0
@@ -359,20 +369,30 @@ class DeformationRejectionConfig:
             raise ValueError("max_attempts must be a positive integer")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "minimum_jacobian": self.minimum_jacobian,
             "minimum_foreground_margin_px": self.minimum_foreground_margin_px,
             "max_attempts": self.max_attempts,
         }
+        # Keep existing artifact definitions byte-for-byte compatible. The new
+        # criterion is serialized only when explicitly enabled.
+        if self.preserved_wall_thickness_px:
+            result["preserved_wall_thickness_px"] = self.preserved_wall_thickness_px
+        return result
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Self:
-        expected = {
+        required = {
             "minimum_jacobian",
             "minimum_foreground_margin_px",
             "max_attempts",
         }
-        if not isinstance(value, dict) or value.keys() != expected:
+        allowed = required | {"preserved_wall_thickness_px"}
+        if (
+            not isinstance(value, dict)
+            or not required <= value.keys()
+            or not value.keys() <= allowed
+        ):
             raise ValueError("invalid DeformationRejectionConfig fields")
         try:
             return cls(**value)

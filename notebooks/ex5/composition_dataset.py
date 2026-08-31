@@ -58,8 +58,8 @@ for i in range(len(dataset)):
         print(f"Sample {i}, violations:")
         for s in out[1]:
             print(s)
-        # plt.imshow(d["target_labels"])
-        # plt.show()
+        plt.imshow(d["target_labels"])
+        plt.show()
 
 # %%
 

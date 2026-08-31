@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, distance_transform_edt
 
 from constraints.voxelmorph.utils import spatial_transform
 
@@ -16,6 +16,7 @@ class DeformationValidationResult:
     accepted: bool
     minimum_jacobian: float
     foreground_margin_px: int
+    preserves_wall: bool
 
 
 def foreground_margin(labels: np.ndarray) -> int:
@@ -92,9 +93,9 @@ def validate_deformation(
 
     support = deformation_support(source_labels, field)
     minimum_jacobian = minimum_jacobian_determinant(field, support)
-    labels_tensor = torch.from_numpy(
-        source_labels.astype(np.float32, copy=False)
-    )[None, None]
+    labels_tensor = torch.from_numpy(source_labels.astype(np.float32, copy=False))[
+        None, None
+    ]
     field_tensor = torch.from_numpy(field)
     warped_labels = spatial_transform(
         labels_tensor,
@@ -102,12 +103,43 @@ def validate_deformation(
         method="nearest",
     )[0, 0].numpy()
     foreground_margin_px = foreground_margin(warped_labels)
+    preserves_wall = _preserves_wall_after_warp(
+        source_labels,
+        field_tensor,
+        config.preserved_wall_thickness_px,
+    )
     accepted = (
         minimum_jacobian > config.minimum_jacobian
         and foreground_margin_px >= config.minimum_foreground_margin_px
+        and preserves_wall
     )
     return DeformationValidationResult(
         accepted=accepted,
         minimum_jacobian=minimum_jacobian,
         foreground_margin_px=foreground_margin_px,
+        preserves_wall=preserves_wall,
     )
+
+
+def _preserves_wall_after_warp(
+    source_labels: np.ndarray,
+    field_tensor: torch.Tensor,
+    wall_thickness_px: int,
+) -> bool:
+    """Stress-test whether a thin outer wall survives nearest resampling."""
+    if wall_thickness_px == 0:
+        return True
+    foreground = source_labels != 0
+    if not foreground.any():
+        return False
+    distance_inside = distance_transform_edt(foreground)
+    stress_labels = np.zeros(source_labels.shape, dtype=np.float32)
+    stress_labels[foreground] = 2
+    stress_labels[foreground & (distance_inside <= wall_thickness_px)] = 1
+    warped = spatial_transform(
+        torch.from_numpy(stress_labels)[None, None],
+        field_tensor,
+        method="nearest",
+    )[0, 0].numpy()
+    background_edge = binary_dilation(warped == 0, structure=np.ones((3, 3)))
+    return not bool(np.any(background_edge & (warped == 2)))

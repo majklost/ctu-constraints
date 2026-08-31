@@ -1,0 +1,186 @@
+{
+  "deformation": {
+    "backup": {
+      "config": {
+        "fractal_mode": "blur",
+        "integrations": 2,
+        "magnitude": 7.0,
+        "scales": 14,
+        "voxsize": 1.0
+      },
+      "rejection": {
+        "max_attempts": 100,
+        "minimum_foreground_margin_px": 1,
+        "minimum_jacobian": 0.0,
+        "preserved_wall_thickness_px": 4
+      },
+      "seed": 27
+    },
+    "name": "wall-preserving-4px-deformation-v1"
+  },
+  "format_name": "composed-artificial-recipe",
+  "format_version": 5,
+  "layers": [
+    {
+      "backup": {
+        "params": {
+          "gradient_length_px": {
+            "maximum": 24,
+            "minimum": 10
+          },
+          "plaque_sampling": [
+            {
+              "angle_rad": {
+                "maximum": 3.141592653589793,
+                "minimum": -3.141592653589793
+              },
+              "angular_width_rad": {
+                "maximum": 1.0471975511965976,
+                "minimum": 0.5235987755982988
+              },
+              "inward_depth_fraction": {
+                "maximum": 0.35,
+                "minimum": 0.15
+              },
+              "offset_px_lumen": {
+                "maximum": 0.0,
+                "minimum": 0.0
+              },
+              "shape_power": {
+                "maximum": 0.8,
+                "minimum": 0.4
+              },
+              "wall_depth_fraction": {
+                "maximum": 0,
+                "minimum": 0
+              }
+            },
+            {
+              "angle_rad": {
+                "maximum": 3.141592653589793,
+                "minimum": -3.141592653589793
+              },
+              "angular_width_rad": {
+                "maximum": 1.0471975511965976,
+                "minimum": 0.5235987755982988
+              },
+              "inward_depth_fraction": {
+                "maximum": 0.35,
+                "minimum": 0.15
+              },
+              "offset_px_lumen": {
+                "maximum": 0.0,
+                "minimum": 0.0
+              },
+              "shape_power": {
+                "maximum": 0.8,
+                "minimum": 0.4
+              },
+              "wall_depth_fraction": {
+                "maximum": 0,
+                "minimum": 0
+              }
+            },
+            {
+              "angle_rad": {
+                "maximum": 3.141592653589793,
+                "minimum": -3.141592653589793
+              },
+              "angular_width_rad": {
+                "maximum": 1.0471975511965976,
+                "minimum": 0.5235987755982988
+              },
+              "inward_depth_fraction": {
+                "maximum": 0.35,
+                "minimum": 0.15
+              },
+              "offset_px_lumen": {
+                "maximum": 0.0,
+                "minimum": 0.0
+              },
+              "shape_power": {
+                "maximum": 0.8,
+                "minimum": 0.4
+              },
+              "wall_depth_fraction": {
+                "maximum": 0,
+                "minimum": 0
+              }
+            },
+            {
+              "angle_rad": {
+                "maximum": 3.141592653589793,
+                "minimum": -3.141592653589793
+              },
+              "angular_width_rad": {
+                "maximum": 1.0471975511965976,
+                "minimum": 0.5235987755982988
+              },
+              "inward_depth_fraction": {
+                "maximum": 0.35,
+                "minimum": 0.15
+              },
+              "offset_px_lumen": {
+                "maximum": 0.0,
+                "minimum": 0.0
+              },
+              "shape_power": {
+                "maximum": 0.8,
+                "minimum": 0.4
+              },
+              "wall_depth_fraction": {
+                "maximum": 0,
+                "minimum": 0
+              }
+            }
+          ],
+          "residual_wall_px": [
+            4.0,
+            5.0,
+            8.0,
+            12.0
+          ],
+          "seed": 93
+        },
+        "resolver": "wall-attenuation-v1"
+      },
+      "name": "wall-attenuation-four-plaques-v2"
+    }
+  ],
+  "noise": {
+    "black_rectangle_probability": 0.0,
+    "black_rectangle_size": [
+      0,
+      0
+    ],
+    "seed": 0,
+    "speckle_mode": "multiplicative",
+    "speckle_std": 0.7
+  },
+  "rigid": {
+    "backup": {
+      "config": {
+        "angle": {
+          "maximum": 3.141592653589793,
+          "minimum": -3.141592653589793
+        },
+        "dx": {
+          "maximum": 0,
+          "minimum": 0
+        },
+        "dy": {
+          "maximum": 0,
+          "minimum": 0
+        }
+      },
+      "rejection": {
+        "max_attempts": 20,
+        "minimum_foreground_margin_px": 1
+      },
+      "seed": 52
+    },
+    "name": "rotation-only-v1"
+  },
+  "sdf_cache": null,
+  "source": "artificial/samples5000"
+}

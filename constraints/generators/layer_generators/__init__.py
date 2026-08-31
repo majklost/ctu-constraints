@@ -29,6 +29,7 @@ from .types import (
     MaskLayer,
     SavedLayer,
 )
+from .wall_attenuation import wall_attenuation_layer_backup
 
 __all__ = [
     "CyclicRasterizer",
@@ -55,4 +56,5 @@ __all__ = [
     "register_layer_resolver",
     "resolve_layer_patch",
     "sample_power_plaque_mask",
+    "wall_attenuation_layer_backup",
 ]

@@ -7,8 +7,12 @@ from scipy.ndimage import binary_dilation, generate_binary_structure, label
 from ..datatools.label_schema import LabelSchema
 
 
-def _label_components(mask: np.ndarray, structure: np.ndarray) -> tuple[np.ndarray, int]:
-    labeled, component_count = cast(tuple[np.ndarray, int], label(mask, structure=structure))
+def _label_components(
+    mask: np.ndarray, structure: np.ndarray
+) -> tuple[np.ndarray, int]:
+    labeled, component_count = cast(
+        tuple[np.ndarray, int], label(mask, structure=structure)
+    )
     return labeled, int(component_count)
 
 
@@ -31,7 +35,7 @@ def does_violation_occur_with_wall(
     max_ignored_enclosed_background_area: int = 2,
 ) -> tuple[bool, list[str]]:
     """Check Violations according to the following rules for 4-class vessel segmentation:
-    
+
     Classes:
     - 0: Background (BG)
     - 1: Wall/boundary
@@ -58,7 +62,7 @@ def does_violation_occur_with_wall(
     - blob_threshold: minimum number of pixels required for a connected component to be considered a detection
     - max_ignored_enclosed_background_area: largest enclosed Background component,
         in pixels, ignored as visually insignificant
-    
+
     OUTPUT:
     - violation_occurred: bool indicating whether a violation occurred
     - violation_details: list of strings describing the specific violations that were found
@@ -73,7 +77,7 @@ def does_violation_occur_with_wall(
 
     # Connectivity structures:
     # 8-connectivity for component grouping & spatial adjacency
-    s8 = generate_binary_structure(2, 2)
+    s8 = generate_binary_structure(2, 1)
     name_to_id = {name: class_id for class_id, name in label_schema.names.items()}
     required_names = {"background", "boundary", "lumen", "plaque"}
     if not required_names <= name_to_id.keys():
@@ -156,10 +160,7 @@ def does_violation_occur_with_wall(
         )
 
         component_area = int(np.count_nonzero(comp_mask))
-        if (
-            not touches_edge
-            and component_area > max_ignored_enclosed_background_area
-        ):
+        if not touches_edge and component_area > max_ignored_enclosed_background_area:
             violations.append(
                 "Background constraint violated: "
                 f"Background component {i} is enclosed, has area {component_area} px, "
@@ -181,6 +182,7 @@ def does_violation_occur_with_wall(
         )
 
     return len(violations) > 0, violations
+
 
 def does_violation_occur_no_wall(
     prediction: torch.Tensor, blob_threshold: int = 50

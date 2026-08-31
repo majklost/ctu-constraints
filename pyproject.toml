@@ -22,6 +22,7 @@ dependencies = [
     "torch-tb-profiler>=0.4.3",
     "jupyter-cache>=1.0.1",
     "polars>=1.43.2",
+    "h5py>=3.16.0",
 ]
 
 [build-system]

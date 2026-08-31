@@ -1,0 +1,4 @@
+- 512x512 images
+- value 0 128 255 corresponding to bg, plaque, lumen respectively
+  - mask is uint8
+  - lumen has artifacts (probably from imprecise annotations), need check by does_violation and refine

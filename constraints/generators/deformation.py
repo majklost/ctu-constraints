@@ -229,6 +229,9 @@ def generate_deformation_fields(
                     "accepted_foreground_margins_px": [
                         item.foreground_margin_px for item in accepted_diagnostics
                     ],
+                    "accepted_wall_preservation": [
+                        item.preserves_wall for item in accepted_diagnostics
+                    ],
                 },
                 "array": {
                     "relative_path": "fields.npy",
