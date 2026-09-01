@@ -45,8 +45,8 @@ from constraints.losses_metrics.constraint_function import (
 from constraints.utils import get_repo_root
 
 RECIPE = "wall_attenuation"
-# RECIPE = "bubble_cavities_overlap_gradient"
-# RECIPE = "tworeal_fake_similar_offset_minus3"
+RECIPE = "bubble_cavities_overlap_gradient"
+RECIPE = "tworeal_fake_similar_offset_minus3"
 
 source_root = get_data_folder() / "artificial" / "samples5000"
 recipe_path = (
@@ -145,7 +145,7 @@ for col, sample_index in enumerate(sample_indices):
     axes[0,col].imshow(sample["image"].squeeze(), cmap="gray", vmin=0, vmax=1)
     axes[0,col].set_title(f"Sample {sample_index}")
     axes[1,col].imshow(
-        create_segmentation_overlay(sample["image"],sample["target_labels"],cmap,.8),
+        create_segmentation_overlay(sample["image"],sample["target_labels"],cmap,.5),
         cmap=cmap,
         vmin=0,
         vmax=3,

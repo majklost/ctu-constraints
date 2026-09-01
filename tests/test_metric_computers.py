@@ -2,7 +2,10 @@ import torch
 import torch.nn.functional as functional
 
 from constraints.datatools.label_schema import LabelSchema
-from constraints.factories.metrics import create_default_staged_metrics
+from constraints.factories.metrics import (
+    create_default_staged_metrics,
+    create_segmentation_staged_metrics,
+)
 from constraints.types import (
     DiscreteSegmentation,
     FieldParams,
@@ -88,6 +91,29 @@ def test_default_staged_metrics_do_not_share_state_between_validation_stages() -
 
     assert metrics.compute(_context("val")).scalars
     assert metrics.compute(_context("val_extra")).scalars == {}
+
+
+def test_segmentation_staged_metrics_support_binary_non_vessel_schema() -> None:
+    label_schema = LabelSchema.from_lists(
+        ["background", "myocardium"],
+        [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1)],
+    )
+    target = torch.tensor([[[0, 1], [1, 0]]])
+    metric_input = MetricInput(
+        image=torch.zeros((1, 1, 2, 2)),
+        segmentation_logits=functional.one_hot(target, 2).movedim(-1, 1).float(),
+        gt=DiscreteSegmentation(target, label_schema),
+    )
+    metrics = create_segmentation_staged_metrics(label_schema)
+
+    metrics.update(_context("val"), metric_input)
+
+    result = metrics.compute(_context("val")).scalars
+    assert torch.isclose(
+        result["segmentation/iou/pred_vs_gt"],
+        torch.tensor(1.0),
+    )
+    assert not any("constraint" in name for name in result)
 
 
 def test_deformation_jacobian_diagnostics_report_identity_and_folding() -> None:

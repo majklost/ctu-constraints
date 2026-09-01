@@ -82,3 +82,15 @@ def create_default_staged_metrics(
             ),
         }
     )
+
+
+def create_segmentation_staged_metrics(
+    label_schema: LabelSchema,
+) -> StagedMetricComputer:
+    """Build dataset-agnostic segmentation IoU metrics for every stage."""
+    return StagedMetricComputer(
+        {
+            stage: CompositeMetric([SegmentationIoUTerm(label_schema)])
+            for stage in ("train", "val", "val_extra", "test")
+        }
+    )

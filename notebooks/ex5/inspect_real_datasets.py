@@ -18,6 +18,7 @@
 from pathlib import Path
 import h5py
 from constraints import get_data_folder
+from constraints.utils import get_repo_root
 import numpy as np
 import matplotlib.pyplot as plt
 import polars as pl
@@ -64,6 +65,47 @@ plt.show()
 plt.imshow(label==255)
 
 
+
+# %%
+import h5py
+import matplotlib.pyplot as plt
+import numpy as np
+
+sample_id = 0
+image_fname = image_fnames[sample_id]
+label_fname = label_fnames[sample_id]
+print(image_fname.name, label_fname.name)
+
+with (
+    h5py.File(image_fname, "r") as image_file,
+    h5py.File(label_fname, "r") as label_file,
+):
+    print("Label keys:", list(label_file.keys()))
+    image = np.array(image_file["trans_img"])
+    label = np.array(label_file["trans_mask"], dtype=np.uint8)
+
+print("Unique label values:", np.unique(label))
+
+# Create 1x3 subplot
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+# 1. Transformed Image
+axes[0].imshow(image, cmap="gray")
+axes[0].set_title(f"Image ({image_fname.name})")
+
+# 2. Label Mask
+im1 = axes[1].imshow(label, cmap="viridis")
+axes[1].set_title("Label Mask")
+
+# 3. Label == 255 Binary Mask
+axes[2].imshow(label == 255, cmap="gray")
+axes[2].set_title("Mask == 255")
+
+for ax in axes:
+    ax.axis("off")
+
+plt.tight_layout()
+plt.show()
 
 # %%
 for i in range(len(image_fnames)):
@@ -166,6 +208,79 @@ df.head()
 # %%
 print(df.select(pl.col("annular_myocardium").sum()))
 print(len(df))
+
+# %% [markdown]
+# ## Image sizes
+
+# %%
+def acdc_shape(data_path: Path) -> tuple[int, int]:
+    with h5py.File(ACDC_INIT / data_path, "r") as file:
+        image_shape = tuple(file["image"].shape)
+        label_shape = tuple(file["label"].shape)
+    assert image_shape == label_shape
+    assert len(image_shape) == 2
+    return image_shape
+
+
+shapes = [acdc_shape(path) for path in df["path"]]
+shape_counts = (
+    pl.DataFrame(
+        {
+            "image_height": [shape[0] for shape in shapes],
+            "image_width": [shape[1] for shape in shapes],
+        }
+    )
+    .group_by("image_height", "image_width")
+    .len(name="num_images")
+    .sort("num_images", descending=True)
+)
+print(f"All ACDC images have one size: {len(shape_counts) == 1}")
+print(shape_counts)
+
+# %% [markdown]
+# ## Patient-disjoint annular-myocardium splits
+#
+# Split patients rather than individual slices so that slices from one patient
+# cannot leak between train, validation, and test sets.
+
+# %%
+SPLIT_SEED = 42
+MANIFEST_DIR = get_repo_root() / "dataset_manifests" / "acdc"
+
+annular_df = df.filter(pl.col("annular_myocardium"))
+patient_ids = np.array(sorted(annular_df["patient"].unique().to_list()))
+np.random.default_rng(SPLIT_SEED).shuffle(patient_ids)
+
+num_train_patients = int(0.70 * len(patient_ids))
+num_val_patients = int(0.20 * len(patient_ids))
+split_patients = {
+    "trn": patient_ids[:num_train_patients],
+    "val": patient_ids[
+        num_train_patients : num_train_patients + num_val_patients
+    ],
+    "test": patient_ids[num_train_patients + num_val_patients :],
+}
+
+MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+split_dfs = {}
+for split_name, patients in split_patients.items():
+    split_df = (
+        annular_df.filter(pl.col("patient").is_in(patients))
+        .sort("patient", "frame", "slice")
+    )
+    split_df.write_csv(MANIFEST_DIR / f"{split_name}.csv")
+    split_dfs[split_name] = split_df
+    print(
+        split_name,
+        f"patients={split_df['patient'].n_unique()}",
+        f"slices={len(split_df)}",
+    )
+
+assert sum(len(split_df) for split_df in split_dfs.values()) == len(annular_df)
+assert all(
+    set(split_patients[left]).isdisjoint(split_patients[right])
+    for left, right in (("trn", "val"), ("trn", "test"), ("val", "test"))
+)
 
 # %%
 # print(df.select(pl.col("patient").n_unique()))

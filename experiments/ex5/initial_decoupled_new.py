@@ -28,6 +28,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from constraints import (
+    get_data_folder,
     get_experiment_folder,
     show_torch_image,
     show_torch_mask,
@@ -35,14 +36,20 @@ from constraints import (
 from constraints.computers.loss_computers import ProjectLossComputer
 from constraints.computers.metric_computers import StagedMetricComputer
 from constraints.computers.overlay_computers import SegmentationOverlayComputer
-from constraints.datatools.datasets import ComposedArtificialDataset
+from constraints.datatools.datasets import (
+    ACDCSliceMyocardiumOnlyDataset,
+    ComposedArtificialDataset,
+)
 from constraints.datatools.label_schema import LabelSchema
 from constraints.datatools.template_sources import (
     PerSampleTemplateSource,
     TemplateSource,
 )
 from constraints.factories.losses import LossPresetName, create_loss_computer
-from constraints.factories.metrics import create_default_staged_metrics
+from constraints.factories.metrics import (
+    create_default_staged_metrics,
+    create_segmentation_staged_metrics,
+)
 from constraints.generators.recipes import Recipe
 from constraints.lightning_wrappers.callbacks import (
     InferenceWeightsCheckpoint,
@@ -69,6 +76,7 @@ from constraints.utils import get_repo_root
 
 FOLDER = get_experiment_folder(Path("ex5") / "initial_decoupled_new")
 DEFAULT_RECIPE = get_repo_root() / "recipes/artificial/default.json"
+DEFAULT_ACDC_MANIFEST_DIR = get_repo_root() / "dataset_manifests/acdc"
 WANDB_PROJECT = "Constraints2"
 WANDB_ENTITY = "mrkosmic-ctu"
 # COUPLING_OPTIONS = ["full", "decoupled"]
@@ -168,9 +176,8 @@ def handle_decoupled(
         label_schema,
         field_regularization_weight=args.deformation_regularization_weight,
     )
-    optimizer_callback = lambda module: torch.optim.Adam(
-        module.parameters(), lr=args.learning_rate
-    )
+    def optimizer_callback(module):
+        return torch.optim.Adam(module.parameters(), lr=args.learning_rate)
 
     match args.learning_sample_strategy:
         case "always_gt":
@@ -222,11 +229,22 @@ def main(args):
     print(f"W&B project: {WANDB_ENTITY}/{WANDB_PROJECT}")
     configure_reproducibility(seed=args.seed)
     print(f"Seed: {args.seed}")
-    if args.rigid_def_mode is not None and args.modality != "both":
+    if args.dataset == "acdc" and args.mode != "UNET":
+        raise ValueError("The ACDC pipeline currently supports --mode UNET only.")
+    if (
+        args.dataset == "artificial"
+        and args.rigid_def_mode is not None
+        and args.modality != "both"
+    ):
         raise ValueError("rigid_def_mode can only be used with modality 'both'")
-    if args.modality == "both" and args.rigid_def_mode is None:
+    if (
+        args.dataset == "artificial"
+        and args.modality == "both"
+        and args.rigid_def_mode is None
+    ):
         raise ValueError(
-            "When modality is 'both', rigid_def_mode must be specified (either 'calc' or 'deep')"
+            "When modality is 'both', rigid_def_mode must be specified "
+            "(either 'calc' or 'deep')"
         )
 
     if args.segmentator_unlearned:
@@ -250,107 +268,129 @@ def main(args):
     #     "BCE_SDFTEMPLATE_MSE",
     #     "BCE_SDFTEMPLATE_OneSideSDFSQUARE",
     # ]
-    recipe = Recipe.load_json(args.recipe)
-    source_root = recipe.resolve_source_root()
+    if args.dataset == "acdc":
+        acdc_root = get_data_folder() / "real/acdc"
+        trn_df = polars.read_csv(args.acdc_manifest_dir / "trn.csv")
+        val_df = polars.read_csv(args.acdc_manifest_dir / "val.csv")
+        if args.swap_splits:
+            trn_df, val_df = val_df, trn_df
 
-    trn_indices = polars.read_csv(source_root / "splits/trn_samples.csv")[
-        "sample_index"
-    ].to_list()
-    val_indices = polars.read_csv(source_root / "splits/val_samples.csv")[
-        "sample_index"
-    ].to_list()
+        image_size = tuple(args.acdc_image_size)
+        trn_dataset = ACDCSliceMyocardiumOnlyDataset(
+            acdc_root,
+            trn_df,
+            image_size=image_size,
+        )
+        val_dataset = ACDCSliceMyocardiumOnlyDataset(
+            acdc_root,
+            val_df,
+            image_size=image_size,
+        )
+    else:
+        recipe = Recipe.load_json(args.recipe)
+        source_root = recipe.resolve_source_root()
 
-    if args.swap_splits:
-        trn_indices, val_indices = val_indices, trn_indices
+        trn_indices = polars.read_csv(source_root / "splits/trn_samples.csv")[
+            "sample_index"
+        ].to_list()
+        val_indices = polars.read_csv(source_root / "splits/val_samples.csv")[
+            "sample_index"
+        ].to_list()
 
-    trn_dataset = ComposedArtificialDataset.from_recipe(
-        source_root,
-        recipe,
-        sample_list=trn_indices,
-    )
+        if args.swap_splits:
+            trn_indices, val_indices = val_indices, trn_indices
 
-    val_dataset = ComposedArtificialDataset.from_recipe(
-        source_root,
-        recipe,
-        sample_list=val_indices,
-    )
-    # trn_dataset = CachedArtificialDataset(
-    #     TRN_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
-    # )
-    # val_dataset = CachedArtificialDataset(
-    #     VAL_FOLDER, sdf_mode=args.sdf_mode, return_template_sdf=return_template_sdf
-    # )
-    template_source = PerSampleTemplateSource(
-        trn_dataset.template_assets, trn_dataset.label_schema
-    )
-    assert args.modality == "deformed", "Currently deformed only supported"
-    transformer = DeformableTransformer()
+        trn_dataset = ComposedArtificialDataset.from_recipe(
+            source_root,
+            recipe,
+            sample_list=trn_indices,
+        )
+        val_dataset = ComposedArtificialDataset.from_recipe(
+            source_root,
+            recipe,
+            sample_list=val_indices,
+        )
 
-    staged_metric_computer = create_default_staged_metrics(trn_dataset.label_schema)
+    if args.dataset == "acdc":
+        staged_metric_computer = create_segmentation_staged_metrics(
+            trn_dataset.label_schema
+        )
+    else:
+        staged_metric_computer = create_default_staged_metrics(
+            trn_dataset.label_schema
+        )
 
     if args.mode == "UNET":
         module = handle_unet(args, staged_metric_computer, ls=trn_dataset.label_schema)
     else:
+        template_source = PerSampleTemplateSource(
+            trn_dataset.template_assets, trn_dataset.label_schema
+        )
+        if args.modality != "deformed":
+            raise ValueError("Currently only the deformed modality is supported.")
         module = handle_decoupled(
             args,
-            transformer,
+            DeformableTransformer(),
             staged_metric_computer,
             label_schema=trn_dataset.label_schema,
             template_source=template_source,
         )
 
-    BATCH_SIZE = args.batch_size
-    NUM_WORKERS = args.num_workers
-    EPOCHS = args.max_epochs
+    batch_size = args.batch_size
+    num_workers = args.num_workers
+    epochs = args.max_epochs
     train_generator = torch.Generator().manual_seed(args.seed)
     trn_loader = DataLoader(
         trn_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=True,
-        num_workers=NUM_WORKERS,
+        num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
         generator=train_generator,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=False,
-        num_workers=NUM_WORKERS,
+        num_workers=num_workers,
         pin_memory=torch.cuda.is_available(),
     )
 
     group_name = (
-        f"ex3-{FILE_NAME}-{args.mode}-{args.modality}"  # identifies the "approach"
+        f"ex5-{FILE_NAME}-{args.dataset}-{args.mode}-{args.modality}"
     )
     if args.rigid_def_mode is not None:
         # calc and deep are different approaches - they must not share a group.
         group_name += f"-{args.rigid_def_mode}"
 
-    TAGS = [
+    tags = [
         "scratch",
         "overlay",
-        "ex3",
+        "ex5",
         FILE_NAME,
+        args.dataset,
         args.mode,
         args.modality,
         "newer",
     ]
     if args.rigid_def_mode is not None:
-        TAGS.append(args.rigid_def_mode)
+        tags.append(args.rigid_def_mode)
     if args.special_tag:
-        TAGS.append(args.special_tag)
+        tags.append(args.special_tag)
 
-    wandb_logger = create_wandb_logger(
-        project=WANDB_PROJECT,
-        entity=WANDB_ENTITY,
-        name=f"{group_name}-seed{args.seed}",  # unique per run, human-readable
-        group=group_name,  # ties all seeds of this approach together
-        job_type="train",  # distinguishes from later "aggregate" runs
-        tags=TAGS,
-        config=None if args.smoke_test else vars(args),
-    )
+    wandb_logger = None
+    if not args.smoke_test:
+        wandb_logger = create_wandb_logger(
+            project=WANDB_PROJECT,
+            entity=WANDB_ENTITY,
+            name=f"{group_name}-seed{args.seed}",
+            group=group_name,
+            job_type="train",
+            tags=tags,
+            config=vars(args),
+        )
 
-    logger = False if args.smoke_test else wandb_logger
+    logger = wandb_logger if wandb_logger is not None else False
     callbacks = []
     if not args.smoke_test:
         callbacks.append(
@@ -362,14 +402,14 @@ def main(args):
         )
         callbacks.append(
             InferenceWeightsCheckpoint(
-                experiment="ex4",
+                experiment="ex5",
                 filename=FILE_NAME,
                 run_id=wandb_logger.experiment.id,
             )
         )
 
     trainer = pl.Trainer(
-        max_epochs=EPOCHS,
+        max_epochs=epochs,
         accelerator="auto",
         devices="auto",
         logger=logger,
@@ -384,11 +424,18 @@ def main(args):
     trainer.fit(module, train_dataloaders=trn_loader, val_dataloaders=val_loader)
 
     if not args.smoke_test:
+        assert wandb_logger is not None
         wandb_logger.experiment.finish()
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        choices=("artificial", "acdc"),
+        default="artificial",
+        help="Dataset pipeline to train on.",
+    )
     parser.add_argument(
         "--recipe",
         type=Path,
@@ -398,8 +445,22 @@ if __name__ == "__main__":
             "(defaults to recipes/artificial/default.json)."
         ),
     )
-    parser.add_argument("--mode", type=str, choices=MODES, required=True)
-    parser.add_argument("--modality", type=str, choices=MODALITIES, required=True)
+    parser.add_argument("--mode", type=str, choices=MODES, default="UNET")
+    parser.add_argument("--modality", type=str, choices=MODALITIES, default="deformed")
+    parser.add_argument(
+        "--acdc_manifest_dir",
+        type=Path,
+        default=DEFAULT_ACDC_MANIFEST_DIR,
+        help="Directory containing trn.csv, val.csv, and test.csv.",
+    )
+    parser.add_argument(
+        "--acdc_image_size",
+        type=int,
+        nargs=2,
+        metavar=("HEIGHT", "WIDTH"),
+        default=(256, 256),
+        help="Spatial size used to batch variable-sized ACDC slices.",
+    )
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--max_epochs", type=int, default=200)
@@ -408,7 +469,10 @@ if __name__ == "__main__":
         "--deformation_regularization_weight",
         type=float,
         default=0.0,
-        help="Weight of VoxelMorph L2 diffusion regularization for displacement fields.",
+        help=(
+            "Weight of VoxelMorph L2 diffusion regularization for displacement "
+            "fields."
+        ),
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(

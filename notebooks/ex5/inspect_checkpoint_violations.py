@@ -9,7 +9,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.19.5
 #   kernelspec:
-#     display_name: ctu-constraints
+#     display_name: Python 3 (ipykernel)
 #     language: python
 #     name: python3
 # ---
@@ -51,8 +51,8 @@ from constraints.models.segmentator import set_segmentator_encoder_weights
 from constraints.utils import get_repo_root
 
 # %%
-# RUN_ID = "s0x3j84i"
-RUN_ID = "ct6wtl0n"
+RUN_ID = "s0x3j84i"
+# RUN_ID = "ct6wtl0n"
 EXPERIMENT = "ex4"
 EXPERIMENT_FILE = "initial_decoupled_new"
 
@@ -250,6 +250,13 @@ colors.
 """
 
 # %%
+from typing import List, Union
+
+from matplotlib import gridspec
+
+from constraints.visu.helpers import create_segmentation_overlay
+
+
 cmap = ListedColormap(
     [
         dataset.label_schema.colors[index]
@@ -257,25 +264,19 @@ cmap = ListedColormap(
     ]
 )
 
+def show_violations(violation_indices: Union[int, List[int]]) -> None:
+    if isinstance(violation_indices, int):
+        violation_indices = [violation_indices]
 
-def show_violation(violation_index: int) -> None:
-    record = violations[violation_index]
-    sample = dataset[record["dataset_position"]]
-    prediction = record["prediction"]
+    num_rows = len(violation_indices)
+    if num_rows == 0:
+        return
 
-    occurred, details = does_violation_occur_with_wall(
-        prediction,
-        dataset.label_schema,
+    # Compact figure size: width=10, height proportional (~3.2 inches per row)
+    fig = plt.figure(figsize=(10, 3.2 * num_rows))
+    gs = gridspec.GridSpec(
+        num_rows, 3, figure=fig, hspace=0.35, wspace=0.08, top=0.95, bottom=0.05
     )
-    if not occurred or tuple(details) != record["details"]:
-        raise RuntimeError(
-            "Constraint results changed since this prediction was scanned. "
-            "Rerun the violation scan cell before displaying it."
-        )
-
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    axes[0].imshow(sample["image"].squeeze(), cmap="gray", vmin=0, vmax=1)
-    axes[0].set_title(f"Image (sample {record['sample_id']})")
 
     mask_options = {
         "cmap": cmap,
@@ -283,21 +284,76 @@ def show_violation(violation_index: int) -> None:
         "vmax": dataset.label_schema.num_classes - 1,
         "interpolation": "nearest",
     }
-    axes[1].imshow(sample["target_labels"], **mask_options)
-    axes[1].set_title("Ground truth")
-    axes[2].imshow(prediction, **mask_options)
-    axes[2].set_title("Prediction")
 
-    for axis in axes:
-        axis.axis("off")
+    for row_idx, v_idx in enumerate(violation_indices):
+        record = violations[v_idx]
+        sample = dataset[record["dataset_position"]]
+        prediction = record["prediction"]
 
-    fig.suptitle("\n".join(record["details"]), wrap=True)
-    fig.tight_layout()
+        occurred, details = does_violation_occur_with_wall(
+            prediction,
+            dataset.label_schema,
+        )
+        if not occurred or tuple(details) != record["details"]:
+            raise RuntimeError(
+                f"Constraint results changed for index {v_idx} (sample {record['sample_id']})."
+            )
+
+        ax0 = fig.add_subplot(gs[row_idx, 0])
+        ax1 = fig.add_subplot(gs[row_idx, 1])
+        ax2 = fig.add_subplot(gs[row_idx, 2])
+
+        # 1. Grayscale Image
+        img = sample["image"].squeeze()
+        ax0.imshow(img, cmap="gray", vmin=0, vmax=1)
+        ax0.set_title(
+            f"Sample {record['sample_id']} (#{v_idx})",
+            fontsize=10,
+            fontweight="bold",
+        )
+
+        # 2. Ground Truth Overlay
+        gt_overlay = create_segmentation_overlay(
+            sample["image"], sample["target_labels"], cmap, alpha=0.7
+        )
+        ax1.imshow(gt_overlay, **mask_options)
+        ax1.set_title("Ground truth", fontsize=10)
+
+        # 3. Prediction Overlay
+        pred_overlay = create_segmentation_overlay(
+            sample["image"], prediction, cmap, alpha=0.7
+        )
+        ax2.imshow(pred_overlay, **mask_options)
+        ax2.set_title("Prediction", fontsize=10)
+
+        for ax in (ax0, ax1, ax2):
+            ax.axis("off")
+
+        # Display violation reason spanning across the row under the middle plot
+        details_text = " • ".join(record["details"])
+        ax1.text(
+            0.5,
+            -0.12,
+            f"Violations: {details_text}",
+            transform=ax1.transAxes,
+            fontsize=8.5,
+            ha="center",
+            va="top",
+            wrap=True,
+        )
+
     plt.show()
 
 # %%
+import polars as pl
 if violations:
-    show_violation(0)
+    sample_ids_to_plot = ["2888", "723", "1275"]
+    indices = [
+        i
+        for i, item in enumerate(violations)
+        if str(item.get("sample_id")) in sample_ids_to_plot
+    ]
+    show_violations(indices)
 else:
     print("No violating predictions to display.")
 

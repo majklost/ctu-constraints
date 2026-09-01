@@ -148,13 +148,27 @@ results[2000]
 results[200]
 ```
 
+![Vybraná porušení topologie pro plovoucí pláty (200 trn) (Violation s bg je kvůli pixelu vpravo nahoře u plátu)](../images/floating/output.png){fig-align="center" width="100%"}
+
+![Vybraná porušení topologie pro díry a kousance (200 trn)](../images/bubbles_violations.png){fig-align="center" width="100%"}
+
 ### Interpretace výsledků
+
+Některé možné závěry:
+-  Množství topologických porušení, které UNET udělá je významně ovlivněno počtem trénovacích příkladů
+- Zatímco změna IoU se pohybuje v řádu jednotek procent, množství porušení se může měnit o desítky procent
+- Průzkum aplikace registračních metod pro segmentace je potřeba provést na datasetech s menším množstvím dat, je otázkou zda se na těchto datasetech dokáží dostatečně naučit
+
 
 
 ## Přidání externích datasetů
 
 - Do prostředí byly přidány datasety [ACDC](https://www.kaggle.com/datasets/anhoangvo/acdc-dataset/data) a [CSV](http://119.29.231.17/index.html).
-- Ne všechny vzorky datasetu CSV splňují očekávaná topologická pravidla. Ve většině případů se ovšem jedná o nedokonalosti při tvorbě GT masek (viz obrázek). Je potřeba vyřešit, zda budeme dataset využívat tak, jak je, nebo dovolíme dodatečnou úpravu masek.
+- Ne všechny vzorky datasetu CSV splňují očekávaná topologická pravidla. Ve většině případů se ovšem jedná o nedokonalosti při tvorbě GT masek (viz obrázek). Je potřeba vyřešit, zda budeme dataset využívat tak, jak je, nebo dovolíme dodatečnou úpravu masek. Moje preference je upravit masky, jinak nemá cenu měřit porušení topologie.
+
+![Ukázka jedné z nedokonalostí masky v CSV](../images/CSV_violation.png){fig-align="center" width="100%"}
+
+
 
 -**TODO obrázek** a statistiky porušení
 
@@ -186,3 +200,4 @@ Značná část měsíce byla věnována úpravám kódu, které měly za cíl z
 - snaha prekonat UNET na zjistenych problemech
 - prezkoumani minulych experimentu na 2000 vs 200
 - TEDS-NET
+- tri moznosti kam to stocit

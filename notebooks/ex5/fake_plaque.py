@@ -218,7 +218,7 @@ for col, sample_index in enumerate(range(len(samples))):
     axes[0,col].imshow(sample.image.squeeze(), cmap="gray", vmin=0, vmax=1)
     axes[0,col].set_title(f"Sample {sample_index}")
     axes[1,col].imshow(
-        create_segmentation_overlay(sample.image,sample.target_labels,cmap,.5),
+        create_segmentation_overlay(sample.image,sample.target_labels,cmap,1),
         cmap=cmap,
         vmin=0,
         vmax=3,
