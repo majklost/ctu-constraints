@@ -15,6 +15,8 @@ execute:
   echo: false
   warning: false
   cache: true
+
+extract-media: .quarto/media
 ---
 ## Kontext
 
@@ -36,7 +38,8 @@ Plátu je takto vytvořeno několik, je možné aplikovat offset vůči vnitřn�
 - Pro každý vzorek v dataset je možné vygenerovat rigidní posun, posun je generován tak, aby nedošlo k vytlačení již zdeformované cévy mimo obraz
 - Na výsledný šedotónový obrázek je možné aplikovat šum (multiplikativní/aditivní), nebo překrýt některé oblasti černými obdélníky
 
-- **TODO** Obrázky nedeform, deform, posun. 
+![Ukázka vzorku, náhodně zdeformovaného, náhodně otočeného a s přidaným šumem (překryv GT na obrázek)](../images/dataset.png){fig-align="center" width="100%"}
+
 
 Bylo vyzkoušeno několik přístupů, s cílem zmást UNET. Ve všech popsaných přístupech je aplikována následně deformace, rigidní posun a multiplikativní šum. 
 
@@ -49,6 +52,7 @@ Bylo vyzkoušeno několik přístupů, s cílem zmást UNET. Ve všech popsanýc
 
 - Z medicínského hlediska by měl daný přístup simulovat částečné ultrazvukové odrazy.
 
+![Ukázka plovoucích plátů (překryv GT na obrázek)](../images/tworeal_fake_similar_offset_minus3.png){fig-align="center" width="100%"}
 
 ### Díry a "kousance"
 
@@ -58,10 +62,17 @@ Bylo vyzkoušeno několik přístupů, s cílem zmást UNET. Ve všech popsanýc
 
 - Z medicínského hlediska by měl daný přístup simulovat nehomogenity v plátu.
 
-
+![Ukázka děr a „kousanců“ v plátu (překryv GT na obrázek)](../images/bubble_cavities_overlap_gradient.png){fig-align="center" width="100%"}
 
 ### Pohlcení signálu plátem
 
+- Při přístupu pohlcení signálu plátem je vygenerován plát, který se v GT masce zabořuje do stěny cévy a tedy ji v daném místě ztenčuje. V šedotónovém obrázku je poté hranice plátu rošířena tak, že by se mohlo zdát, že plát přímo přechází do pozadí a stěna cévy není přítomná.
+
+- Hypotéza experimentu byla, že UNET ve své segmentační masce stěnu nevykreslí, čímž poruší topologii stěny cévy (nebude uzavřená).
+
+- Z medicínského hlediska by měl daný přístup simulovat pohlcení ultrazvukového signálu plátem, mající za následek snížení intensity obrazu za plátem.
+
+![Ukázka pohlcení signálu plátem (překryv GT na obrázek)](../images/wall_attenuation.png){fig-align="center" width="100%"}
 
 ### Výsledky
 
@@ -70,7 +81,75 @@ Pro všechny tři přístupy byly otestovány dvě trn/val varianty:
 1. 2000 tréninkových dat a 200 validačních vzorků
 2. 200 tréninkových a  2000 validačních dat
 
-Ve všech případech bylo měřeno IoU jednotlivých tříd a procento vzorků, kde predikce sítě UNET porušuje topologii.
+Ve všech případech bylo měřeno IoU jednotlivých tříd a procento vzorků, kde predikce sítě UNET porušuje topologii. Veškeré experimenty byly trénovány do konvergence.
+
+```{python}
+#| label: prepare-results-tables
+#| output: false
+import pandas as pd
+import wandb
+
+WANDB_RUN_PATH = "mrkosmic-ctu/Constraints2"
+METRICS = {
+    "Porušení [%]": "val/epoch/segmentation/constraint/violation_rate",
+    "Pozadí IoU": "val/epoch/segmentation/iou/background_vs_gt",
+    "Stěna IoU": "val/epoch/segmentation/iou/boundary_vs_gt",
+    "Lumen IoU": "val/epoch/segmentation/iou/lumen_vs_gt",
+    "Plát IoU": "val/epoch/segmentation/iou/plaque_vs_gt",
+    "Celkové IoU": "val/epoch/segmentation/iou/pred_vs_gt",
+}
+RUNS = {
+    2000: [
+        ("Pohlcení signálu", "7acubv6h"),
+        ("Díry a kousance", "bdse2t26"),
+        ("Plovoucí pláty", "647e6un7"),
+    ],
+    200: [
+        ("Pohlcení signálu", "3yie79kf"),
+        ("Díry a kousance", "s0x3j84i"),
+        ("Plovoucí pláty", "ct6wtl0n"),
+    ],
+}
+
+
+def results_table(runs: list[tuple[str, str]]) -> pd.DataFrame:
+    api = wandb.Api()
+    rows = []
+    for dataset, run_id in runs:
+        summary = api.run(f"{WANDB_RUN_PATH}/{run_id}").summary
+        row = {name: summary[key] for name, key in METRICS.items()}
+        row["Porušení [%]"] *= 100
+        rows.append({"Dataset": dataset, **row})
+
+    return pd.DataFrame(rows).set_index("Dataset").round(
+        {
+            "Porušení [%]": 1,
+            "Pozadí IoU": 4,
+            "Stěna IoU": 4,
+            "Lumen IoU": 4,
+            "Plát IoU": 4,
+            "Celkové IoU": 4,
+        }
+    )
+
+
+results = {size: results_table(runs) for size, runs in RUNS.items()}
+```
+
+```{python}
+#| label: tbl-results-train-2000
+#| tbl-cap: "Výsledky UNET pro 2 000 tréninkových a 200 validačních vzorků."
+results[2000]
+```
+
+```{python}
+#| label: tbl-results-train-200
+#| tbl-cap: "Výsledky UNET pro 200 tréninkových a 2 000 validačních vzorků."
+results[200]
+```
+
+### Interpretace výsledků
+
 
 ## Přidání externích datasetů
 
@@ -80,14 +159,14 @@ Ve všech případech bylo měřeno IoU jednotlivých tříd a procento vzorků,
 -**TODO obrázek** a statistiky porušení
 
 
-### Interpretace výsledků
+
 
 
 
 
 ## Další provedené práce za období srpen 2026
 
-*Sekce (vyjma změny IoU) nemá vliv na prezentaci výsledků, čtenář ji může případně přeskočit. *
+*Sekce (vyjma změny IoU) nemá vliv na aktuální prezentaci výsledků, čtenář ji může případně přeskočit. *
 
 Značná část měsíce byla věnována úpravám kódu, které měly za cíl zjednodušit přidávání, organizaci a analýzu budoucích experimentů.
 
@@ -103,4 +182,7 @@ Značná část měsíce byla věnována úpravám kódu, které měly za cíl z
 
 ## Plánované experimenty
 - naplánované experimenty 6x5 lossů
+- vetsi prozkoumani UNET selhani
+- snaha prekonat UNET na zjistenych problemech
+- prezkoumani minulych experimentu na 2000 vs 200
 - TEDS-NET

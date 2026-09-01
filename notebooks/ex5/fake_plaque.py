@@ -165,6 +165,74 @@ print(recipe_path)
 # print(report)
 
 # %% [markdown]
+# ## Figure for report
+
+# %%
+from constraints.visu.helpers import create_segmentation_overlay
+from constraints.utils import get_repo_root
+recipes =[
+    Recipe(
+    source="artificial/samples5000",
+    layers=(
+        SavedLayer(backup=power_layer_backup((plaque_range1, plaque_range2), seed=25)),
+    ),
+
+),
+Recipe(
+    source="artificial/samples5000",
+    layers=(
+        SavedLayer(backup=power_layer_backup((plaque_range1, plaque_range2), seed=25)),
+    ),
+    deformation=SavedDeformation(backup=DeformationBackup(dc, seed=27)),
+
+),
+Recipe(
+    source="artificial/samples5000",
+    layers=(
+        SavedLayer(backup=power_layer_backup((plaque_range1, plaque_range2), seed=25)),
+    ),
+    deformation=SavedDeformation(backup=DeformationBackup(dc, seed=27)),
+    rigid=SavedRigid(backup=RigidBackup(rc, seed=52)),
+),
+Recipe(
+    source="artificial/samples5000",
+    layers=(
+        SavedLayer(backup=power_layer_backup((plaque_range1, plaque_range2), seed=25)),
+    ),
+    deformation=SavedDeformation(backup=DeformationBackup(dc, seed=27)),
+    rigid=SavedRigid(backup=RigidBackup(rc, seed=52)),
+    noise=nc,
+)
+] 
+# sample = preview_artificial_sample(
+#     recipe=recipe,
+#     sample_index=5,
+# )
+samples = list(map(lambda x: preview_artificial_sample(recipe=x, sample_index=5),recipes))
+cmap = ListedColormap(
+    [LabelSchema.as_artery().colors[i] for i in sorted(LabelSchema.as_artery().colors) ]
+)
+fig, axes = plt.subplots(2,4, figsize=(18,8))
+for col, sample_index in enumerate(range(len(samples))):
+    sample = samples[sample_index]
+    axes[0,col].imshow(sample.image.squeeze(), cmap="gray", vmin=0, vmax=1)
+    axes[0,col].set_title(f"Sample {sample_index}")
+    axes[1,col].imshow(
+        create_segmentation_overlay(sample.image,sample.target_labels,cmap,.5),
+        cmap=cmap,
+        vmin=0,
+        vmax=3,
+        interpolation="nearest",
+    )
+    axes[1,col].set_title(f"target labels")
+    for axis in axes[:,col]:
+        axis.axis("off")
+fig.tight_layout()
+fig.savefig(get_repo_root()/"reports/august26/images"/f"dataset.png")
+
+
+
+# %% [markdown]
 # # Bites and holes
 # Start with one large plaque produced by the existing power-profile generator.
 # Random circular bubbles are then intersected with the plaque:

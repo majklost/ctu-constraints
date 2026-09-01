@@ -30,6 +30,9 @@ empty-artery source.
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
+import numpy as np
+import torch
+from matplotlib.colors import ListedColormap, to_rgba
 from constraints import get_data_folder
 from constraints.datatools.datasets import ComposedArtificialDataset, SavedLayer
 
@@ -41,9 +44,13 @@ from constraints.losses_metrics.constraint_function import (
 )
 from constraints.utils import get_repo_root
 
+RECIPE = "wall_attenuation"
+# RECIPE = "bubble_cavities_overlap_gradient"
+# RECIPE = "tworeal_fake_similar_offset_minus3"
+
 source_root = get_data_folder() / "artificial" / "samples5000"
 recipe_path = (
-    get_repo_root() / "recipes/artificial/bubble_cavities_overlap_gradient.json"
+    get_repo_root() / f"recipes/artificial/{RECIPE}.json"
 )
 dataset = ComposedArtificialDataset.from_recipe(
     source_root, Recipe.load_json(recipe_path)
@@ -62,29 +69,93 @@ for i in range(len(dataset)):
         plt.show()
 
 # %%
+import torch
+import numpy as np
+def create_segmentation_overlay(
+    image: torch.Tensor | np.ndarray,
+    label_map: torch.Tensor | np.ndarray,
+    cmap: ListedColormap | list | dict,
+    alpha: float = 0.4,
+    background_label: int = 0,
+) -> np.ndarray:
+    """Blends a grayscale image with a segmentation label map into an RGB image.
+
+    Args:
+        image: Grayscale tensor/array of shape (H, W) or (1, H, W), range
+          [0, 1].
+        label_map: Integer tensor/array of shape (H, W) containing class labels.
+        cmap: Matplotlib ListedColormap, list/tuple of colors, or dict mapping
+          label->color.
+        alpha: Opacity factor for segmentation mask (0.0 to 1.0).
+        background_label: Label index treated as transparent/unmasked background
+          (set to None to color all labels).
+
+    Returns:
+        np.ndarray: Blended RGB float32 array of shape (H, W, 3) in range [0,
+        1].
+    """
+    if isinstance(image, torch.Tensor):
+        image = image.detach().cpu().numpy()
+    if isinstance(label_map, torch.Tensor):
+        label_map = label_map.detach().cpu().numpy()
+
+    image = np.squeeze(image).astype(np.float32)
+    label_map = np.squeeze(label_map).astype(np.int64)
+
+    # Convert grayscale (H, W) to 3-channel RGB (H, W, 3)
+    rgb_base = np.stack([image] * 3, axis=-1)
+    rgb_base = np.clip(rgb_base, 0.0, 1.0)
+
+    # Build color lookup table: shape (max_label + 1, 4) in RGBA
+    max_label = int(label_map.max())
+    if isinstance(cmap, dict):
+        lut = np.zeros((max(max_label + 1, max(cmap.keys()) + 1), 4), dtype=np.float32)
+        for lbl, color in cmap.items():
+            lut[lbl] = to_rgba(color)
+    elif isinstance(cmap, ListedColormap):
+        colors = cmap.colors
+        lut = np.array([to_rgba(c) for c in colors], dtype=np.float32)
+    else:
+        lut = np.array([to_rgba(c) for c in cmap], dtype=np.float32)
+
+    # Map labels to RGB overlay
+    overlay_rgb = lut[label_map, :3]
+
+    # Create mask for pixels to blend (exclude background)
+    if background_label is not None:
+        mask = (label_map != background_label)[..., None]
+    else:
+        mask = np.ones((*label_map.shape, 1), dtype=bool)
+
+    # Alpha blending on segmented regions
+    blended = np.where(mask, (1.0 - alpha) * rgb_base + alpha * overlay_rgb, rgb_base)
+    return np.clip(blended, 0.0, 1.0)
+
+# %%
 
 
-sample_indices = range(6)
-fig, axes = plt.subplots(len(sample_indices), 2, figsize=(8, 18))
+sample_indices = range(5,11)
+fig, axes = plt.subplots(2,len(sample_indices), figsize=(18,8))
 
 cmap = ListedColormap(
     [dataset.label_schema.colors[i] for i in sorted(dataset.label_schema.colors)]
 )
-for row, sample_index in enumerate(sample_indices):
+for col, sample_index in enumerate(sample_indices):
     sample = dataset[sample_index]
-    axes[row, 0].imshow(sample["image"].squeeze(), cmap="gray", vmin=0, vmax=1)
-    axes[row, 0].set_title(f"Sample {sample_index}: image")
-    axes[row, 1].imshow(
-        sample["target_labels"],
+    axes[0,col].imshow(sample["image"].squeeze(), cmap="gray", vmin=0, vmax=1)
+    axes[0,col].set_title(f"Sample {sample_index}")
+    axes[1,col].imshow(
+        create_segmentation_overlay(sample["image"],sample["target_labels"],cmap,.8),
         cmap=cmap,
         vmin=0,
         vmax=3,
         interpolation="nearest",
     )
-    axes[row, 1].set_title(f"Sample {sample_index}: target labels")
-    for axis in axes[row]:
+    axes[1,col].set_title(f"target labels")
+    for axis in axes[:,col]:
         axis.axis("off")
 fig.tight_layout()
+fig.savefig(get_repo_root()/"reports/august26/images"/f"{RECIPE}.png")
 
 # %% [markdown]
 #
