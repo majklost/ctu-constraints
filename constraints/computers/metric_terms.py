@@ -5,6 +5,8 @@ import torch
 from torch import nn
 from torchmetrics import JaccardIndex
 
+from constraints.losses_metrics.metrics import ACDCAnnularityViolationCounter
+
 from ..datatools.label_schema import LabelSchema
 from ..losses_metrics.metrics import ConstraintViolationCounter
 from ..types import ConstraintViolationSamples, MetricInput, MetricResult
@@ -227,9 +229,7 @@ class DeformationJacobianTerm(MetricTerm):
         # the second (x) axis, the same order used by VoxelMorph meshgrids.
         du_dy = field[:, :, 1:, :-1] - field[:, :, :-1, :-1]
         du_dx = field[:, :, :-1, 1:] - field[:, :, :-1, :-1]
-        return (1.0 + du_dy[:, 0]) * (1.0 + du_dx[:, 1]) - (
-            du_dx[:, 0] * du_dy[:, 1]
-        )
+        return (1.0 + du_dy[:, 0]) * (1.0 + du_dx[:, 1]) - (du_dx[:, 0] * du_dy[:, 1])
 
     def update(self, inputs: MetricInput) -> MetricResult:
         fields = list(iter_deformation_fields(inputs.transform_spec))
@@ -363,6 +363,94 @@ class SegmentationConstraintViolationTerm(_ConstraintViolationTerm):
 
 
 class RegistrationConstraintViolationTerm(_ConstraintViolationTerm):
+    metric_prefix = "registration/constraint"
+
+    def _prediction_labels(self, inputs: MetricInput) -> torch.Tensor | None:
+        if inputs.warped_template is None:
+            return None
+        return inputs.warped_template.argmax(dim=1)
+
+
+class _ACDCConstraintViolationTerm(MetricTerm, ABC):
+    metric_prefix: str
+
+    def __init__(
+        self,
+        label_schema: LabelSchema,
+        min_hole_area: int = 10,
+        track_violating_samples: bool = False,
+        min_component_area: int | None = 5,
+    ) -> None:
+        super().__init__(label_schema)
+        self._counter = ACDCAnnularityViolationCounter(
+            label_schema,
+            min_hole_area=min_hole_area,
+            min_component_area=min_component_area,
+        )
+        self._track_violating_samples = track_violating_samples
+
+    @abstractmethod
+    def _prediction_labels(self, inputs: MetricInput) -> torch.Tensor | None:
+        """Return discrete [B, H, W] predictions, or None when unavailable."""
+
+    def update(self, inputs: MetricInput) -> MetricResult:
+        predictions = self._prediction_labels(inputs)
+        if predictions is None:
+            return MetricResult()
+        if self._track_violating_samples and not inputs.sample_ids:
+            raise ValueError(
+                "track_violating_samples=True requires MetricInput.sample_ids"
+            )
+
+        violations = self._counter.classify(predictions)
+        self._counter.update(predictions, violations=violations)
+        if not self._track_violating_samples:
+            return MetricResult()
+
+        violating_indices = [
+            index for index, (occurred, _) in enumerate(violations) if occurred
+        ]
+        if not violating_indices:
+            return MetricResult()
+        return MetricResult(
+            constraint_violation_samples={
+                self.metric_prefix: ConstraintViolationSamples(
+                    sample_ids=tuple(
+                        inputs.sample_ids[index] for index in violating_indices
+                    ),
+                    details=tuple(violations[index][1] for index in violating_indices),
+                )
+            }
+        )
+
+    def compute(self) -> MetricResult:
+        if not self._counter.update_called:
+            return MetricResult()
+        violating_samples, total_samples = self._counter.compute()
+        if total_samples.item() == 0:
+            return MetricResult()
+        return MetricResult(
+            scalars={
+                f"{self.metric_prefix}/violation_rate": (
+                    violating_samples.float() / total_samples
+                )
+            }
+        )
+
+    def reset(self) -> None:
+        self._counter.reset()
+
+
+class ACDCSegmentationConstraintViolationTerm(_ACDCConstraintViolationTerm):
+    metric_prefix = "segmentation/constraint"
+
+    def _prediction_labels(self, inputs: MetricInput) -> torch.Tensor | None:
+        if inputs.segmentation_logits is None:
+            return None
+        return inputs.segmentation_logits.argmax(dim=1)
+
+
+class ACDCRegistrationConstraintViolationTerm(_ACDCConstraintViolationTerm):
     metric_prefix = "registration/constraint"
 
     def _prediction_labels(self, inputs: MetricInput) -> torch.Tensor | None:

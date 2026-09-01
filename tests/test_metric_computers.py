@@ -98,9 +98,11 @@ def test_segmentation_staged_metrics_support_binary_non_vessel_schema() -> None:
         ["background", "myocardium"],
         [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1)],
     )
-    target = torch.tensor([[[0, 1], [1, 0]]])
+    target = torch.zeros((1, 32, 32), dtype=torch.long)
+    target[:, 4:28, 4:28] = 1
+    target[:, 10:22, 10:22] = 0
     metric_input = MetricInput(
-        image=torch.zeros((1, 1, 2, 2)),
+        image=torch.zeros((1, 1, 32, 32)),
         segmentation_logits=functional.one_hot(target, 2).movedim(-1, 1).float(),
         gt=DiscreteSegmentation(target, label_schema),
     )
@@ -113,7 +115,11 @@ def test_segmentation_staged_metrics_support_binary_non_vessel_schema() -> None:
         result["segmentation/iou/pred_vs_gt"],
         torch.tensor(1.0),
     )
-    assert not any("constraint" in name for name in result)
+    assert torch.isclose(
+        result["segmentation/constraint/violation_rate"],
+        torch.tensor(0.0),
+    )
+    assert "registration/constraint/violation_rate" not in result
 
 
 def test_deformation_jacobian_diagnostics_report_identity_and_folding() -> None:

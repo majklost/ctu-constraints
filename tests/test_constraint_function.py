@@ -1,8 +1,10 @@
+import numpy as np
 import torch
 
 from constraints.datatools.label_schema import LabelSchema
 from constraints.losses_metrics.constraint_function import (
     does_violation_occur_with_wall,
+    is_annular,
 )
 
 LABEL_SCHEMA = LabelSchema.from_lists(
@@ -64,3 +66,86 @@ def test_visible_enclosed_background_component_is_a_violation() -> None:
     assert occurred
     assert len(details) == 1
     assert "area 3 px" in details[0]
+
+
+def test_is_annular_returns_true_with_no_details_for_one_ring() -> None:
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[4:28, 4:28] = True
+    mask[10:22, 10:22] = False
+
+    annular, details = is_annular(mask)
+
+    assert annular
+    assert details == []
+
+
+def test_is_annular_explains_an_empty_mask() -> None:
+    annular, details = is_annular(np.zeros((32, 32), dtype=bool))
+
+    assert not annular
+    assert details == ["Myocardium mask is empty."]
+
+
+def test_is_annular_explains_a_mask_without_a_valid_hole() -> None:
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[4:28, 4:28] = True
+
+    annular, details = is_annular(mask)
+
+    assert not annular
+    assert len(details) == 1
+    assert "Open-ring/missing-hole violation" in details[0]
+    assert "background has 1" in details[0]
+    assert "expected 2" in details[0]
+
+
+def test_is_annular_identifies_an_open_ring_from_background_topology() -> None:
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[4:28, 4:28] = True
+    mask[10:22, 10:22] = False
+    mask[4:10, 16] = False
+
+    annular, details = is_annular(mask)
+
+    assert not annular
+    assert len(details) == 1
+    assert "Open-ring/missing-hole violation" in details[0]
+    assert "background has 1" in details[0]
+
+
+def test_is_annular_ignores_foreground_blobs_smaller_than_five_pixels() -> None:
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[4:28, 4:28] = True
+    mask[10:22, 10:22] = False
+    mask[1, 1] = True
+
+    annular, details = is_annular(mask)
+
+    assert annular
+    assert details == []
+
+
+def test_is_annular_can_disable_small_foreground_blob_filtering() -> None:
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[4:28, 4:28] = True
+    mask[10:22, 10:22] = False
+    mask[1, 1] = True
+
+    annular, details = is_annular(mask, min_component_area=None)
+
+    assert not annular
+    assert len(details) == 1
+    assert "found 2" in details[0]
+
+
+def test_is_annular_keeps_foreground_blobs_of_exactly_five_pixels() -> None:
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[4:28, 4:28] = True
+    mask[10:22, 10:22] = False
+    mask[1, 1:6] = True
+
+    annular, details = is_annular(mask)
+
+    assert not annular
+    assert len(details) == 1
+    assert "found 2" in details[0]

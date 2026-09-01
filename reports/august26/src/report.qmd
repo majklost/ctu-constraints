@@ -4,7 +4,7 @@ author: "Michal Mrkos"
 date: today
 number-sections: true
 toc: true
-#bibliography: references.bib
+bibliography: references.bib
 
 format:
   typst:
@@ -20,45 +20,45 @@ extract-media: .quarto/media
 ---
 ## Kontext
 
-V minulém reportu "PROJECT architecture and loss determination" bylo porovnáno $10$ různých ztrátových funkcí na jednoduchém datasetu obsahujícím vždy dva pláty tvaru elipsy. Pozice elips byly fixní, rozdíly mezi trénovacími příklady byly dány rigidní transformací, aplikací deformačního pole nebo kombinací obou technik.
+V minulém reportu „PROJECT architecture and loss determination“ bylo porovnáno $10$ různých ztrátových funkcí na jednoduchém datasetu obsahujícím vždy dva pláty tvaru elipsy. Pozice elips byly fixní, rozdíly mezi trénovacími příklady byly dány rigidní transformací, aplikací deformačního pole nebo kombinací obou technik.
 
-Jedním z hlavních požadavků bylo vytvoření umělého datasetu, na kterém UNET bude dělat topologické chyby (dále budeme označovat jako topoligcky obtížný dataset). Dále podpora pro více šablon najednou, regularizaci pole a připojení reálných datasetů. 
+Jedním z hlavních požadavků bylo vytvoření umělého datasetu, na kterém bude U-Net dělat topologické chyby (dále jej budeme označovat jako topologicky obtížný dataset). Dalšími požadavky byly podpora více šablon najednou, regularizace pole a připojení reálných datasetů.
 
 ## Tvorba topologicky obtížného datasetu
 
-Pro tvorbu nového datasetu byl implementován generátor plátů, který nyní na vstupu vezme funkce $f(\varphi)\rightarrow \mathbb{R}$, $g(\varphi)\rightarrow \mathbb{R}$ a rozsah $\varphi \in [ \varphi_1, \varphi_2 ]$ a vykreslí daný plát.
+Pro tvorbu nového datasetu byl implementován generátor plátů, který nyní na vstupu přijímá funkce $f(\varphi)\rightarrow \mathbb{R}$, $g(\varphi)\rightarrow \mathbb{R}$ a rozsah $\varphi \in [ \varphi_1, \varphi_2 ]$ a vykreslí daný plát.
 
-Jako inciální přístup pro tvrobu plátů bylo zvoleno vykreslení pomocí mocniny. Definujeme $\alpha$ jako střed plátu a $w$ jako úhel, který zabírá.
+Jako iniciální přístup pro tvorbu plátů bylo zvoleno vykreslení pomocí mocniny. Definujeme $\alpha$ jako střed plátu a $w$ jako úhel, který plát zabírá.
 
-poté zavedeme nový souřadnicový systém $\theta = \frac{2}{w}\cdot \text{atan2}(\sin(\varphi-\alpha),\cos(\varphi-\alpha))$. Samotný profile je poté definován jako $f(\theta)=[\max(1-\theta^2),0]^p$, kde $p\in\mathbb{R}^+$.
+Poté zavedeme nový souřadnicový systém $\theta = \frac{2}{w}\cdot \text{atan2}(\sin(\varphi-\alpha),\cos(\varphi-\alpha))$. Samotný profil je definován jako $f(\theta)=[\max(1-\theta^2),0]^p$, kde $p\in\mathbb{R}^+$.
 
-Plátu je takto vytvořeno několik, je možné aplikovat offset vůči vnitřní stěně cévy. Pláty jsou uloženy v různých vrstvách a je možné je překrývat (např zvlášť malé, zvlášť velké, sloučit dohromady)
+Plátů je takto vytvořeno několik a je možné aplikovat posun vůči vnitřní stěně cévy. Pláty jsou uloženy v různých vrstvách a lze je překrývat (např. zvlášť malé, zvlášť velké nebo je sloučit dohromady).
 
-- Pro každý vzorek v datasetu je možné vygenerovat deformační pole, pole je generováno tak, aby nedošlo k porušení topologie, či vytlačení cévy mimo obraz. Pole musí být předgenerováno dopředu (změřeno 112 ms/vzorek CPU, 7.67 ms/vzorek CUDA).
-- Pro každý vzorek v dataset je možné vygenerovat rigidní posun, posun je generován tak, aby nedošlo k vytlačení již zdeformované cévy mimo obraz
-- Na výsledný šedotónový obrázek je možné aplikovat šum (multiplikativní/aditivní), nebo překrýt některé oblasti černými obdélníky
+- Pro každý vzorek v datasetu je možné vygenerovat deformační pole. Pole je generováno tak, aby nedošlo k porušení topologie či vytlačení cévy mimo obraz, a musí být vytvořeno předem (naměřeno 112 ms/vzorek na CPU a 7,67 ms/vzorek na CUDA).
+- Pro každý vzorek v datasetu je možné vygenerovat rigidní posun, který je generován tak, aby nedošlo k vytlačení již zdeformované cévy mimo obraz.
+- Na výsledný šedotónový obrázek je možné aplikovat šum (multiplikativní/aditivní) nebo překrýt některé oblasti černými obdélníky.
 
-![Ukázka vzorku, náhodně zdeformovaného, náhodně otočeného a s přidaným šumem (překryv GT na obrázek)](../images/dataset.png){fig-align="center" width="100%"}
+![Ukázka vzorku, náhodně zdeformovaného, náhodně otočeného a s přidaným šumem (překryv GT na obrázek)](../images/dataset.png){fig-align="center" width="100%" #fig-dataset-sample}
 
 
-Bylo vyzkoušeno několik přístupů, s cílem zmást UNET. Ve všech popsaných přístupech je aplikována následně deformace, rigidní posun a multiplikativní šum. 
+Bylo vyzkoušeno několik přístupů s cílem zmást U-Net. Ve všech popsaných přístupech jsou následně aplikovány deformace, rigidní posun a multiplikativní šum.
 
 
 
 ### Plovoucí pláty
 
-- V tomto přístupu byly ke standardním plátům, které jsou připojeno přímo k stěně cévy a mají v GT masce hodnotu 'plát', přidány falešné pláty, které v šedotónovém obraze vypadají stejně jako GT pláty, nicméně nejsou připojeny ke stěně cévy a v GT masce mají hodnotu "lumen" (jedná se tedy jen o šum/ artefakt). 
-- Hypotéza tohoto experimentu byla, že UNET při klasifikaci pixelu blíže ke středu cévy nebude mít dostatečné informace o "nepřipojení" falešného plátu a bude tedy falešný plát klasifikovat jako pravý, čímž se dopustí topologické chyby.
+- V tomto přístupu byly ke standardním plátům, které jsou připojeny přímo ke stěně cévy a mají v GT masce hodnotu „plát“, přidány falešné pláty. Ty v šedotónovém obraze vypadají stejně jako GT pláty, nejsou však připojeny ke stěně cévy a v GT masce mají hodnotu „lumen“ (jedná se tedy pouze o šum/artefakt).
+- Hypotéza tohoto experimentu byla, že U-Net při klasifikaci pixelu blíže ke středu cévy nebude mít dostatečné informace o „nepřipojení“ falešného plátu, a bude tedy falešný plát klasifikovat jako pravý, čímž se dopustí topologické chyby.
 
 - Z medicínského hlediska by měl daný přístup simulovat částečné ultrazvukové odrazy.
 
 ![Ukázka plovoucích plátů (překryv GT na obrázek)](../images/tworeal_fake_similar_offset_minus3.png){fig-align="center" width="100%"}
 
-### Díry a "kousance"
+### Díry a „kousance“
 
-- Tento přístup je obměnou tzv. "pathfinding" problému. Do standardně vygenerovaných plátů byly vygenerovánany "díry". Jestliže je dané díra dosažitelná z lumenu, je prohlášena celá za lumen, v opačném případě se jedná pouze o šum a díra je v GT masce označena hodnotou "plát".
+- Tento přístup je obměnou tzv. „pathfinding“ problému. Do standardně vygenerovaných plátů byly vygenerovány „díry“. Jestliže je daná díra dosažitelná z lumenu, je celá prohlášena za lumen. V opačném případě se jedná pouze o šum a díra je v GT masce označena hodnotou „plát“.
 
-- Hypotéza experimentu byla, že UNET bude díry klasifikovat pouze z lokálního pohledu na základě tvaru.
+- Hypotéza experimentu byla, že U-Net bude díry klasifikovat pouze z lokálního pohledu na základě tvaru.
 
 - Z medicínského hlediska by měl daný přístup simulovat nehomogenity v plátu.
 
@@ -66,22 +66,22 @@ Bylo vyzkoušeno několik přístupů, s cílem zmást UNET. Ve všech popsanýc
 
 ### Pohlcení signálu plátem
 
-- Při přístupu pohlcení signálu plátem je vygenerován plát, který se v GT masce zabořuje do stěny cévy a tedy ji v daném místě ztenčuje. V šedotónovém obrázku je poté hranice plátu rošířena tak, že by se mohlo zdát, že plát přímo přechází do pozadí a stěna cévy není přítomná.
+- Při přístupu založeném na pohlcení signálu plátem je vygenerován plát, který se v GT masce zabořuje do stěny cévy, a tedy ji v daném místě ztenčuje. V šedotónovém obrázku je poté hranice plátu rozšířena tak, že by se mohlo zdát, že plát přímo přechází do pozadí a stěna cévy není přítomná.
 
-- Hypotéza experimentu byla, že UNET ve své segmentační masce stěnu nevykreslí, čímž poruší topologii stěny cévy (nebude uzavřená).
+- Hypotéza experimentu byla, že U-Net ve své segmentační masce stěnu nevykreslí, čímž poruší topologii stěny cévy (nebude uzavřená).
 
-- Z medicínského hlediska by měl daný přístup simulovat pohlcení ultrazvukového signálu plátem, mající za následek snížení intensity obrazu za plátem.
+- Z medicínského hlediska by měl daný přístup simulovat pohlcení ultrazvukového signálu plátem, které má za následek snížení intenzity obrazu za plátem.
 
 ![Ukázka pohlcení signálu plátem (překryv GT na obrázek)](../images/wall_attenuation.png){fig-align="center" width="100%"}
 
 ### Výsledky
 
-Pro všechny tři přístupy byly otestovány dvě trn/val varianty:
+Pro všechny tři přístupy byly otestovány dvě varianty rozdělení trénovacích a validačních dat:
 
-1. 2000 tréninkových dat a 200 validačních vzorků
-2. 200 tréninkových a  2000 validačních dat
+1. 2 000 trénovacích a 200 validačních vzorků
+2. 200 trénovacích a 2 000 validačních vzorků
 
-Ve všech případech bylo měřeno IoU jednotlivých tříd a procento vzorků, kde predikce sítě UNET porušuje topologii. Veškeré experimenty byly trénovány do konvergence.
+Ve všech případech bylo měřeno IoU jednotlivých tříd a procento vzorků, u nichž predikce sítě U-Net porušuje topologii. Veškeré experimenty byly trénovány do konvergence.
 
 ```{python}
 #| label: prepare-results-tables
@@ -138,66 +138,164 @@ results = {size: results_table(runs) for size, runs in RUNS.items()}
 
 ```{python}
 #| label: tbl-results-train-2000
-#| tbl-cap: "Výsledky UNET pro 2 000 tréninkových a 200 validačních vzorků."
+#| tbl-cap: "Výsledky U-Netu pro 2 000 trénovacích a 200 validačních vzorků."
 results[2000]
 ```
 
 ```{python}
 #| label: tbl-results-train-200
-#| tbl-cap: "Výsledky UNET pro 200 tréninkových a 2 000 validačních vzorků."
+#| tbl-cap: "Výsledky U-Netu pro 200 trénovacích a 2 000 validačních vzorků."
 results[200]
 ```
 
-![Vybraná porušení topologie pro plovoucí pláty (200 trn) (Violation s bg je kvůli pixelu vpravo nahoře u plátu)](../images/floating/output.png){fig-align="center" width="100%"}
+![Vybraná porušení topologie pro plovoucí pláty (200 trénovacích vzorků; porušení s pozadím je způsobeno pixelem vpravo nahoře u plátu)](../images/floating/output.png){fig-align="center" width="100%"}
 
-![Vybraná porušení topologie pro díry a kousance (200 trn)](../images/bubbles_violations.png){fig-align="center" width="100%"}
+![Vybraná porušení topologie pro díry a kousance (200 trénovacích vzorků)](../images/bubbles_violations.png){fig-align="center" width="100%"}
 
 ### Interpretace výsledků
 
 Některé možné závěry:
--  Množství topologických porušení, které UNET udělá je významně ovlivněno počtem trénovacích příkladů
-- Zatímco změna IoU se pohybuje v řádu jednotek procent, množství porušení se může měnit o desítky procent
-- Průzkum aplikace registračních metod pro segmentace je potřeba provést na datasetech s menším množstvím dat, je otázkou zda se na těchto datasetech dokáží dostatečně naučit
+
+- Množství topologických porušení, kterých se U-Net dopustí, je významně ovlivněno počtem trénovacích příkladů.
+- Zatímco změna IoU se pohybuje v řádu jednotek procent, množství porušení se může měnit o desítky procent.
 
 
 
 ## Přidání externích datasetů
 
 - Do prostředí byly přidány datasety [ACDC](https://www.kaggle.com/datasets/anhoangvo/acdc-dataset/data) a [CSV](http://119.29.231.17/index.html).
-- Ne všechny vzorky datasetu CSV splňují očekávaná topologická pravidla. Ve většině případů se ovšem jedná o nedokonalosti při tvorbě GT masek (viz obrázek). Je potřeba vyřešit, zda budeme dataset využívat tak, jak je, nebo dovolíme dodatečnou úpravu masek. Moje preference je upravit masky, jinak nemá cenu měřit porušení topologie.
+- Ne všechny vzorky datasetu CSV splňují očekávaná topologická pravidla. Ve většině případů se ovšem jedná o nedokonalosti při tvorbě GT masek (viz obrázek). Je potřeba vyřešit, zda budeme dataset využívat tak, jak je, nebo dovolíme dodatečnou úpravu masek. Preferuji úpravu masek, jinak nemá smysl měřit porušení topologie.
 
 ![Ukázka jedné z nedokonalostí masky v CSV](../images/CSV_violation.png){fig-align="center" width="100%"}
 
 
+### Otestování U-Netu na ACDC
 
--**TODO obrázek** a statistiky porušení
+- Po inspekci bylo vybráno 1 798 řezů s myokardem prstencového tvaru a ty byly rozděleny v poměru 70/20/10 podle pacientů.
+
+- Pro první použití byl vytvořen dataset pouze se třídami pozadí a myokard.
+
+- Byla přidána funkce `is_annular`, která je dostupná v `constraints/losses_metrics/constraint_function.py`. Při daném testování nebyly jednopixelové stopy považovány za porušení topologie (na výsledné predikci jsou pouhým okem obtížně dohledatelné).
+
+
+![Ukázka některých porušení topologie v predikcích U-Netu](../images/ACDC_UNET_vioaltion.png){fig-align="center" width="100%"}
 
 
 
+```{python}
+#| label: tbl-acdc
+#| tbl-cap: "Výsledky U-Netu na validační sadě datasetu ACDC"
 
+import pandas as pd
 
+acdc_results = pd.DataFrame(
+    [["65/353", "19/353", 0.997, 0.767, 0.880]],
+    index=pd.Index(["U-Net"], name="Model"),
+    columns=[
+        "Porušení<br>celkem",
+        "Porušení<br>prstence",
+        "Pozadí<br>IoU",
+        "Myokard<br>IoU",
+        "Celkové<br>IoU",
+    ],
+)
 
+acdc_results.style.format(precision=3).set_table_styles(
+    [
+        {
+            "selector": "th, td",
+            "props": [("text-align", "center"), ("padding", "0.4em 0.8em")],
+        }
+    ]
+)
+```
 
-## Další provedené práce za období srpen 2026
+Můžeme vidět, že na reálných datech dělá U-Net chyby i při větším množství trénovacích dat.
 
-*Sekce (vyjma změny IoU) nemá vliv na aktuální prezentaci výsledků, čtenář ji může případně přeskočit. *
+## Další provedené práce za období srpen 2026 {#sec-morework}
+
+*Sekce (vyjma změny IoU) nemá vliv na aktuální prezentaci výsledků, čtenář ji tedy může přeskočit.*
 
 Značná část měsíce byla věnována úpravám kódu, které měly za cíl zjednodušit přidávání, organizaci a analýzu budoucích experimentů.
 
 
-- **Nahrazení pojmu affine za správny pojem Rigid**
-- **Změna výpočtu IoU** – v předchozích experimentech bylo reportováno IoU jako průměrné IoU přes jednotlivé vzorky (image-level average), tedy:$$mIoU = \frac{1}{\vert{}\mathcal{D}_\text{val}\vert{}} \sum_{x \in \mathcal{D}_\text{val}} IoU(x)$$což je méně standardní varianta náchylná ke zkreslení u malých objektů. V tomto a následujících reportech se využívá standardnější přístup (odpovídající např. torchmetrics.JaccardIndex), kde se nejprve akumulují průniky a sjednocení globálně přes celý validační dataset pro každou třídu $c \in \mathcal{C}$ a následně se provede průměr přes třídy:$$mIoU = \frac{1}{\vert{}\mathcal{C}\vert{}} \sum_{c \in \mathcal{C}} \frac{\sum_{x \in \mathcal{D}_\text{val}} \vert{}TP_c(x)\vert{}}{\sum_{x \in \mathcal{D}_\text{val}} \left(\vert{}TP_c(x)\vert{} + \vert{}FP_c(x)\vert{} + \vert{}FN_c(x)\vert{}\right)}$$
-- **Přípravné práce pro  více templatů a podporu dynamických templatů** - Každý dataset nyní definuje, zda předává template pro každý vzorek, nebo zda nabízí množinu templatů pro celý dataset. Objekty TemplateSource a TemplateRefiner poté unifikují tyto možnosti pro trénovací kód a dovolují úpravu templatů (např přidání plátů).
-- **Přidání regularizace deformačního pole** - po vzoru architektury Voxelmorph je vypočten gradient vektorového pole ve 2D a suma čtverců jeho složek. Vrácena je poté průměrná hodnota přes celý 2D prostor. 
-- **Rozdělení ztrátových funkcí** - každá ztrátová funkce je zapsána jako vážený průměr ztrátových termů. Hlavní termy jsou registrační, segmentační a regularizace deformačního pole. Příkladem `RegistrationCentroidTerm`, `SegmentationCrossEntropyTerm`. Pomáhá elegantnějí skládat jednotlivá řešení.
-- **Rozdělení metrik a uploadu obrázků** - zjednodušení připisování metrik pro experimenty. Metriky rozdělené dle módu ("trénování","validace","extra",...). Stejné rozdělení i pro upload obrázků a překrytí do logovacího rozhraní
+- **Nahrazení pojmu „affine“ správným pojmem „rigid“**
+- **Změna výpočtu IoU** – v předchozích experimentech bylo IoU reportováno jako průměr hodnot IoU jednotlivých vzorků (image-level average), tedy: $$mIoU = \frac{1}{\vert{}\mathcal{D}_\text{val}\vert{}} \sum_{x \in \mathcal{D}_\text{val}} IoU(x)$$ což je méně standardní varianta náchylná ke zkreslení u malých objektů. V tomto a následujících reportech se využívá standardnější přístup (odpovídající např. `torchmetrics.JaccardIndex`), při kterém se nejprve globálně akumulují průniky a sjednocení přes celý validační dataset pro každou třídu $c \in \mathcal{C}$ a následně se vypočítá průměr přes třídy: $$mIoU = \frac{1}{\vert{}\mathcal{C}\vert{}} \sum_{c \in \mathcal{C}} \frac{\sum_{x \in \mathcal{D}_\text{val}} \vert{}TP_c(x)\vert{}}{\sum_{x \in \mathcal{D}_\text{val}} \left(\vert{}TP_c(x)\vert{} + \vert{}FP_c(x)\vert{} + \vert{}FN_c(x)\vert{}\right)}$$
+- **Přípravné práce pro více šablon a podporu dynamických šablon** – každý dataset nyní definuje, zda předává šablonu pro každý vzorek, nebo zda nabízí množinu šablon pro celý dataset. Objekty `TemplateSource` a `TemplateRefiner` poté tyto možnosti sjednocují pro trénovací kód a umožňují úpravu šablon (např. přidání plátů).
+- **Přidání regularizace deformačního pole** – po vzoru architektury VoxelMorph je vypočten gradient vektorového pole ve 2D a součet čtverců jeho složek. Poté je vrácena průměrná hodnota přes celý 2D prostor.
+- **Rozdělení ztrátových funkcí** – každá ztrátová funkce je zapsána jako vážený průměr ztrátových členů. Hlavní členy jsou registrační, segmentační a regularizační člen deformačního pole, například `RegistrationCentroidTerm` a `SegmentationCrossEntropyTerm`. To pomáhá elegantněji skládat jednotlivá řešení.
+- **Rozdělení metrik a nahrávání obrázků** – zjednodušení přiřazování metrik k experimentům. Metriky jsou rozděleny podle režimu („trénování“, „validace“, „extra“ atd.). Stejné rozdělení se používá i pro nahrávání obrázků a překryvů do logovacího rozhraní.
 
 
 
-## Plánované experimenty
+## Plánované experimenty a další výzvy
+
+Zde je nabídka možných experimentů, které lze dále provést. Budu rád za zpětnou vazbu, které jsou smysluplné, které nikoliv, či zda na seznamu chybí nějaký důležitější experiment.
+
+### Hromadné testování ztrátových funkcí na obtížnějším datasetu
+
+- V minulém reportu (viz kontext) bylo otestováno 10 různých ztrátových funkcí. Generátor datasetů nyní umožňuje testování na složitějším umělém datasetu.
+
+- Navrhuji omezit se na šest nejnadějnějších kombinací z minulého testu: One-side (seg BCE), DSDF MSE, One-SideSDFSquared, Centroid, One-side (seg OneSide) a U-Net.
+- Všechny funkce budou deformovat jednu šablonu se dvěma pláty (podobnou nedeformované masce z @fig-dataset-sample). Šablona bude mít fixní úhel mezi pláty (např. $40^\circ$).
+- Provedeme následující experimenty:
+
+    1. Dva pláty o stejné velikosti jako v šabloně, ale s různými odchylkami v rozestupech. Dvě sady rozestupů: $[10^\circ,70^\circ]$ a $[70^\circ,130^\circ]$.
+    2. Dva pláty ve stejné poloze, ale s různými velikostmi (podobně jako u úhlů jeden velikostní rozsah obsahuje velikost ze šablony, druhý nikoliv).
+    3. Kombinace bodů 1 a 2 (lehká–lehká a těžká–těžká varianta).
+    4. Dataset podobný variantě „Díry a kousance“, ovšem s omezením na dva pláty.
+
+### Důkladnější prozkoumání selhání U-Netu
+
+1. Mezi variantami s 200 a 2 000 trénovacími vzorky je velký rozdíl v počtu topologických porušení. Cílem experimentu by bylo zjistit, jak se počet porušení vyvíjí v závislosti na počtu trénovacích vzorků.
+
+1. Je možné, že na 200 trénovacích vzorcích nebude spolehlivě fungovat ani náš registrační přístup (bude topologicky správný, ale bude mít nízké IoU). Průzkum vlivu počtu trénovacích vzorků na U-Net by nám umožnil vybrat vhodnější počet, při kterém se U-Net stále dopouští topologických chyb, ale naše metoda již funguje.
+
+1. V rámci tohoto experimentu je možné zopakovat pokusy z minulého reportu, ovšem s omezením na 200 trénovacích vzorků místo původních 2 000.
+
+### Implementace architektury TEDS-NET
+
+1. Architektura [@TEDS] je nejbližší našemu přístupu, má veřejnou implementaci [na GitHubu](https://github.com/mwyburd/TEDS-Net) a byla prezentována na MICCAI 2021 a aktualizována v roce 2024.
+1. Z toho důvodu by bylo vhodné se s ní porovnat nebo práci prezentovat jako generalizaci či vylepšení dané architektury (například obě naše architektury PROJECT i BRANCH podporují srovnání klasického segmentačního přístupu s registračním, což TEDS-NET [@TEDS] neobsahuje).
+1. Implementace architektury a její otestování na ACDC (na kterém byla testována i v článku) a na našich umělých datasetech by představovaly první porovnání. Zároveň by umožnily převzít některé architektonické prvky.
+1. Plánovaná architektura Anatomical Constraint NN @ANN by byla doplněna později.
+
+### Otestování globálních šablon, dynamické predikce šablon a funkce dvou uzavřených křivek
+
+1. V kódu (viz @sec-morework) je připravena podpora globálních i dynamických šablon. Aktuálně není připravena deformace více šablon naráz pomocí VoxelMorphu.
+1. Globální šablony – máme např. šest různých šablon (různé úhly, velikosti a počty plátů).
+1. Dynamické šablony – máme síť, která predikuje, kam do šablony umístit pláty a jakou mají mít velikost.
+1. Funkce dvou uzavřených křivek – učíme síť deformovat dvě kružnice. První kružnice se snaží vystihnout vnitřní stěnu cévy, druhá okraj lumenu. Prostor mezi kružnicemi poté tvoří pláty.
+
+
+### Křest reálnými daty
+
+1. Dokončit připojení datasetu CSV (odstranit nepřesnosti porušující topologii).
+1. Z datasetu Antique vybrat vhodné segmentace kruhového tvaru (odstranit vzorky se dvěma cévami).
+1. Připojit dataset CCA, deformovat pouze stěnu cévy.
+
+### Architektura BRANCH
+
+1. Dovést architekturu BRANCH do podobné fáze, v jaké je aktuálně PROJECT (testy na afinním datasetu, deformacích atd.).
+1. Dle mého názoru ji lze přidat i později, až budeme mít jasno, na čem měřit. BRANCH je zajímavá hlavně v případě, kdy vynucujeme konzistenci mezi registrační a segmentační částí na neanotovaných datech.
+
+### Ablace způsobů učení
+
+1. Vyzkoušet již zmiňované @olddog a připravit návrh, jak tento plán učení realizovat.
+1. Zjistit množství předtrénování nutné pro obě části architektury PROJECT.
+1. Provést ablaci regularizace deformačního pole (veškeré dosavadní experimenty byly bez regularizace pole).
+
+### Alternativní možnost v případě neúspěchu
+
+1. Zaměřit se na robustnost vůči datům mimo trénovací distribuci (out-of-distribution robustness). Natrénujeme U-Net i naši metodu na plátech bez děr a budeme je validovat na děravých plátech. Otázkou je, zda by nešlo spíše o robustnost danou neschopností vyjádřit děravý plát.
+
+1. Deformovat pouze okraje cévy; pláty budou řešeny jiným způsobem (zatím nemám rozmyšleno).
+
+
+<!--
 - naplánované experimenty 6x5 lossů
 - vetsi prozkoumani UNET selhani
 - snaha prekonat UNET na zjistenych problemech
 - prezkoumani minulych experimentu na 2000 vs 200
 - TEDS-NET
-- tri moznosti kam to stocit
+- tri moznosti kam to stocit -->

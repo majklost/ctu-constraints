@@ -2,6 +2,8 @@
 
 from ..computers.metric_computers import StagedMetricComputer
 from ..computers.metric_terms import (
+    ACDCRegistrationConstraintViolationTerm,
+    ACDCSegmentationConstraintViolationTerm,
     CompositeMetric,
     DeformationJacobianTerm,
     RegistrationConstraintViolationTerm,
@@ -86,11 +88,32 @@ def create_default_staged_metrics(
 
 def create_segmentation_staged_metrics(
     label_schema: LabelSchema,
+    *,
+    min_hole_area: int = 10,
+    min_component_area: int | None = 5,
 ) -> StagedMetricComputer:
-    """Build dataset-agnostic segmentation IoU metrics for every stage."""
+    """Build ACDC segmentation and annularity metrics with independent state."""
+    validation_stages = ("val", "val_extra", "test")
     return StagedMetricComputer(
         {
-            stage: CompositeMetric([SegmentationIoUTerm(label_schema)])
-            for stage in ("train", "val", "val_extra", "test")
+            "train": CompositeMetric([SegmentationIoUTerm(label_schema)]),
+            **{
+                stage: CompositeMetric(
+                    [
+                        SegmentationIoUTerm(label_schema),
+                        ACDCSegmentationConstraintViolationTerm(
+                            label_schema,
+                            min_hole_area=min_hole_area,
+                            min_component_area=min_component_area,
+                        ),
+                        ACDCRegistrationConstraintViolationTerm(
+                            label_schema,
+                            min_hole_area=min_hole_area,
+                            min_component_area=min_component_area,
+                        ),
+                    ]
+                )
+                for stage in validation_stages
+            },
         }
     )

@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as functional
 
 from constraints.computers.metric_terms import (
+    ACDCRegistrationConstraintViolationTerm,
+    ACDCSegmentationConstraintViolationTerm,
     CompositeMetric,
     RegistrationConstraintViolationTerm,
     RegistrationIoUTerm,
@@ -13,7 +15,6 @@ from constraints.computers.metric_terms import (
 from constraints.datatools.label_schema import LabelSchema
 from constraints.types import DiscreteSegmentation, MetricInput, MetricResult
 
-
 LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen"],
     [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1), (0.1, 0.7, 0.1)],
@@ -22,6 +23,11 @@ LABEL_SCHEMA = LabelSchema.from_lists(
 CONSTRAINT_LABEL_SCHEMA = LabelSchema.from_lists(
     ["background", "boundary", "lumen", "plaque"],
     [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1), (0.1, 0.7, 0.1), (0.1, 0.35, 0.95)],
+)
+
+ACDC_LABEL_SCHEMA = LabelSchema.from_lists(
+    ["background", "myocardium"],
+    [(0.0, 0.0, 0.0), (0.9, 0.1, 0.1)],
 )
 
 
@@ -141,10 +147,16 @@ def test_composite_metric_merges_empty_results_and_normalizes_prefix() -> None:
 
 def test_composite_metric_rejects_duplicate_scalar_names() -> None:
     composite = CompositeMetric(
-        [_StaticMetric({"segmentation/iou": 0.8}), _StaticMetric({"segmentation/iou": 0.7})]
+        [
+            _StaticMetric({"segmentation/iou": 0.8}),
+            _StaticMetric({"segmentation/iou": 0.7}),
+        ]
     )
 
-    with pytest.raises(ValueError, match="Duplicate metric scalar name 'segmentation/iou'"):
+    with pytest.raises(
+        ValueError,
+        match="Duplicate metric scalar name 'segmentation/iou'",
+    ):
         composite.compute()
 
 
@@ -249,4 +261,83 @@ def test_constraint_sample_tracking_requires_stable_sample_ids() -> None:
     )
 
     with pytest.raises(ValueError, match="requires MetricInput.sample_ids"):
-        term.update(_constraint_metric_input(torch.stack((_valid_vessel_labels(),)), None))
+        term.update(
+            _constraint_metric_input(torch.stack((_valid_vessel_labels(),)), None)
+        )
+
+
+def _annular_myocardium_labels() -> torch.Tensor:
+    labels = torch.zeros((32, 32), dtype=torch.long)
+    labels[4:28, 4:28] = 1
+    labels[10:22, 10:22] = 0
+    return labels
+
+
+def _acdc_metric_input(
+    segmentation_labels: torch.Tensor | None,
+    registration_labels: torch.Tensor | None,
+    sample_ids: tuple[str, ...] = (),
+) -> MetricInput:
+    labels = (
+        segmentation_labels
+        if segmentation_labels is not None
+        else registration_labels
+    )
+    assert labels is not None
+
+    def channels(value: torch.Tensor | None) -> torch.Tensor | None:
+        if value is None:
+            return None
+        return functional.one_hot(value, 2).movedim(-1, 1).float()
+
+    return MetricInput(
+        image=torch.zeros((labels.shape[0], 1, 32, 32)),
+        segmentation_logits=channels(segmentation_labels),
+        warped_template=channels(registration_labels),
+        sample_ids=sample_ids,
+    )
+
+
+def test_acdc_annularity_terms_accumulate_and_reset_independently() -> None:
+    annular = _annular_myocardium_labels()
+    non_annular = annular.clone()
+    non_annular[10:22, 10:22] = 1
+    segmentation = ACDCSegmentationConstraintViolationTerm(ACDC_LABEL_SCHEMA)
+    registration = ACDCRegistrationConstraintViolationTerm(ACDC_LABEL_SCHEMA)
+    metric_input = _acdc_metric_input(
+        torch.stack((annular, non_annular)),
+        torch.stack((annular, annular)),
+    )
+
+    segmentation.update(metric_input)
+    registration.update(metric_input)
+
+    assert torch.isclose(
+        segmentation.compute().scalars["segmentation/constraint/violation_rate"],
+        torch.tensor(0.5),
+    )
+    assert torch.isclose(
+        registration.compute().scalars["registration/constraint/violation_rate"],
+        torch.tensor(0.0),
+    )
+
+    segmentation.reset()
+    registration.reset()
+    assert segmentation.compute().scalars == {}
+    assert registration.compute().scalars == {}
+
+
+def test_acdc_annularity_term_forwards_specific_violation_details() -> None:
+    empty = torch.zeros((1, 32, 32), dtype=torch.long)
+    term = ACDCSegmentationConstraintViolationTerm(
+        ACDC_LABEL_SCHEMA,
+        track_violating_samples=True,
+    )
+
+    result = term.update(
+        _acdc_metric_input(empty, None, sample_ids=("empty-myocardium",))
+    )
+
+    samples = result.constraint_violation_samples["segmentation/constraint"]
+    assert samples.sample_ids == ("empty-myocardium",)
+    assert samples.details == (("Myocardium mask is empty.",),)

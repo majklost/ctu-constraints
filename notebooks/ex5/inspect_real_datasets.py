@@ -174,7 +174,7 @@ print(len(df))
 df.head()
 
 # %%
-from constraints.datatools.utils.acdc_utils import is_annular
+from constraints.losses_metrics.constraint_function import is_annular
 
 
 def open_acdc(data_path: Path):
@@ -196,7 +196,8 @@ def show_pair(data_path:Path):
 
 def check_annularity(data_path:Path):
     im,label = open_acdc(data_path)
-    return is_annular(label == 2)
+    annular, _ = is_annular(label == 2)
+    return annular
 selected = df["path"][20]
 print(check_annularity(selected))
 show_pair(selected)
