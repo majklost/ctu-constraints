@@ -2,11 +2,8 @@ from typing import cast
 
 import numpy as np
 import torch
-from scipy.ndimage import (
-    binary_dilation,
-    generate_binary_structure,
-    label,
-)
+from scipy import ndimage
+from scipy.ndimage import binary_dilation, generate_binary_structure, label
 
 from ..datatools.label_schema import LabelSchema
 
@@ -295,91 +292,44 @@ def does_violation_occur_no_wall(
     return len(violations) > 0, violations
 
 
-def is_annular(
-    mask_2d: np.ndarray,
-    min_hole_area: int = 10,
-    min_component_area: int | None = 5,
-) -> tuple[bool, list[str]]:
-    """Check whether a 2-D binary mask is annular (b0 = 1, b1 = 1).
+def is_annular(mask_2d: np.ndarray, min_hole_area: int = 10) -> bool:
+    """
+    Checks if a 2D binary mask is annular (b0 = 1, b1 = 1).
 
     Args:
         mask_2d: 2D numpy array (binary or boolean).
         min_hole_area: Minimum pixel area to filter out tiny noise holes.
-        min_component_area: Ignore foreground components smaller than this
-            area before checking annularity. The default of 5 filters
-            single-pixel and other tiny prediction artifacts. Set to ``None``
-            to disable foreground-component filtering.
 
     Returns:
-        A pair of ``(is_annular, details)``. ``details`` is empty for a valid
-        annulus and otherwise explains which annularity condition failed.
+        bool: True if the mask is a closed ring with one hole, False otherwise.
     """
     binary_mask = mask_2d > 0
     if not binary_mask.any():
-        return False, ["Myocardium mask is empty."]
-    if min_hole_area <= 0:
-        raise ValueError("min_hole_area must be > 0")
-    if min_component_area is not None and min_component_area <= 0:
-        raise ValueError("min_component_area must be > 0 or None")
+        return False
 
     # 1. Count foreground components (b0) using 8-connectivity / square structure
-    structure_8 = generate_binary_structure(2, 2)
-    labeled_components, _ = label(binary_mask, structure=structure_8)
-    if min_component_area is not None:
-        component_areas = np.bincount(labeled_components.ravel())
-        retained_components = component_areas >= min_component_area
-        retained_components[0] = False
-        binary_mask = retained_components[labeled_components]
-        if not binary_mask.any():
-            return False, [
-                "Myocardium mask is empty after ignoring components smaller "
-                f"than {min_component_area} px."
-            ]
-
-    _, num_components = label(binary_mask, structure=structure_8)
+    structure_8 = ndimage.generate_binary_structure(2, 2)
+    _, num_components = ndimage.label(binary_mask, structure=structure_8)
     if num_components != 1:
-        return False, [
-            "Expected exactly one myocardium component, "
-            f"found {num_components}."
-        ]
+        return False
 
-    # 2. Count significant background components using 4-connectivity. A closed
-    # annulus has exactly two: exterior background and one enclosed hole.
-    structure_4 = generate_binary_structure(2, 1)
-    labeled_background, num_background_components = label(
-        ~binary_mask,
-        structure=structure_4,
-    )
-    significant_background_components = 0
-    valid_holes = 0
-    for component_id in range(1, num_background_components + 1):
-        component = labeled_background == component_id
-        touches_edge = (
-            component[0].any()
-            or component[-1].any()
-            or component[:, 0].any()
-            or component[:, -1].any()
-        )
-        area = int(component.sum())
-        if touches_edge or area >= min_hole_area:
-            significant_background_components += 1
-        if not touches_edge and area >= min_hole_area:
-            valid_holes += 1
+    # 2. Extract and count enclosed holes (b1)
+    filled_mask = ndimage.binary_fill_holes(binary_mask)
+    holes_mask = filled_mask & ~binary_mask
 
-    if significant_background_components == 1 and valid_holes == 0:
-        return False, [
-            "Open-ring/missing-hole violation: background has 1 significant "
-            "connected component; expected 2 (exterior plus one enclosed hole)."
-        ]
-    if significant_background_components != 2:
-        return False, [
-            "Background topology violation: background has "
-            f"{significant_background_components} significant connected "
-            "components; expected 2 (exterior plus one enclosed hole)."
-        ]
-    if valid_holes != 1:
-        return False, [
-            "Background topology violation: expected exactly one enclosed "
-            f"hole with area >= {min_hole_area} px, found {valid_holes}."
-        ]
-    return True, []
+    # Define hole connectivity (TEDS-Net paper uses 4-connectivity for background holes)
+    structure_4 = ndimage.generate_binary_structure(2, 1)
+    labeled_holes, num_holes = ndimage.label(holes_mask, structure=structure_4)
+
+    if num_holes == 0:
+        return False
+
+    # 3. Filter out single-pixel / acquisition noise holes if needed
+    if min_hole_area > 1:
+        valid_holes = 0
+        for i in range(1, num_holes + 1):
+            if np.sum(labeled_holes == i) >= min_hole_area:
+                valid_holes += 1
+        return valid_holes == 1
+
+    return num_holes == 1
